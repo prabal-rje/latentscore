@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from typing import IO, Any, Optional
 
 import rumps  # type: ignore[import]
-from AppKit import NSApplication  # type: ignore[import]
+import AppKit  # type: ignore[import]
 from rumps import utils as rumps_utils  # type: ignore[import]
 
 from .logging_utils import (
@@ -25,6 +25,15 @@ from .logging_utils import (
     default_log_dir,
     log_path,
 )
+
+NSApplication: Any = getattr(AppKit, "NSApplication")
+NSRunningApplication: Any = getattr(AppKit, "NSRunningApplication")
+NSApplicationActivateIgnoringOtherApps: int = getattr(
+    AppKit, "NSApplicationActivateIgnoringOtherApps"
+)
+NSApplicationActivateAllWindows: int = getattr(AppKit, "NSApplicationActivateAllWindows")
+assert isinstance(NSApplicationActivateIgnoringOtherApps, int)
+assert isinstance(NSApplicationActivateAllWindows, int)
 
 GREETING_TITLE = "Say hi"
 GREETING_MESSAGE = "Hi there!"
@@ -73,6 +82,11 @@ class MenuBarApp(rumps.App):
         window_resizable: bool = False,
         window_frameless: bool = False,
         window_easy_drag: bool = True,
+        diagnostics_window_title: str = "LatentScore Diagnostics",
+        diagnostics_window_width: int = 1400,
+        diagnostics_window_height: int = 900,
+        diagnostics_window_resizable: bool = True,
+        diagnostics_window_screen_fraction: float | None = 0.75,
         initialize: bool = True,
     ) -> None:
         self.enable_alerts = enable_alerts
@@ -88,6 +102,11 @@ class MenuBarApp(rumps.App):
         self.window_resizable = window_resizable
         self.window_frameless = window_frameless
         self.window_easy_drag = window_easy_drag
+        self.diagnostics_window_title = diagnostics_window_title
+        self.diagnostics_window_width = diagnostics_window_width
+        self.diagnostics_window_height = diagnostics_window_height
+        self.diagnostics_window_resizable = diagnostics_window_resizable
+        self.diagnostics_window_screen_fraction = diagnostics_window_screen_fraction
         self._app_support_dir = app_support_dir
         self._server_proc: subprocess.Popen[bytes] | None = None
         self._server_log_file: IO[bytes] | None = None
@@ -393,7 +412,7 @@ class MenuBarApp(rumps.App):
 
     def _open_diagnostics_webview(self, url: str) -> bool:
         if self._diagnostics_webview_proc and self._diagnostics_webview_proc.poll() is None:
-            self._bring_to_front("LatentScore Diagnostics")
+            self._bring_to_front(self.diagnostics_window_title)
             return True
         cmd = self._diagnostics_webview_command(url)
         if cmd is None:
@@ -401,7 +420,7 @@ class MenuBarApp(rumps.App):
         self._diagnostics_webview_proc = subprocess.Popen(
             cmd, env=self._server_env(), start_new_session=True
         )
-        self._bring_to_front("LatentScore Diagnostics")
+        self._bring_to_front(self.diagnostics_window_title)
         return True
 
     def _diagnostics_webview_command(self, url: str) -> list[str] | None:
@@ -414,15 +433,21 @@ class MenuBarApp(rumps.App):
             "--url",
             url,
             "--title",
-            "LatentScore Diagnostics",
+            self.diagnostics_window_title,
             "--width",
-            str(self.window_width),
+            str(self.diagnostics_window_width),
             "--height",
-            str(self.window_height),
+            str(self.diagnostics_window_height),
         ]
-        cmd.append("--resizable" if self.window_resizable else "--no-resizable")
+        if self.diagnostics_window_screen_fraction is not None:
+            cmd.extend(
+                ["--screen-fraction", str(self.diagnostics_window_screen_fraction)]
+            )
+        cmd.append(
+            "--resizable" if self.diagnostics_window_resizable else "--no-resizable"
+        )
         cmd.append("--frameless" if self.window_frameless else "--no-frameless")
-        cmd.append("--easy-drag" if self.window_easy_drag else "--no-easy-drag")
+        cmd.append("--no-easy-drag")
         return cmd
 
     def _find_free_port(self) -> int:
@@ -527,6 +552,15 @@ class MenuBarApp(rumps.App):
         # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
         app: Any = NSApplication.sharedApplication()  # type: ignore[reportUnknownMemberType]
         app.activateIgnoringOtherApps_(True)  # type: ignore[reportUnknownMemberType]
+        if hasattr(app, "unhide_"):
+            app.unhide_(None)  # type: ignore[reportUnknownMemberType]
+        if hasattr(app, "arrangeInFront_"):
+            app.arrangeInFront_(None)  # type: ignore[reportUnknownMemberType]
+        running_app = NSRunningApplication.currentApplication()  # type: ignore[reportUnknownMemberType]
+        if running_app is None:
+            return
+        options = NSApplicationActivateIgnoringOtherApps | NSApplicationActivateAllWindows
+        running_app.activateWithOptions_(options)  # type: ignore[reportUnknownMemberType]
 
     def _bring_to_front(self, title: str) -> None:
         if platform.system() != "Darwin":

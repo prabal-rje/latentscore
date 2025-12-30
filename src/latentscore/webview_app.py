@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import platform
+from typing import Any
 from importlib.util import find_spec
 
 
@@ -12,6 +13,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--title", default="LatentScore")
     parser.add_argument("--width", type=int, default=1000)
     parser.add_argument("--height", type=int, default=700)
+    parser.add_argument(
+        "--screen-fraction",
+        type=float,
+        default=None,
+        help="Size the window to a fraction of the primary screen (0 < fraction <= 1).",
+    )
     parser.add_argument(
         "--resizable",
         default=True,
@@ -52,13 +59,15 @@ def main(argv: list[str] | None = None) -> int:
         evaluate_js("alert('YOLO Test')")
 
     menu = [menu_cls("YOLO Test", [menu_action_cls("Show dialog", show_yolo_dialog)])]
+    width, height = _resolve_window_size(args, webview)
+
     create_window = getattr(webview, "create_window", None)
     assert callable(create_window)
     create_window(
         args.title,
         args.url,
-        width=args.width,
-        height=args.height,
+        width=width,
+        height=height,
         resizable=args.resizable,
         frameless=args.frameless,
         easy_drag=args.easy_drag,
@@ -68,6 +77,25 @@ def main(argv: list[str] | None = None) -> int:
     assert callable(start)
     start()
     return 0
+
+
+def _resolve_window_size(args: argparse.Namespace, webview_module: Any) -> tuple[int, int]:
+    width = args.width
+    height = args.height
+    fraction = args.screen_fraction
+    if fraction is None:
+        return width, height
+    if not 0 < fraction <= 1:
+        raise SystemExit("--screen-fraction must be between 0 and 1")
+    screens = getattr(webview_module, "screens", None)
+    if not screens:
+        return width, height
+    screen = screens[0]
+    screen_width = getattr(screen, "width", None)
+    screen_height = getattr(screen, "height", None)
+    if not isinstance(screen_width, int) or not isinstance(screen_height, int):
+        return width, height
+    return max(1, int(screen_width * fraction)), max(1, int(screen_height * fraction))
 
 
 def _set_app_name(title: str) -> None:

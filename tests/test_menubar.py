@@ -105,6 +105,19 @@ def test_webview_command_includes_window_args(monkeypatch) -> None:
     assert "--easy-drag" in cmd
 
 
+def test_diagnostics_webview_command_includes_screen_fraction(monkeypatch) -> None:
+    app = MenuBarApp(enable_alerts=False, initialize=False)
+
+    monkeypatch.setattr("latentscore.menubar.importlib.util.find_spec", lambda name: object())
+    cmd = app._diagnostics_webview_command("http://127.0.0.1:4242")
+    assert cmd is not None
+    assert "--screen-fraction" in cmd
+    fraction_index = cmd.index("--screen-fraction") + 1
+    assert cmd[fraction_index] == "0.75"
+    assert "--resizable" in cmd
+    assert "--no-easy-drag" in cmd
+
+
 def test_quit_callback_invokes_shutdown(monkeypatch) -> None:
     app = MenuBarApp(enable_alerts=False, initialize=False)
     called = {}

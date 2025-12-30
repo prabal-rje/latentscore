@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from textual import events
+from textual.actions import SkipAction
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -48,10 +49,11 @@ class DiagnosticsHeader(Header):
 
 class DiagnosticsApp(App[None]):
     """Textual log viewer for LatentScore diagnostics."""
-
+    _inherit_bindings = False
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("f", "toggle_follow", "Follow"),
+        Binding("Ctrl+c", "copy_selection", "Copy"),
         Binding("r", "reload", "Reload"),
         Binding("/", "focus_search", "Search"),
         Binding("escape", "close_search", "Close Search"),
@@ -93,10 +95,10 @@ class DiagnosticsApp(App[None]):
 
     #search-input {
         width: 1fr;
+        height: auto; /* Let the widget decide its own natural height */
         border: tall $accent;
-        background: $boost;
-        color: $text;
-        height: 3;
+        background: $surface;
+        color: $foreground;
     }
 
     #help {
@@ -114,6 +116,21 @@ class DiagnosticsApp(App[None]):
         display: block;
     }
 
+    #size-warning {
+        display: none;
+        layer: overlay;
+        width: 100%;
+        height: 100%;
+        background: $panel;
+        color: $text-muted;
+        content-align: center middle;
+        border: tall $accent;
+    }
+
+    #size-warning.visible {
+        display: block;
+    }
+
     .pane {
         width: 1fr;
     }
@@ -127,28 +144,45 @@ class DiagnosticsApp(App[None]):
     TextArea {
         height: 1fr;
     }
+
+    TextArea .text-area--selection {
+        background: $accent 40%;
+    }
     """
 
-    def __init__(self, log_dir: Path, *, max_lines: int = 5000) -> None:
+    def __init__(
+        self,
+        log_dir: Path,
+        *,
+        max_lines: int = 5000,
+        min_viewport_width: int = 110,
+        min_viewport_height: int = 28,
+    ) -> None:
         super().__init__()
         self._log_dir = log_dir
         self._max_lines = max_lines
+        self._min_viewport_width = min_viewport_width
+        self._min_viewport_height = min_viewport_height
         self._follow = True
         self._search_query: str | None = None
         self._search_visible = False
         self._active_pane: _LogPane | None = None
         self._panes: list[_LogPane] = []
+        self._size_warning = Static(
+            "Please re-size window to view properly",
+            id="size-warning",
+        )
         # Use TextArea for proper text selection and copy support
         self._menubar_log = TextArea(id="menubar-log", read_only=True)
         self._ui_log = TextArea(id="ui-log", read_only=True)
-        self._search_input = Input(placeholder="Type and press Enter", id="search-input")
+        self._search_input = Input(placeholder="Type search query and press Enter", id="search-input")
         help_text = (
             "Diagnostics viewer\n"
             "  /      search (press Enter to jump)\n"
             "  n/N    next/prev match\n"
             "  f      toggle follow\n"
             "  r      reload logs\n"
-            "  Cmd+C  copy selection\n"
+            "  Ctrl+C  copy selection\n"
             "  q      quit"
         )
         self._help = Static(help_text, id="help")
@@ -156,8 +190,8 @@ class DiagnosticsApp(App[None]):
     def compose(self) -> ComposeResult:
         yield DiagnosticsHeader(show_clock=False)
         yield self._help
+        yield self._size_warning
         with Horizontal(id="search-bar"):
-            yield Static("Search:", id="search-label")
             yield self._search_input
         with Horizontal(id="logs"):
             with Vertical(classes="pane"):
@@ -181,6 +215,7 @@ class DiagnosticsApp(App[None]):
         self._active_pane = self._panes[0]
         self._active_pane.widget.focus()
         self._load_initial()
+        self._update_size_warning()
         self.set_interval(0.35, self._poll_files)
 
     def action_toggle_follow(self) -> None:
@@ -232,6 +267,21 @@ class DiagnosticsApp(App[None]):
         else:
             help_widget.add_class("visible")
 
+    def action_copy_selection(self) -> None:
+        target = self.focused
+        if isinstance(target, (TextArea, Input)):
+            try:
+                target.action_copy()
+            except SkipAction:
+                return
+            return
+        if self._active_pane is None:
+            return
+        try:
+            self._active_pane.widget.action_copy()
+        except SkipAction:
+            return
+
     def on_focus(self, event: events.Focus) -> None:
         control = event.control
         if isinstance(control, TextArea):
@@ -242,6 +292,9 @@ class DiagnosticsApp(App[None]):
     def on_click(self, event: events.Click) -> None:
         if isinstance(event.control, Header):
             event.control.remove_class("-tall")
+
+    def on_resize(self, event: events.Resize) -> None:
+        self._update_size_warning(event.size.width, event.size.height)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input is not self._search_input:
@@ -321,6 +374,16 @@ class DiagnosticsApp(App[None]):
         """Update the TextArea content with all lines."""
         pane.widget.load_text("\n".join(pane.lines))
 
+    def _update_size_warning(self, width: int | None = None, height: int | None = None) -> None:
+        size = self.size
+        resolved_width = width if width is not None else size.width
+        resolved_height = height if height is not None else size.height
+        too_small = (
+            resolved_width < self._min_viewport_width
+            or resolved_height < self._min_viewport_height
+        )
+        self._size_warning.set_class(too_small, "visible")
+
     def _pane_for_widget(self, widget: TextArea) -> _LogPane | None:
         for pane in self._panes:
             if pane.widget is widget:
@@ -347,6 +410,7 @@ class DiagnosticsApp(App[None]):
         line_index = matches[pane.match_index]
         pane.highlight_line = line_index
         # Move cursor to the matching line and select it
+        pane.widget.focus()
         pane.widget.move_cursor((line_index, 0))
         pane.widget.select_line(line_index)
         self.notify(
