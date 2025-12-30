@@ -4,4 +4,6 @@ pytest>=7.4
 pytest-asyncio>=0.23
 pytest-cov>=4.1
 ruff>=0.6
+textual>=0.58
 uvloop>=0.20
+rumps>=0.4

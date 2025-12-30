@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Awaitable, TypeVar
+from typing import Coroutine, TypeVar
 
 import uvloop
 
@@ -13,7 +13,7 @@ def install_uvloop_policy() -> None:
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 
-def run(coro: Awaitable[T]) -> T:
+def run(coro: Coroutine[object, object, T]) -> T:
     """Run a coroutine with uvloop installed."""
     install_uvloop_policy()
     return asyncio.run(coro)

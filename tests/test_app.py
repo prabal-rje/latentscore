@@ -8,12 +8,12 @@ from latentscore.loop import run
 
 async def _current_loop_name() -> str:
     loop = asyncio.get_running_loop()
-    return type(loop).__name__
+    return type(loop).__module__
 
 
 def test_run_installs_uvloop() -> None:
     loop_name = run(_current_loop_name())
-    assert "uvloop" in loop_name.lower()
+    assert "uvloop" in loop_name
 
 
 @pytest.mark.asyncio
