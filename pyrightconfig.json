@@ -1,0 +1,8 @@
+{
+  "include": ["src"],
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "strict",
+  "reportUnusedImport": "warning",
+  "reportMissingTypeStubs": "warning",
+  "useLibraryCodeForTypes": true
+}

@@ -39,3 +39,17 @@ conda activate latentspace
 ```
 
 Now you are ready to start working!
+
+## Development Loop
+
+Install project dependencies and tooling with:
+
+```bash
+pip install -r requirements.txt
+```
+
+Before opening a pull request, run the full suite:
+
+```bash
+make check
+```

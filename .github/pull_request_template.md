@@ -1,0 +1,5 @@
+- [ ] Tests added/updated and passing (`pytest`)
+- [ ] Types clean (`pyright --strict`)
+- [ ] Lint/format clean (`ruff check`, `ruff format --check`)
+- [ ] Behavior change documented (README/CHANGELOG as needed)
+- [ ] Relevant docs updated (AGENTS, CONTRIBUTE, docs templates, etc.)
