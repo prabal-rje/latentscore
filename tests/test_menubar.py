@@ -1,4 +1,5 @@
 import platform
+import sys
 
 import pytest
 
@@ -6,6 +7,7 @@ from latentscore.menubar import (
     GREETING_MESSAGE,
     GREETING_TITLE,
     MenuBarApp,
+    OPEN_UI_TITLE,
     require_macos,
 )
 
@@ -13,6 +15,7 @@ from latentscore.menubar import (
 def test_greeting_message_constant() -> None:
     assert GREETING_MESSAGE == "Hi there!"
     assert GREETING_TITLE == "Say hi"
+    assert OPEN_UI_TITLE == "Open LatentScore"
 
 
 def test_require_macos() -> None:
@@ -27,3 +30,64 @@ def test_menu_bar_app_sets_menu_item_title(tmp_path) -> None:
     app = MenuBarApp(enable_alerts=False, app_support_dir=str(tmp_path), initialize=False)
     assert app.hi_item.title == GREETING_TITLE
     assert app._on_hi_clicked(None) == GREETING_MESSAGE
+    assert app.open_item.title == OPEN_UI_TITLE
+
+
+def test_on_open_starts_server_and_opens_browser(monkeypatch) -> None:
+    app = MenuBarApp(enable_alerts=False, initialize=False, server_ready_timeout=0.0)
+    started = {}
+
+    def fake_start_server() -> bool:
+        started["ok"] = True
+        app._server_port = 4242
+        return True
+
+    opened = {}
+    app._start_server = fake_start_server  # type: ignore[assignment]
+    def fake_open_webview(_self, url: str) -> bool:
+        opened["url"] = url
+        return True
+
+    monkeypatch.setattr("latentscore.menubar.MenuBarApp._open_webview", fake_open_webview)
+
+    url = app._on_open_clicked(None)
+    assert started["ok"] is True
+    assert opened["url"] == "http://127.0.0.1:4242"
+    assert url == opened["url"]
+
+
+def test_server_disabled_skips_start(monkeypatch) -> None:
+    app = MenuBarApp(enable_alerts=False, server_enabled=False, initialize=False)
+
+    def fail() -> None:
+        raise AssertionError("server should not start when disabled")
+
+    app._start_server = fail  # type: ignore[assignment]
+    app._ensure_server()
+
+
+def test_server_command_uses_runner(monkeypatch) -> None:
+    app = MenuBarApp(enable_alerts=False, initialize=False)
+
+    monkeypatch.setattr(
+        "latentscore.menubar.importlib.util.find_spec", lambda name: object()
+    )
+    cmd = app._server_command(4242)
+    assert cmd is not None
+    assert cmd[:3] == [sys.executable, "-m", "latentscore.textual_serve_runner"]
+    assert "--app" in cmd
+
+
+def test_webview_command_includes_window_args(monkeypatch) -> None:
+    app = MenuBarApp(enable_alerts=False, initialize=False)
+
+    monkeypatch.setattr(
+        "latentscore.menubar.importlib.util.find_spec", lambda name: object()
+    )
+    cmd = app._webview_command("http://127.0.0.1:4242")
+    assert cmd is not None
+    assert cmd[:3] == [sys.executable, "-m", "latentscore.webview_app"]
+    assert "--url" in cmd
+    assert "--title" in cmd
+    assert "--no-frameless" in cmd
+    assert "--easy-drag" in cmd

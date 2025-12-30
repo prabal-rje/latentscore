@@ -9,7 +9,7 @@ Minimal tracer-bullet slice for async Python using `uvloop` by default and `depe
 
 ## UI demos
 - Textual TUI: `python -m latentscore.tui` renders a centered `Hello world!` message in the terminal.
-- macOS menu bar: `python -m latentscore.menubar` adds a status bar item with a single `Say hi` menu entry that pops a `Hi there!` dialog (macOS only).
+- macOS menu bar: `python -m latentscore.menubar` adds a status bar item. The "Open LatentScore" entry launches a Textual web UI inside a native window (install `textual-serve` + `pywebview`). Server logs land in `~/Library/Logs/LatentScore/menubar-server.log`.
 
 ## Tooling
 - `make check`: ruff lint, ruff format --check, pyright --strict, pytest with coverage.

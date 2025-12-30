@@ -1,10 +1,25 @@
 # Repository Notes for Agents
 
+## ⚠️ MANDATORY: Shell Environment Setup
+
+**BEFORE running ANY shell command** (Python, pip, pytest, make, etc.), you MUST first activate the conda environment:
+
+```bash
+conda activate latentspace
+```
+
+This is NON-NEGOTIABLE. Every terminal session requires this. Do NOT run `python`, `pip`, `pytest`, `make check`, or any Python tooling without first activating the environment. If unsure whether the env is active, run `conda activate latentspace` anyway—it's idempotent.
+
+---
+
+## General Guidelines
+
 - Current contents are minimal (`README.md` was empty; `CONTRIBUTE.md` documented Conda setup). Keep additions concise and self-contained.
-- Environment: use Conda env `latentspace` with Python 3.10; if `requirements.txt` appears, install via `pip install -r requirements.txt`.
+- Environment: Conda env `latentspace` with Python 3.10. If `requirements.txt` appears, install via `pip install -r requirements.txt`.
 - Git hygiene: prefer small, reviewable commits (1–3 per PR). Separate refactors/formatting from behavior changes; squash noisy WIP commits before merging.
 - Tests/tooling: none present initially. If you add code, include at least smoke tests or runnable examples and note how to execute them.
 - Defaults: stay ASCII unless a file already uses Unicode; add comments only when logic is non-obvious; avoid destructive git commands.
+- Exception handling: never add bare `try/except` with `pass` or silent swallowing. If handling errors, be explicit about the exception types and the behavior; otherwise let it raise.
 - Tooling: canonical flow is `make check` (ruff check, ruff format --check, pyright --strict, pytest with coverage). Use `make format` to apply formatting (`ruff format`); lint with `ruff check`.
 - Async: install `uvloop` as the default event loop policy; favor async-first APIs and avoid mixing threads unless bounded and deliberate. `python -m latentscore` runs a demo slice using uvloop.
 - Dependency injection: wire services with `dependency-injector`; override providers in tests for determinism.

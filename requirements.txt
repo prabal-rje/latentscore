@@ -5,5 +5,7 @@ pytest-asyncio>=0.23
 pytest-cov>=4.1
 ruff>=0.6
 textual>=0.58
+textual-serve>=1.0
+pywebview>=4.4
 uvloop>=0.20
 rumps>=0.4
