@@ -3,7 +3,8 @@
 Minimal tracer-bullet slice for async Python using `uvloop` by default and `dependency_injector` wiring.
 
 ## Quickstart
-- `conda create -n latentspace python=3.10` and `conda activate latentspace`.
+- Apple Silicon recommended; use an arm64 Conda (e.g. Miniforge) when possible.
+- `conda create -n latentscore python=3.10` and `conda activate latentscore`.
 - `pip install -r requirements.txt`.
 - Run the demo: `PYTHONPATH=src python -m latentscore` (or `pip install -e .` once).
 

@@ -7,6 +7,8 @@ from pathlib import Path
 
 LOG_DIR_ENV = "LATENTSCORE_LOG_DIR"
 LOG_DIR_NAME = "LatentScore"
+QUIT_SIGNAL_FILENAME = "textual-ui.quit"
+DIAGNOSTICS_QUIT_SIGNAL_FILENAME = "diagnostics-ui.quit"
 
 
 def default_log_dir() -> Path:
@@ -37,8 +39,6 @@ def setup_file_logger(
     path = log_path(filename, app_support_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     handler = logging.FileHandler(path)
-    handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
-    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     logger.addHandler(handler)
     return path

@@ -13,7 +13,7 @@ lint:
 	ruff check .
 
 typecheck:
-	pyright --strict
+	pyright
 
 test:
 	pytest

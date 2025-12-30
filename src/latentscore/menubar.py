@@ -12,18 +12,26 @@ import time
 import webbrowser
 from pathlib import Path
 from types import SimpleNamespace
-from typing import IO, Any, Optional, cast
+from typing import IO, Any, Optional
 
 import rumps  # type: ignore[import]
+from AppKit import NSApplication  # type: ignore[import]
 from rumps import utils as rumps_utils  # type: ignore[import]
 
-from .logging_utils import LOG_DIR_ENV, default_log_dir, log_path
+from .logging_utils import (
+    DIAGNOSTICS_QUIT_SIGNAL_FILENAME,
+    LOG_DIR_ENV,
+    QUIT_SIGNAL_FILENAME,
+    default_log_dir,
+    log_path,
+)
 
 GREETING_TITLE = "Say hi"
 GREETING_MESSAGE = "Hi there!"
 OPEN_UI_TITLE = "Open LatentScore"
 OPEN_LOGS_TITLE = "Open Logs Folder"
 SEE_DIAGNOSTICS_TITLE = "See Diagnostics"
+QUIT_TITLE = "Quit"
 
 
 def _is_apple_silicon_hardware() -> bool:
@@ -88,11 +96,13 @@ class MenuBarApp(rumps.App):
         self._diagnostics_log_file: IO[bytes] | None = None
         self._diagnostics_webview_proc: subprocess.Popen[bytes] | None = None
         self._diagnostics_port: Optional[int] = None
+        self._quit_watch_timer: Optional[rumps.Timer] = None
         if not initialize:
             self.hi_item = SimpleNamespace(title=GREETING_TITLE)
             self.open_item = SimpleNamespace(title=OPEN_UI_TITLE)
             self.logs_item = SimpleNamespace(title=OPEN_LOGS_TITLE)
             self.diagnostics_item = SimpleNamespace(title=SEE_DIAGNOSTICS_TITLE)
+            self.quit_item = SimpleNamespace(title=QUIT_TITLE)
             return
 
         if app_support_dir:
@@ -103,39 +113,39 @@ class MenuBarApp(rumps.App):
                 base.mkdir(parents=True, exist_ok=True)
                 return str(base)
 
-            cast(Any, rumps).application_support = _application_support
-            cast(Any, rumps_utils).application_support = _application_support
+            assert hasattr(rumps, "application_support")
+            setattr(rumps, "application_support", _application_support)
+            assert hasattr(rumps_utils, "application_support")
+            setattr(rumps_utils, "application_support", _application_support)
 
-        super().__init__("LatentScore")  # type: ignore[misc]
+        super().__init__("LatentScore", quit_button=None)  # type: ignore[misc]
         self._register_signal_handlers()
         atexit.register(self._stop_server)
         atexit.register(self._stop_webview)
         atexit.register(self._stop_diagnostics_server)
         atexit.register(self._stop_diagnostics_webview)
-        self.hi_item = cast(Any, rumps).MenuItem(
-            GREETING_TITLE, callback=self._on_hi_clicked
-        )
-        self.open_item = cast(Any, rumps).MenuItem(
-            OPEN_UI_TITLE, callback=self._on_open_clicked
-        )
-        self.logs_item = cast(Any, rumps).MenuItem(
-            OPEN_LOGS_TITLE, callback=self._on_open_logs_clicked
-        )
-        self.diagnostics_item = cast(Any, rumps).MenuItem(
+        self.hi_item = rumps.MenuItem(GREETING_TITLE, callback=self._on_hi_clicked)
+        self.open_item = rumps.MenuItem(OPEN_UI_TITLE, callback=self._on_open_clicked)
+        self.logs_item = rumps.MenuItem(OPEN_LOGS_TITLE, callback=self._on_open_logs_clicked)
+        self.diagnostics_item = rumps.MenuItem(
             SEE_DIAGNOSTICS_TITLE, callback=self._on_diagnostics_clicked
         )
+        self.quit_item = rumps.MenuItem(QUIT_TITLE, callback=self._on_quit_clicked)
         self.menu = [
             self.open_item,
             self.logs_item,
             self.diagnostics_item,
             self.hi_item,
+            self.quit_item,
         ]
+        self._start_quit_watch()
         if self.server_enabled:
             self._ensure_server()
 
     def _on_hi_clicked(self, _sender: object) -> str:
         if self.enable_alerts:
-            cast(Any, rumps).alert("latentscore", GREETING_MESSAGE)
+            self._activate_app()
+            self._alert("latentscore", GREETING_MESSAGE)
         return GREETING_MESSAGE
 
     def _on_open_clicked(self, _sender: object) -> str:
@@ -152,7 +162,7 @@ class MenuBarApp(rumps.App):
         if log_dir.exists():
             subprocess.Popen(["open", str(log_dir)])
         elif self.enable_alerts:
-            cast(Any, rumps).alert(
+            self._alert(
                 "latentscore",
                 f"Logs directory not found yet: {log_dir}\n{env_hint}",
             )
@@ -161,7 +171,7 @@ class MenuBarApp(rumps.App):
     def _on_diagnostics_clicked(self, _sender: object) -> str:
         if not self._ensure_diagnostics_server():
             if self.enable_alerts:
-                cast(Any, rumps).alert(
+                self._alert(
                     "latentscore",
                     "Diagnostics viewer unavailable. Install textual-serve to open logs.",
                 )
@@ -170,6 +180,10 @@ class MenuBarApp(rumps.App):
         if not self._open_diagnostics_webview(url):
             webbrowser.open(url)
         return url
+
+    def _on_quit_clicked(self, _sender: object) -> None:
+        self._shutdown()
+        self._quit_application()
 
     def _current_url(self) -> str:
         port = self._server_port or 0
@@ -186,7 +200,7 @@ class MenuBarApp(rumps.App):
             return True
         self._stop_server()
         if self.enable_alerts:
-            cast(Any, rumps).alert(
+            self._alert(
                 "latentscore",
                 "LatentScore UI failed to start. Try again or run it from the terminal for details.",
             )
@@ -198,7 +212,7 @@ class MenuBarApp(rumps.App):
         cmd = self._server_command(port)
         if cmd is None:
             if self.enable_alerts:
-                cast(Any, rumps).alert(
+                self._alert(
                     "latentscore",
                     "Textual web server is missing. Install textual-serve and try again.",
                 )
@@ -253,18 +267,18 @@ class MenuBarApp(rumps.App):
 
     def _open_webview(self, url: str) -> bool:
         if self._webview_proc and self._webview_proc.poll() is None:
+            self._bring_to_front(self.window_title)
             return True
         cmd = self._webview_command(url)
         if cmd is None:
             if self.enable_alerts:
-                cast(Any, rumps).alert(
+                self._alert(
                     "latentscore",
                     "Native window requires pywebview. Install it to avoid opening a browser.",
                 )
             return False
-        self._webview_proc = subprocess.Popen(
-            cmd, env=self._server_env(), start_new_session=True
-        )
+        self._webview_proc = subprocess.Popen(cmd, env=self._server_env(), start_new_session=True)
+        self._bring_to_front(self.window_title)
         return True
 
     def _webview_command(self, url: str) -> list[str] | None:
@@ -378,10 +392,8 @@ class MenuBarApp(rumps.App):
         return log_path("diagnostics-server.log", self._app_support_dir)
 
     def _open_diagnostics_webview(self, url: str) -> bool:
-        if (
-            self._diagnostics_webview_proc
-            and self._diagnostics_webview_proc.poll() is None
-        ):
+        if self._diagnostics_webview_proc and self._diagnostics_webview_proc.poll() is None:
+            self._bring_to_front("LatentScore Diagnostics")
             return True
         cmd = self._diagnostics_webview_command(url)
         if cmd is None:
@@ -389,6 +401,7 @@ class MenuBarApp(rumps.App):
         self._diagnostics_webview_proc = subprocess.Popen(
             cmd, env=self._server_env(), start_new_session=True
         )
+        self._bring_to_front("LatentScore Diagnostics")
         return True
 
     def _diagnostics_webview_command(self, url: str) -> list[str] | None:
@@ -436,10 +449,7 @@ class MenuBarApp(rumps.App):
             self._diagnostics_log_file = None
 
     def _stop_diagnostics_webview(self) -> None:
-        if (
-            self._diagnostics_webview_proc
-            and self._diagnostics_webview_proc.poll() is None
-        ):
+        if self._diagnostics_webview_proc and self._diagnostics_webview_proc.poll() is None:
             self._terminate_process_group(self._diagnostics_webview_proc)
 
     def _terminate_process_group(self, proc: subprocess.Popen[bytes]) -> None:
@@ -467,11 +477,64 @@ class MenuBarApp(rumps.App):
             signal.signal(sig, self._handle_signal)
 
     def _handle_signal(self, _signum: int, _frame: object | None) -> None:
+        self._shutdown()
+        raise SystemExit(0)
+
+    def _shutdown(self) -> None:
         self._stop_diagnostics_webview()
         self._stop_diagnostics_server()
         self._stop_webview()
         self._stop_server()
-        raise SystemExit(0)
+
+    def _start_quit_watch(self) -> None:
+        self._quit_watch_timer = rumps.Timer(self._poll_quit_signal, 0.25)
+        self._quit_watch_timer.start()
+
+    def _poll_quit_signal(self, _timer: rumps.Timer) -> None:
+        ui_signal = log_path(QUIT_SIGNAL_FILENAME, self._app_support_dir)
+        if ui_signal.exists():
+            try:
+                ui_signal.unlink()
+            except OSError:
+                return
+            self._stop_webview()
+            self._stop_server()
+            return
+        diagnostics_signal = log_path(DIAGNOSTICS_QUIT_SIGNAL_FILENAME, self._app_support_dir)
+        if not diagnostics_signal.exists():
+            return
+        try:
+            diagnostics_signal.unlink()
+        except OSError:
+            return
+        self._stop_diagnostics_webview()
+        self._stop_diagnostics_server()
+
+    def _alert(self, title: str, message: str) -> None:
+        alert = getattr(rumps, "alert", None)
+        assert callable(alert)
+        alert(title, message)
+
+    def _quit_application(self) -> None:
+        quit_application = getattr(rumps, "quit_application", None)
+        assert callable(quit_application)
+        quit_application()
+
+    def _activate_app(self) -> None:
+        """Bring the current application to the front using NSApplication."""
+        if platform.system() != "Darwin":
+            return
+        # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+        app: Any = NSApplication.sharedApplication()  # type: ignore[reportUnknownMemberType]
+        app.activateIgnoringOtherApps_(True)  # type: ignore[reportUnknownMemberType]
+
+    def _bring_to_front(self, title: str) -> None:
+        if platform.system() != "Darwin":
+            return
+        safe_title = title.replace('"', '\\"')
+        script = f'tell application "{safe_title}" to activate'
+        subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+
 
 def run_menu_bar() -> None:
     require_apple_silicon()

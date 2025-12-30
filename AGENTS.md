@@ -12,6 +12,22 @@ This is NON-NEGOTIABLE. Every terminal session requires this. Do NOT run `python
 
 ---
 
+## ⚠️ MANDATORY: Run Type Checking with Pyright
+
+**You MUST run Pyright in strict mode** (`pyright --strict`) every single time you change _any_ Python file. This ensures that type errors are caught as early as possible.
+
+- Run the following command from the project root AFTER ANY PYTHON FILE CHANGE, before any PR or commit:
+  ```bash
+  conda activate latentscore
+  pyright
+  ```
+- Do **not** ignore or silence type errors unless you have a justified, documented reason.
+- If you are unsure why Pyright is failing, ask for help immediately or investigate with the `--verbose` flag.
+
+Maintaining strict type integrity is **required for all merges**.
+
+---
+
 ## General Guidelines
 
 - Current contents are minimal (`README.md` was empty; `CONTRIBUTE.md` documented Conda setup). Keep additions concise and self-contained.
@@ -21,6 +37,7 @@ This is NON-NEGOTIABLE. Every terminal session requires this. Do NOT run `python
 - Defaults: stay ASCII unless a file already uses Unicode; add comments only when logic is non-obvious; avoid destructive git commands.
 - Exception handling: never add bare `try/except` with `pass` or silent swallowing. If handling errors, be explicit about the exception types and the behavior; otherwise let it raise.
 - Tooling: canonical flow is `make check` (ruff check, ruff format --check, pyright --strict, pytest with coverage). Use `make format` to apply formatting (`ruff format`); lint with `ruff check`.
+- Type checking: run `pyright --strict` every single time you change any Python file.
 - Async: install `uvloop` as the default event loop policy; favor async-first APIs and avoid mixing threads unless bounded and deliberate. `python -m latentscore` runs a demo slice using uvloop.
 - Dependency injection: wire services with `dependency-injector`; override providers in tests for determinism.
 - Testing: design from UX/DX outward—define intended usage, write tests that capture that DX/UX, then implement to satisfy tests. Target 95%+ coverage with both unit and integration tests; invest in tooling/visibility that makes debugging easy.

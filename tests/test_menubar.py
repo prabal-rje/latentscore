@@ -6,10 +6,11 @@ import pytest
 from latentscore.menubar import (
     GREETING_MESSAGE,
     GREETING_TITLE,
-    MenuBarApp,
     OPEN_LOGS_TITLE,
     OPEN_UI_TITLE,
+    QUIT_TITLE,
     SEE_DIAGNOSTICS_TITLE,
+    MenuBarApp,
     require_apple_silicon,
 )
 
@@ -20,6 +21,7 @@ def test_greeting_message_constant() -> None:
     assert OPEN_UI_TITLE == "Open LatentScore"
     assert OPEN_LOGS_TITLE == "Open Logs Folder"
     assert SEE_DIAGNOSTICS_TITLE == "See Diagnostics"
+    assert QUIT_TITLE == "Quit"
 
 
 def test_require_apple_silicon() -> None:
@@ -43,6 +45,7 @@ def test_menu_bar_app_sets_menu_item_title(tmp_path) -> None:
     assert app.open_item.title == OPEN_UI_TITLE
     assert app.logs_item.title == OPEN_LOGS_TITLE
     assert app.diagnostics_item.title == SEE_DIAGNOSTICS_TITLE
+    assert app.quit_item.title == QUIT_TITLE
 
 
 def test_on_open_starts_server_and_opens_browser(monkeypatch) -> None:
@@ -56,6 +59,7 @@ def test_on_open_starts_server_and_opens_browser(monkeypatch) -> None:
 
     opened = {}
     app._start_server = fake_start_server  # type: ignore[assignment]
+
     def fake_open_webview(_self, url: str) -> bool:
         opened["url"] = url
         return True
@@ -81,9 +85,7 @@ def test_server_disabled_skips_start(monkeypatch) -> None:
 def test_server_command_uses_runner(monkeypatch) -> None:
     app = MenuBarApp(enable_alerts=False, initialize=False)
 
-    monkeypatch.setattr(
-        "latentscore.menubar.importlib.util.find_spec", lambda name: object()
-    )
+    monkeypatch.setattr("latentscore.menubar.importlib.util.find_spec", lambda name: object())
     cmd = app._server_command(4242)
     assert cmd is not None
     assert cmd[:3] == [sys.executable, "-m", "latentscore.textual_serve_runner"]
@@ -93,9 +95,7 @@ def test_server_command_uses_runner(monkeypatch) -> None:
 def test_webview_command_includes_window_args(monkeypatch) -> None:
     app = MenuBarApp(enable_alerts=False, initialize=False)
 
-    monkeypatch.setattr(
-        "latentscore.menubar.importlib.util.find_spec", lambda name: object()
-    )
+    monkeypatch.setattr("latentscore.menubar.importlib.util.find_spec", lambda name: object())
     cmd = app._webview_command("http://127.0.0.1:4242")
     assert cmd is not None
     assert cmd[:3] == [sys.executable, "-m", "latentscore.webview_app"]
@@ -103,3 +103,20 @@ def test_webview_command_includes_window_args(monkeypatch) -> None:
     assert "--title" in cmd
     assert "--no-frameless" in cmd
     assert "--easy-drag" in cmd
+
+
+def test_quit_callback_invokes_shutdown(monkeypatch) -> None:
+    app = MenuBarApp(enable_alerts=False, initialize=False)
+    called = {}
+
+    def fake_shutdown() -> None:
+        called["shutdown"] = True
+
+    def fake_quit_application() -> None:
+        called["quit"] = True
+
+    app._shutdown = fake_shutdown  # type: ignore[assignment]
+    monkeypatch.setattr("latentscore.menubar.rumps.quit_application", fake_quit_application)
+
+    app._on_quit_clicked(None)
+    assert called == {"shutdown": True, "quit": True}

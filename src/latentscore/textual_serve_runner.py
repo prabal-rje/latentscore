@@ -20,6 +20,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     command = build_command(args.app)
+    print(f"textual-serve starting for {args.app} on {args.host}:{args.port}")
     Server(command=command, host=args.host, port=args.port).serve()
     return 0
 

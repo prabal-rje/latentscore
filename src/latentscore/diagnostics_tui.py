@@ -8,29 +8,42 @@ from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Header, Input, RichLog, Static
+from textual.widgets import Footer, Header, Input, Static, TextArea
 
-from .logging_utils import LOG_DIR_ENV, default_log_dir
+from .logging_utils import DIAGNOSTICS_QUIT_SIGNAL_FILENAME, LOG_DIR_ENV, default_log_dir
 from .loop import install_uvloop_policy
+
+
+def _empty_lines() -> list[str]:
+    return []
 
 
 @dataclass
 class _LogPane:
     title: str
     path: Path
-    widget: RichLog
+    widget: TextArea
     position: int = 0
     missing_noted: bool = False
-    lines: list[str] = field(default_factory=list)
+    lines: list[str] = field(default_factory=_empty_lines)
     match_index: int = -1
+    highlight_line: int | None = None
 
 
 class DiagnosticsHeader(Header):
+    app: "DiagnosticsApp"
+
+    def _on_click(self) -> None:
+        return
+
+    def watch_tall(self, tall: bool) -> None:
+        self.set_class(False, "-tall")
+
     def on_mouse_down(self, event: events.MouseDown) -> None:
         if event.button == 1:
             app = self.app
-            if isinstance(app, DiagnosticsApp):
-                app.action_show_help()
+            assert isinstance(app, DiagnosticsApp)
+            app.action_show_help()
 
 
 class DiagnosticsApp(App[None]):
@@ -48,6 +61,7 @@ class DiagnosticsApp(App[None]):
         Binding("h", "show_help", "Help"),
     ]
 
+    # Minimal CSS for layout only - widget styling done via native SDK
     CSS = """
     Screen {
         layout: vertical;
@@ -55,11 +69,15 @@ class DiagnosticsApp(App[None]):
 
     #logs {
         height: 1fr;
+        border-top: solid $secondary;
     }
 
     #search-bar {
         display: none;
         height: auto;
+        padding: 1;
+        background: $surface;
+        border-bottom: solid $secondary;
     }
 
     #search-bar.visible {
@@ -67,14 +85,29 @@ class DiagnosticsApp(App[None]):
     }
 
     #search-label {
-        padding: 0 1;
+        padding-right: 1;
+        padding-top: 1;
+        height: 3;
+        content-align: center middle;
+    }
+
+    #search-input {
+        width: 1fr;
+        border: tall $accent;
+        background: $boost;
+        color: $text;
+        height: 3;
     }
 
     #help {
         display: none;
         padding: 1;
-        border: round $secondary;
         background: $panel;
+        border: tall $primary;
+        dock: bottom;
+        layer: overlay;
+        width: 60%;
+        height: auto;
     }
 
     #help.visible {
@@ -83,15 +116,15 @@ class DiagnosticsApp(App[None]):
 
     .pane {
         width: 1fr;
-        border: round $secondary;
     }
 
     .pane-title {
         padding: 0 1;
-        background: $boost;
+        background: $surface;
+        color: $text-muted;
     }
 
-    RichLog {
+    TextArea {
         height: 1fr;
     }
     """
@@ -105,12 +138,9 @@ class DiagnosticsApp(App[None]):
         self._search_visible = False
         self._active_pane: _LogPane | None = None
         self._panes: list[_LogPane] = []
-        self._menubar_log = RichLog(
-            highlight=False, wrap=False, max_lines=max_lines, id="menubar-log"
-        )
-        self._ui_log = RichLog(
-            highlight=False, wrap=False, max_lines=max_lines, id="ui-log"
-        )
+        # Use TextArea for proper text selection and copy support
+        self._menubar_log = TextArea(id="menubar-log", read_only=True)
+        self._ui_log = TextArea(id="ui-log", read_only=True)
         self._search_input = Input(placeholder="Type and press Enter", id="search-input")
         help_text = (
             "Diagnostics viewer\n"
@@ -118,6 +148,7 @@ class DiagnosticsApp(App[None]):
             "  n/N    next/prev match\n"
             "  f      toggle follow\n"
             "  r      reload logs\n"
+            "  Cmd+C  copy selection\n"
             "  q      quit"
         )
         self._help = Static(help_text, id="help")
@@ -138,6 +169,7 @@ class DiagnosticsApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        self.notify("Diagnostics viewer mounted (runtime check).", timeout=2.0)
         self._panes = [
             _LogPane(
                 "Menubar Server",
@@ -146,9 +178,6 @@ class DiagnosticsApp(App[None]):
             ),
             _LogPane("Textual UI", self._log_dir / "textual-ui.log", self._ui_log),
         ]
-        for pane in self._panes:
-            pane.widget.auto_scroll = self._follow
-            pane.widget.can_focus = True
         self._active_pane = self._panes[0]
         self._active_pane.widget.focus()
         self._load_initial()
@@ -156,20 +185,25 @@ class DiagnosticsApp(App[None]):
 
     def action_toggle_follow(self) -> None:
         self._follow = not self._follow
-        for pane in self._panes:
-            pane.widget.auto_scroll = self._follow
         status = "on" if self._follow else "off"
         self.notify(f"Follow {status}", timeout=1.0)
+        if self._follow:
+            self._scroll_to_end_all()
 
     def action_reload(self) -> None:
         for pane in self._panes:
-            pane.widget.clear()
+            pane.widget.load_text("")
             pane.position = 0
             pane.missing_noted = False
             pane.lines.clear()
             pane.match_index = -1
         self._load_initial()
         self.notify("Reloaded logs", timeout=1.0)
+
+    def _scroll_to_end_all(self) -> None:
+        """Scroll all log panes to the end."""
+        for pane in self._panes:
+            pane.widget.scroll_end(animate=False)
 
     def action_focus_search(self) -> None:
         self._search_visible = True
@@ -200,10 +234,14 @@ class DiagnosticsApp(App[None]):
 
     def on_focus(self, event: events.Focus) -> None:
         control = event.control
-        if isinstance(control, RichLog):
+        if isinstance(control, TextArea):
             pane = self._pane_for_widget(control)
             if pane is not None:
                 self._active_pane = pane
+
+    def on_click(self, event: events.Click) -> None:
+        if isinstance(event.control, Header):
+            event.control.remove_class("-tall")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input is not self._search_input:
@@ -211,39 +249,45 @@ class DiagnosticsApp(App[None]):
         query = event.value.strip()
         if not query:
             self._search_query = None
+            if self._active_pane:
+                self._active_pane.highlight_line = None
             self.notify("Search cleared", timeout=1.0)
             self.action_close_search()
             return
         self._follow = False
-        for pane in self._panes:
-            pane.widget.auto_scroll = False
         self._search_query = query
         self._jump_match(1, reset=True)
         self.action_close_search()
+
+    async def action_quit(self) -> None:
+        signal_path = self._log_dir / DIAGNOSTICS_QUIT_SIGNAL_FILENAME
+        signal_path.write_text("quit", encoding="utf-8")
+        self.exit()
 
     def _load_initial(self) -> None:
         for pane in self._panes:
             if not pane.path.exists():
                 if not pane.missing_noted:
-                    pane.widget.write(
-                        f"{pane.title} log not found yet at {pane.path}"
-                    )
+                    pane.lines.append(f"{pane.title} log not found yet at {pane.path}")
+                    self._update_pane_text(pane)
                     pane.missing_noted = True
                 continue
             text = pane.path.read_text(encoding="utf-8", errors="replace")
             lines = text.splitlines()
             tail = lines[-200:] if len(lines) > 200 else lines
-            for line in tail:
-                self._append_line(pane, line)
+            pane.lines.extend(tail)
+            self._update_pane_text(pane)
             pane.position = pane.path.stat().st_size
+        if self._follow:
+            self._scroll_to_end_all()
 
     def _poll_files(self) -> None:
+        any_updated = False
         for pane in self._panes:
             if not pane.path.exists():
                 if not pane.missing_noted:
-                    pane.widget.write(
-                        f"{pane.title} log not found yet at {pane.path}"
-                    )
+                    pane.lines.append(f"{pane.title} log not found yet at {pane.path}")
+                    self._update_pane_text(pane)
                     pane.missing_noted = True
                 continue
             try:
@@ -253,24 +297,31 @@ class DiagnosticsApp(App[None]):
             if size < pane.position:
                 pane.lines.clear()
                 pane.match_index = -1
-                self._append_line(pane, f"{pane.title} log rotated")
+                pane.lines.append(f"{pane.title} log rotated")
                 pane.position = 0
+                self._update_pane_text(pane)
+                any_updated = True
             with pane.path.open("r", encoding="utf-8", errors="replace") as handle:
                 handle.seek(pane.position)
                 chunk = handle.read()
                 pane.position = handle.tell()
             if not chunk:
                 continue
-            for line in chunk.splitlines():
-                self._append_line(pane, line)
+            new_lines = chunk.splitlines()
+            pane.lines.extend(new_lines)
+            # Trim to max_lines
+            if len(pane.lines) > self._max_lines:
+                pane.lines = pane.lines[-self._max_lines :]
+            self._update_pane_text(pane)
+            any_updated = True
+        if any_updated and self._follow:
+            self._scroll_to_end_all()
 
-    def _append_line(self, pane: _LogPane, line: str) -> None:
-        pane.lines.append(line)
-        if len(pane.lines) > self._max_lines:
-            pane.lines.pop(0)
-        pane.widget.write(line)
+    def _update_pane_text(self, pane: _LogPane) -> None:
+        """Update the TextArea content with all lines."""
+        pane.widget.load_text("\n".join(pane.lines))
 
-    def _pane_for_widget(self, widget: RichLog) -> _LogPane | None:
+    def _pane_for_widget(self, widget: TextArea) -> _LogPane | None:
         for pane in self._panes:
             if pane.widget is widget:
                 return pane
@@ -287,13 +338,17 @@ class DiagnosticsApp(App[None]):
         if not matches:
             self.notify(f"No matches for {self._search_query!r}", timeout=1.0)
             pane.match_index = -1
+            pane.highlight_line = None
             return
         if reset or pane.match_index < 0:
             pane.match_index = 0
         else:
             pane.match_index = (pane.match_index + direction) % len(matches)
         line_index = matches[pane.match_index]
-        pane.widget.scroll_to(y=line_index, animate=False, immediate=True)
+        pane.highlight_line = line_index
+        # Move cursor to the matching line and select it
+        pane.widget.move_cursor((line_index, 0))
+        pane.widget.select_line(line_index)
         self.notify(
             f"{pane.title}: match {pane.match_index + 1}/{len(matches)}",
             timeout=1.0,
