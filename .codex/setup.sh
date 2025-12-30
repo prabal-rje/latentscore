@@ -3,5 +3,5 @@
 # Ensures the conda environment is active for all Python tooling.
 
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate latentspace
+conda activate latentscore
 

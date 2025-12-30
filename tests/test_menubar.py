@@ -7,8 +7,10 @@ from latentscore.menubar import (
     GREETING_MESSAGE,
     GREETING_TITLE,
     MenuBarApp,
+    OPEN_LOGS_TITLE,
     OPEN_UI_TITLE,
-    require_macos,
+    SEE_DIAGNOSTICS_TITLE,
+    require_apple_silicon,
 )
 
 
@@ -16,14 +18,22 @@ def test_greeting_message_constant() -> None:
     assert GREETING_MESSAGE == "Hi there!"
     assert GREETING_TITLE == "Say hi"
     assert OPEN_UI_TITLE == "Open LatentScore"
+    assert OPEN_LOGS_TITLE == "Open Logs Folder"
+    assert SEE_DIAGNOSTICS_TITLE == "See Diagnostics"
 
 
-def test_require_macos() -> None:
-    if platform.system() == "Darwin":
-        require_macos()
+def test_require_apple_silicon() -> None:
+    """Test that the function enforces macOS + Apple Silicon hardware."""
+    from latentscore.menubar import _is_apple_silicon_hardware
+
+    is_macos = platform.system() == "Darwin"
+    is_apple_silicon = is_macos and _is_apple_silicon_hardware()
+
+    if is_apple_silicon:
+        require_apple_silicon()  # Should pass
     else:
         with pytest.raises(RuntimeError):
-            require_macos()
+            require_apple_silicon()
 
 
 def test_menu_bar_app_sets_menu_item_title(tmp_path) -> None:
@@ -31,6 +41,8 @@ def test_menu_bar_app_sets_menu_item_title(tmp_path) -> None:
     assert app.hi_item.title == GREETING_TITLE
     assert app._on_hi_clicked(None) == GREETING_MESSAGE
     assert app.open_item.title == OPEN_UI_TITLE
+    assert app.logs_item.title == OPEN_LOGS_TITLE
+    assert app.diagnostics_item.title == SEE_DIAGNOSTICS_TITLE
 
 
 def test_on_open_starts_server_and_opens_browser(monkeypatch) -> None:

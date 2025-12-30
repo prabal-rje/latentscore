@@ -5,11 +5,11 @@ Minimal tracer-bullet slice for async Python using `uvloop` by default and `depe
 ## Quickstart
 - `conda create -n latentspace python=3.10` and `conda activate latentspace`.
 - `pip install -r requirements.txt`.
-- Run the demo: `python -m latentscore` (computes a sample mean via the container).
+- Run the demo: `PYTHONPATH=src python -m latentscore` (or `pip install -e .` once).
 
 ## UI demos
 - Textual TUI: `python -m latentscore.tui` renders a centered `Hello world!` message in the terminal.
-- macOS menu bar: `python -m latentscore.menubar` adds a status bar item. The "Open LatentScore" entry launches a Textual web UI inside a native window (install `textual-serve` + `pywebview`). Server logs land in `~/Library/Logs/LatentScore/menubar-server.log`.
+- macOS menu bar: `PYTHONPATH=src python -m latentscore.menubar` adds a status bar item. The "Open LatentScore" entry launches a Textual web UI inside a native window (install `textual-serve` + `pywebview`). Use "Open Logs Folder" to inspect logs, or "See Diagnostics" to open the Textual log viewer in a native window (falls back to browser if `pywebview` is missing). Logs default to `~/Library/Logs/LatentScore` and can be overridden with `LATENTSCORE_LOG_DIR`.
 
 ## Tooling
 - `make check`: ruff lint, ruff format --check, pyright --strict, pytest with coverage.

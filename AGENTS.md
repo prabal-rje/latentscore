@@ -5,17 +5,17 @@
 **BEFORE running ANY shell command** (Python, pip, pytest, make, etc.), you MUST first activate the conda environment:
 
 ```bash
-conda activate latentspace
+conda activate latentscore
 ```
 
-This is NON-NEGOTIABLE. Every terminal session requires this. Do NOT run `python`, `pip`, `pytest`, `make check`, or any Python tooling without first activating the environment. If unsure whether the env is active, run `conda activate latentspace` anyway—it's idempotent.
+This is NON-NEGOTIABLE. Every terminal session requires this. Do NOT run `python`, `pip`, `pytest`, `make check`, or any Python tooling without first activating the environment. If unsure whether the env is active, run `conda activate latentscore` anyway—it's idempotent.
 
 ---
 
 ## General Guidelines
 
 - Current contents are minimal (`README.md` was empty; `CONTRIBUTE.md` documented Conda setup). Keep additions concise and self-contained.
-- Environment: Conda env `latentspace` with Python 3.10. If `requirements.txt` appears, install via `pip install -r requirements.txt`.
+- Environment: Conda env `latentscore` with Python 3.10. If `requirements.txt` appears, install via `pip install -r requirements.txt`.
 - Git hygiene: prefer small, reviewable commits (1–3 per PR). Separate refactors/formatting from behavior changes; squash noisy WIP commits before merging.
 - Tests/tooling: none present initially. If you add code, include at least smoke tests or runnable examples and note how to execute them.
 - Defaults: stay ASCII unless a file already uses Unicode; add comments only when logic is non-obvious; avoid destructive git commands.

@@ -10,3 +10,6 @@ __pycache__/
 dist/
 build/
 .chats/
+.vscode/
+.codex/*
+!.codex/setup.sh
