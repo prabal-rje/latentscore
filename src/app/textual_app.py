@@ -22,17 +22,9 @@ QUIT_SIGNAL_WAIT_TIMEOUT = 2.0
 QUIT_SIGNAL_WAIT_INTERVAL = 0.05
 
 
-class NonTallHeader(ChromeHeader):
-    """Header that keeps the tall flag disabled on click."""
-
-    def _on_click(self) -> None:
-        """Call through for now; this inexplicably avoids the titlebar glitch."""
-        # We don't know why this variant behaves correctly, but it does in practice.
-        super()._on_click()
-
-    def watch_tall(self, tall: bool) -> None:
-        """Keep the header in short mode even if tall gets toggled."""
-        self.set_class(False, "-tall")
+# class NonTallHeader(ChromeHeader):
+#     """Header that keeps the tall flag disabled on click."""
+#     pass
 
 
 class SampleApp(CopySupportApp):
@@ -51,10 +43,9 @@ class SampleApp(CopySupportApp):
         logger.info("%s ready (log check).", self.__class__.__name__)
 
     def on_click(self, event: events.Click) -> None:
-        if isinstance(event.control, NonTallHeader):
+        if isinstance(event.control, ChromeHeader):
             logger = logging.getLogger(LOGGER_NAME)
             logger.info("Header clicked (log check).")
-            event.control.remove_class("-tall")
 
     async def action_quit(self) -> None:
         signal_path = log_path(QUIT_SIGNAL_FILENAME)
@@ -75,7 +66,7 @@ class SampleApp(CopySupportApp):
         logger.info("Minimize requested; wrote %s", signal_path)
 
     def compose(self) -> ComposeResult:
-        yield NonTallHeader(show_clock=False)
+        yield ChromeHeader(show_clock=False)
         with Vertical():
             yield Static(f"{APP_NAME} is running via the menubar app.", id="body")
             yield Static("Use the menubar item to open this UI.", id="hint")

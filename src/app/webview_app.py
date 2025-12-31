@@ -123,7 +123,11 @@ def main(argv: list[str] | None = None) -> int:
     if splash_window is not None:
         _install_macos_window_style(splash_window, background=SPLASH_BACKGROUND_COLOR)
     _install_minimize_watch(main_window, minimize_signal)
+
     _install_copy_hint(main_window, COPY_HINT_MESSAGE)
+
+    _install_css_fixes(main_window)
+
     if use_splash:
         _install_main_ready_handler(
             main_window,
@@ -279,6 +283,54 @@ def _nscolor_from_hex(value: str, appkit: Any) -> Any:
     green = int(text[2:4], 16) / 255.0
     blue = int(text[4:6], 16) / 255.0
     return appkit.NSColor.colorWithCalibratedRed_green_blue_alpha_(red, green, blue, 1.0)
+
+
+def _install_css_fixes(window: Any) -> None:
+    """Inject CSS to remove scrollbars and force full-width background."""
+    events = getattr(window, "events", None)
+    if events is None:
+        return
+    loaded = getattr(events, "loaded", None)
+    if loaded is None:
+        return
+
+    def _on_loaded(window: Any) -> None:
+        evaluate_js = getattr(window, "evaluate_js", None)
+        if not callable(evaluate_js):
+            return
+
+        # 1. Hide scrollbars (fixes the white right margin)
+        # 2. Force full viewport width/height on all root elements
+        # 3. Use Textual's theme color var(--background) with a dark fallback
+        css = """
+            ::-webkit-scrollbar {
+                display: none !important;
+            }
+            :root, html, body {
+                background-color: $background !important;
+                width: 100vw !important;
+                height: 100vh !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                overflow: hidden !important;
+            }
+        """
+        # Compact CSS for injection
+        js_css = css.replace("\n", " ").strip()
+        js = f"""
+            (function() {{
+                var style = document.createElement('style');
+                style.id = "pywebview-css-fix";
+                style.textContent = '{js_css}';
+                document.head.appendChild(style);
+            }})();
+        """
+        evaluate_js(js)
+
+    loaded += _on_loaded
+    # Handle race condition if window is already loaded
+    if hasattr(loaded, "is_set") and loaded.is_set():
+        _on_loaded(window)
 
 
 def _install_copy_hint(window: Any, message: str) -> None:

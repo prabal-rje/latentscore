@@ -76,7 +76,6 @@ class HeaderControl(Widget):
     app: "CopySupportApp"
     DEFAULT_CSS = """
     HeaderControl {
-        dock: left;
         height: 1;
         width: 3;
         padding: 0 0;
@@ -86,21 +85,13 @@ class HeaderControl(Widget):
     HeaderControl:hover {
         background: $foreground 10%;
     }
-    #tl-close {
-        color: #ff5f57;
-    }
-    #tl-minimize {
-        color: #febc2e;
-    }
-    #tl-menu {
-        color: #28c840;
-    }
     """
 
-    def __init__(self, icon: str, action: str, *, id: str) -> None:
+    def __init__(self, icon: str, action: str, *, id: str, color: str) -> None:
         super().__init__(id=id)
         self._icon = icon
         self._action = action
+        self.styles.color = color
 
     def render(self) -> str:
         return self._icon
@@ -128,12 +119,34 @@ class HeaderControl(Widget):
         return True
 
 
+class HeaderControls(Widget):
+    DEFAULT_CSS = """
+    HeaderControls {
+        dock: left;
+        layout: horizontal;
+        height: 1;
+        width: auto;
+        overflow: hidden hidden;
+    }
+    """
+
+
 class ChromeHeader(Header):
     def compose(self) -> ComposeResult:
-        yield HeaderControl("X", "quit", id="tl-close")
-        yield HeaderControl("\u2014", "minimize", id="tl-minimize")
-        yield HeaderControl("O", "menu", id="tl-menu")
+        with HeaderControls():
+            yield HeaderControl("\u2715", "quit", id="tl-close", color="#ff5f57")
+            yield HeaderControl("\u2212", "minimize", id="tl-minimize", color="#febc2e")
+            yield HeaderControl("\u25cf", "menu", id="tl-menu", color="#28c840")
         yield HeaderTitle()
         yield (
             HeaderClock().data_bind(Header.time_format) if self._show_clock else HeaderClockSpace()
         )
+
+    def _on_click(self) -> None:
+        """Call through for now; this inexplicably avoids the titlebar glitch."""
+        # We don't know why this variant behaves correctly, but it does in practice.
+        super()._on_click()
+
+    def watch_tall(self, tall: bool) -> None:
+        """Keep the header in short mode even if tall gets toggled."""
+        self.set_class(False, "-tall")
