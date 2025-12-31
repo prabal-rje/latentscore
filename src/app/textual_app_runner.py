@@ -12,8 +12,23 @@ def resolve_app(spec: str) -> App[Any]:
     module_name, sep, attr_name = spec.partition(":")
     if not module_name or not sep or not attr_name:
         raise ValueError("App spec must be in the form module:attribute")
-    module = importlib.import_module(module_name)
-    target: object = getattr(module, attr_name)
+    try:
+        module = importlib.import_module(module_name)
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            f"Module {module_name!r} was not found. Check the module name."
+        ) from exc
+    except ImportError as exc:
+        raise ImportError(
+            f"Module {module_name!r} could not be imported. "
+            "Check the module name and its dependencies."
+        ) from exc
+    try:
+        target: object = getattr(module, attr_name)
+    except AttributeError as exc:
+        raise AttributeError(
+            f"Attribute {attr_name!r} was not found in module {module_name!r}. Check the app spec."
+        ) from exc
     app: App[Any] | None = None
 
     def _is_app(value: object) -> TypeGuard[App[Any]]:

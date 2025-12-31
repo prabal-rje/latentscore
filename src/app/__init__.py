@@ -30,4 +30,4 @@ def __getattr__(name: str) -> object:
 
 
 def __dir__() -> list[str]:
-    return sorted(__all__ + ["MenuBarApp", "run_menu_bar"])
+    return sorted(__all__)

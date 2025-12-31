@@ -121,15 +121,7 @@ class MenuBarApp(rumps.App):
         self._diagnostics_webview_proc: subprocess.Popen[bytes] | None = None
         self._diagnostics_port: Optional[int] = None
         self._quit_watch_timer: Optional[rumps.Timer] = None
-        if not initialize:
-            self.hi_item = SimpleNamespace(title=GREETING_TITLE)
-            self.open_item = SimpleNamespace(title=OPEN_UI_TITLE)
-            self.logs_item = SimpleNamespace(title=OPEN_LOGS_TITLE)
-            self.diagnostics_item = SimpleNamespace(title=SEE_DIAGNOSTICS_TITLE)
-            self.quit_item = SimpleNamespace(title=QUIT_TITLE)
-            return
-
-        if app_support_dir:
+        if initialize and app_support_dir:
             base = Path(app_support_dir)
             base.mkdir(parents=True, exist_ok=True)
 
@@ -143,6 +135,13 @@ class MenuBarApp(rumps.App):
             setattr(rumps_utils, "application_support", _application_support)
 
         super().__init__(APP_NAME, quit_button=None)  # type: ignore[misc]
+        if not initialize:
+            self.hi_item = SimpleNamespace(title=GREETING_TITLE)
+            self.open_item = SimpleNamespace(title=OPEN_UI_TITLE)
+            self.logs_item = SimpleNamespace(title=OPEN_LOGS_TITLE)
+            self.diagnostics_item = SimpleNamespace(title=SEE_DIAGNOSTICS_TITLE)
+            self.quit_item = SimpleNamespace(title=QUIT_TITLE)
+            return
         self._register_signal_handlers()
         atexit.register(self._stop_server)
         atexit.register(self._stop_webview)
@@ -244,13 +243,17 @@ class MenuBarApp(rumps.App):
         log_path = self._server_log_path()
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_file = open(log_path, "ab")
-        self._server_proc = subprocess.Popen(
-            cmd,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            env=self._server_env(),
-            start_new_session=True,
-        )
+        try:
+            self._server_proc = subprocess.Popen(
+                cmd,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                env=self._server_env(),
+                start_new_session=True,
+            )
+        except Exception:
+            log_file.close()
+            raise
         self._server_log_file = log_file
         return True
 
@@ -387,13 +390,17 @@ class MenuBarApp(rumps.App):
         log_path = self._diagnostics_log_path()
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_file = open(log_path, "ab")
-        self._diagnostics_proc = subprocess.Popen(
-            cmd,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            env=self._server_env(),
-            start_new_session=True,
-        )
+        try:
+            self._diagnostics_proc = subprocess.Popen(
+                cmd,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                env=self._server_env(),
+                start_new_session=True,
+            )
+        except Exception:
+            log_file.close()
+            raise
         self._diagnostics_log_file = log_file
         return True
 
@@ -566,7 +573,8 @@ class MenuBarApp(rumps.App):
     def _bring_to_front(self, title: str) -> None:
         if platform.system() != "Darwin":
             return
-        safe_title = title.replace('"', '\\"')
+        safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
+        safe_title = safe_title.replace("\n", "\\n").replace("\r", "\\n")
         script = f'tell application "{safe_title}" to activate'
         subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
 

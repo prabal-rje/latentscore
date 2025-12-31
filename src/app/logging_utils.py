@@ -35,11 +35,11 @@ def setup_file_logger(
     app_support_dir: str | None = None,
 ) -> Path:
     logger = logging.getLogger(name)
-    if logger.handlers:
-        return log_path(filename, app_support_dir)
-    logger.setLevel(level)
     path = log_path(filename, app_support_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
+    if logger.handlers:
+        return path
+    logger.setLevel(level)
     handler = logging.FileHandler(path)
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     logger.addHandler(handler)

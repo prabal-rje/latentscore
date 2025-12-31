@@ -39,7 +39,7 @@ class DiagnosticsHeader(Header):
         return
 
     def watch_tall(self, tall: bool) -> None:
-        self.set_class(False, "-tall")
+        self.set_class(tall, "-tall")
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         if event.button == 1:

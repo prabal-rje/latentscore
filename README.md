@@ -1,6 +1,6 @@
 # Sample App
 
-Minimal tracer-bullet slice for async Python using `uvloop` by default and `dependency_injector` wiring.
+Minimal tracer-bullet slice for async Python using `uvloop` by default (when available) and `dependency_injector` wiring.
 
 ## Quickstart
 - Apple Silicon recommended; use an arm64 Conda (e.g. Miniforge) when possible.
@@ -19,7 +19,7 @@ Minimal tracer-bullet slice for async Python using `uvloop` by default and `depe
 
 ## Project layout
 - `src/app/branding.py`: app name + derived identifiers used across UI/logging.
-- `src/app/loop.py`: installs `uvloop` policy and wraps `asyncio.run`.
+- `src/app/loop.py`: installs `uvloop` policy when available (falls back to asyncio on Windows) and wraps `asyncio.run`.
 - `src/app/app.py`: DI container and demo entrypoint.
 - `src/app/computation.py`: pure async helper used by the demo.
 - `src/app/tui.py`: Textual hello world app (`python -m app.tui`).
