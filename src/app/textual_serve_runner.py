@@ -7,6 +7,7 @@ import sys
 from textual_serve.server import Server
 
 from . import textual_app_runner
+from .parent_watch import start_parent_watchdog_from_env
 
 
 def build_command(app_spec: str) -> str:
@@ -15,6 +16,7 @@ def build_command(app_spec: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    start_parent_watchdog_from_env()
     parser = argparse.ArgumentParser(description="Serve a Textual app over the web.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)

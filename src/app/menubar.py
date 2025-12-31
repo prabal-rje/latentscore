@@ -29,6 +29,7 @@ from .logging_utils import (
     default_log_dir,
     log_path,
 )
+from .parent_watch import PARENT_FD_ENV, PARENT_PID_ENV, create_parent_watch_pipe
 from .textual_app import APP_SPEC as TEXTUAL_APP_SPEC
 
 NSApplication: Any = getattr(AppKit, "NSApplication")
@@ -121,6 +122,10 @@ class MenuBarApp(rumps.App):
         self._diagnostics_webview_proc: subprocess.Popen[bytes] | None = None
         self._diagnostics_port: Optional[int] = None
         self._quit_watch_timer: Optional[rumps.Timer] = None
+        self._parent_watch_read_fd: int | None = None
+        self._parent_watch_write_fd: int | None = None
+        if initialize:
+            self._parent_watch_read_fd, self._parent_watch_write_fd = create_parent_watch_pipe()
         if initialize and app_support_dir:
             base = Path(app_support_dir)
             base.mkdir(parents=True, exist_ok=True)
@@ -250,6 +255,7 @@ class MenuBarApp(rumps.App):
                 stderr=subprocess.STDOUT,
                 env=self._server_env(),
                 start_new_session=True,
+                pass_fds=self._parent_watch_fds(),
             )
         except Exception:
             log_file.close()
@@ -284,6 +290,9 @@ class MenuBarApp(rumps.App):
         env = os.environ.copy()
         if LOG_DIR_ENV not in env:
             env[LOG_DIR_ENV] = str(self._log_dir())
+        if self._parent_watch_read_fd is not None:
+            env[PARENT_FD_ENV] = str(self._parent_watch_read_fd)
+        env[PARENT_PID_ENV] = str(os.getpid())
         source_root = str(Path(__file__).resolve().parents[1])
         pythonpath = env.get("PYTHONPATH", "")
         paths = [path for path in pythonpath.split(os.pathsep) if path]
@@ -291,6 +300,11 @@ class MenuBarApp(rumps.App):
             paths.insert(0, source_root)
         env["PYTHONPATH"] = os.pathsep.join(paths)
         return env
+
+    def _parent_watch_fds(self) -> tuple[int, ...]:
+        if self._parent_watch_read_fd is None or os.name == "nt":
+            return ()
+        return (self._parent_watch_read_fd,)
 
     def _open_webview(self, url: str) -> bool:
         if self._webview_proc and self._webview_proc.poll() is None:
@@ -304,7 +318,12 @@ class MenuBarApp(rumps.App):
                     "Native window requires pywebview. Install it to avoid opening a browser.",
                 )
             return False
-        self._webview_proc = subprocess.Popen(cmd, env=self._server_env(), start_new_session=True)
+        self._webview_proc = subprocess.Popen(
+            cmd,
+            env=self._server_env(),
+            start_new_session=True,
+            pass_fds=self._parent_watch_fds(),
+        )
         self._bring_to_front(self.window_title)
         return True
 
@@ -397,6 +416,7 @@ class MenuBarApp(rumps.App):
                 stderr=subprocess.STDOUT,
                 env=self._server_env(),
                 start_new_session=True,
+                pass_fds=self._parent_watch_fds(),
             )
         except Exception:
             log_file.close()
@@ -430,7 +450,10 @@ class MenuBarApp(rumps.App):
         if cmd is None:
             return False
         self._diagnostics_webview_proc = subprocess.Popen(
-            cmd, env=self._server_env(), start_new_session=True
+            cmd,
+            env=self._server_env(),
+            start_new_session=True,
+            pass_fds=self._parent_watch_fds(),
         )
         self._bring_to_front(self.diagnostics_window_title)
         return True
@@ -514,10 +537,25 @@ class MenuBarApp(rumps.App):
         raise SystemExit(0)
 
     def _shutdown(self) -> None:
+        self._close_parent_watch()
         self._stop_diagnostics_webview()
         self._stop_diagnostics_server()
         self._stop_webview()
         self._stop_server()
+
+    def _close_parent_watch(self) -> None:
+        if self._parent_watch_write_fd is not None:
+            try:
+                os.close(self._parent_watch_write_fd)
+            except OSError:
+                pass
+            self._parent_watch_write_fd = None
+        if self._parent_watch_read_fd is not None:
+            try:
+                os.close(self._parent_watch_read_fd)
+            except OSError:
+                pass
+            self._parent_watch_read_fd = None
 
     def _start_quit_watch(self) -> None:
         self._quit_watch_timer = rumps.Timer(self._poll_quit_signal, 0.25)

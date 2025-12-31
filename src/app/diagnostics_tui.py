@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from textual import events
-from textual.actions import SkipAction
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -272,19 +271,40 @@ class DiagnosticsApp(App[None]):
             help_widget.add_class("visible")
 
     def action_copy_selection(self) -> None:
+        selected_text = self._selected_text()
+        if not selected_text:
+            return
+        if not self._copy_text_to_clipboard(selected_text):
+            self.notify("Clipboard copy failed; ensure pyperclip is installed.", timeout=2.0)
+
+    def _selected_text(self) -> str | None:
         target = self.focused
         if isinstance(target, (TextArea, Input)):
-            try:
-                target.action_copy()
-            except SkipAction:
-                return
-            return
+            return target.selected_text or None
         if self._active_pane is None:
-            return
+            return None
+        return self._active_pane.widget.selected_text or None
+
+    def _copy_text_to_clipboard(self, text: str) -> bool:
+        if not text:
+            return False
         try:
-            self._active_pane.widget.action_copy()
-        except SkipAction:
-            return
+            import importlib
+
+            pyperclip = importlib.import_module("pyperclip")
+        except Exception:
+            pyperclip = None
+        try:
+            if pyperclip is not None:
+                pyperclip.copy(text)
+                return True
+        except Exception:
+            pass
+        try:
+            self.copy_to_clipboard(text)
+            return True
+        except Exception:
+            return False
 
     def on_focus(self, event: events.Focus) -> None:
         control = event.control

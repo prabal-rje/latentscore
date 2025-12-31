@@ -7,9 +7,11 @@ from importlib.util import find_spec
 from typing import Any
 
 from .branding import APP_NAME
+from .parent_watch import start_parent_watchdog_from_env
 
 
 def main(argv: list[str] | None = None) -> int:
+    start_parent_watchdog_from_env()
     parser = argparse.ArgumentParser(description="Open a webview window.")
     parser.add_argument("--url", required=True)
     parser.add_argument("--title", default=APP_NAME)

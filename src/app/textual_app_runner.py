@@ -7,6 +7,8 @@ from typing import Any, TypeGuard
 
 from textual.app import App
 
+from .parent_watch import start_parent_watchdog_from_env
+
 
 def resolve_app(spec: str) -> App[Any]:
     module_name, sep, attr_name = spec.partition(":")
@@ -54,6 +56,7 @@ def resolve_app(spec: str) -> App[Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    start_parent_watchdog_from_env()
     parser = argparse.ArgumentParser(description="Run a Textual App from a spec.")
     parser.add_argument("--app", required=True, help="App spec like package.module:AppClass")
     args = parser.parse_args(argv)

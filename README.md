@@ -10,7 +10,8 @@ Minimal tracer-bullet slice for async Python using `uvloop` by default (when ava
 
 ## UI demos
 - Textual TUI: `python -m app.tui` renders a centered `Hello world!` message in the terminal.
-- macOS menu bar: `PYTHONPATH=src python -m app.menubar` adds a status bar item. The "Open Sample App" entry launches a Textual web UI inside a native window (install `textual-serve` + `pywebview`). Use "Open Logs Folder" to inspect logs, or "See Diagnostics" to open the Textual log viewer in a native window (falls back to browser if `pywebview` is missing)..
+- macOS menu bar: `PYTHONPATH=src python -m app.menubar` adds a status bar item. The "Open Sample App" entry launches a Textual web UI inside a native window (install `textual-serve` + `pywebview`). Use "Open Logs Folder" to inspect logs, or "See Diagnostics" to open the Textual log viewer in a native window (falls back to browser if `pywebview` is missing). Diagnostics copy uses `pyperclip` for the system clipboard.
+- Menu bar subprocesses watch a parent-death signal (pipe/PID) and exit when the menu bar app exits.
 
 ## Tooling
 - `make check`: ruff lint, ruff format --check, pyright --strict, pytest with coverage.
