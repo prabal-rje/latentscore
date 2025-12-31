@@ -10,6 +10,8 @@ conda activate sample_app_env
 
 This is NON-NEGOTIABLE. Every terminal session requires this. Do NOT run `python`, `pip`, `pytest`, `make check`, or any Python tooling without first activating the environment. If unsure whether the env is active, run `conda activate sample_app_env` anyway—it's idempotent.
 
+*Exception: You may skip this requirement only if the user explicitly instructs you to do otherwise.*
+
 ---
 
 ## ⚠️ MANDATORY: Run Type Checking with Pyright
@@ -28,9 +30,9 @@ Maintaining strict type integrity is **required for all merges**.
 
 ---
 
-## ⚠️ MANDATORY: Create Plan First
+## ⚠️ MANDATORY: Write Plan First
 
-**You MUST always use the `create-plan` skill** before executing any task.
+**You MUST always use the `write-plan` skill** before executing any task.
 
 - **Plan first, then act.**
 - Do not start writing code or running shell commands until you have established a plan.
@@ -38,10 +40,64 @@ Maintaining strict type integrity is **required for all merges**.
 
 ---
 
+## ⚠️ MANDATORY: Use Context-Appropriate Skills
+
+**You MUST invoke skills based on task context**, in addition to the `write-plan` requirement.
+
+- Use `systematic-debugging` for bug investigations, regressions, or unclear behavior before making changes.
+- Use `writing-plans` when the user asks for a plan or when multi-step planning is needed.
+- Use `writing-skills` when creating or updating any skill definitions or workflows.
+- State which skill(s) you are using and why; if multiple apply, use the minimal set needed.
+
+---
+
+## ⚠️ MANDATORY: Use Agent Memory Before and After Every Action
+
+**You MUST scan `.chats/context/agent_memory.md`** before taking any action (including reading files, running commands, or editing).
+**You MUST update `.chats/context/agent_memory.md`** after every action if anything changed, a new gotcha appeared, or a new decision was made.
+
+- Keep updates succinct and linked to the relevant file/folder/concept.
+- If the memory file is missing, create it from `skills/memory-use/references/memory-template.md`.
+
+This is NON-NEGOTIABLE. No exceptions.
+
+---
+
+## ⚠️ MANDATORY: Docs Context for Every Library Docs Lookup
+
+**You MUST update memory and the docs context** whenever you need to consult or search a library's documentation.
+
+- First, check `.chats/context/docs/index.md` for existing captured docs.
+- If missing, capture the docs into `.chats/context/docs/<library>.md` and add an index entry.
+- After using the docs, update `.chats/context/agent_memory.md` with any gotchas, triggers, or mandatory actions.
+
+This is NON-NEGOTIABLE. No exceptions.
+
+---
+
+## ⚠️ MANDATORY: Run `make check` Before Presenting Final Work
+
+**You MUST run `make check`** before presenting any completed work to the user. This ensures all quality gates pass.
+
+- Run the following command from the project root BEFORE presenting final work:
+  ```bash
+  conda activate sample_app_env
+  make check
+  ```
+- Do **not** present work as complete if `make check` fails.
+- If any check fails, fix the issues based on the errors, then re-run `make check` until it passes.
+- Use `make fix` for automatic syntax/formatting fixes.
+- See the `Makefile` for details on what checks are run.
+- Only after a clean `make check` should you present the final work to the user.
+
+This is NON-NEGOTIABLE. No exceptions.
+
+---
+
 ## General Guidelines
 
 - Current contents are minimal (`README.md` was empty; `CONTRIBUTE.md` documented Conda setup). Keep additions concise and self-contained.
-- Environment: Conda env `sample_app_env` with Python 3.10. If `requirements.txt` appears, install via `pip install -r requirements.txt`.
+- Environment: Conda env `sample_app_env` with Python 3.13. If `requirements.txt` appears, install via `pip install -r requirements.txt`.
 - Git hygiene: prefer small, reviewable commits (1–3 per PR). Separate refactors/formatting from behavior changes; squash noisy WIP commits before merging.
 - Tests/tooling: none present initially. If you add code, include at least smoke tests or runnable examples and note how to execute them.
 - Defaults: stay ASCII unless a file already uses Unicode; add comments only when logic is non-obvious; avoid destructive git commands.

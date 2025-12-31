@@ -10,7 +10,9 @@ from .branding import APP_ENV_PREFIX, APP_NAME, APP_SLUG
 LOG_DIR_ENV = f"{APP_ENV_PREFIX}_LOG_DIR"
 LOG_DIR_NAME = APP_NAME
 QUIT_SIGNAL_FILENAME = "textual-ui.quit"
+MINIMIZE_SIGNAL_FILENAME = "textual-ui.minimize"
 DIAGNOSTICS_QUIT_SIGNAL_FILENAME = "diagnostics-ui.quit"
+DIAGNOSTICS_MINIMIZE_SIGNAL_FILENAME = "diagnostics-ui.minimize"
 
 
 def default_log_dir() -> Path:

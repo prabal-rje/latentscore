@@ -13,4 +13,5 @@ build/
 .vscode/
 .codex/*
 !.codex/setup.sh
-repomix-output.xml
+**/repomix-output.xml
+docs/plans/**/*.md

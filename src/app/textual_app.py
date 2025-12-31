@@ -1,21 +1,28 @@
 from __future__ import annotations
 
 import logging
-from typing import ClassVar
 
 from textual import events
-from textual.app import App, ComposeResult
-from textual.binding import BindingType
+from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Footer, Header, Static
+from textual.widgets import Footer, Static
 
 from .branding import APP_NAME
-from .logging_utils import QUIT_SIGNAL_FILENAME, log_path, setup_file_logger
+from .logging_utils import (
+    MINIMIZE_SIGNAL_FILENAME,
+    QUIT_SIGNAL_FILENAME,
+    log_path,
+    setup_file_logger,
+)
+from .quit_signal import wait_for_signal_clear
+from .tui_base import ChromeHeader, CopySupportApp
 
 LOGGER_NAME = f"{__package__ or 'app'}.textual"
+QUIT_SIGNAL_WAIT_TIMEOUT = 2.0
+QUIT_SIGNAL_WAIT_INTERVAL = 0.05
 
 
-class NonTallHeader(Header):
+class NonTallHeader(ChromeHeader):
     """Header that keeps the tall flag disabled on click."""
 
     def _on_click(self) -> None:
@@ -28,12 +35,10 @@ class NonTallHeader(Header):
         self.set_class(False, "-tall")
 
 
-class SampleApp(App[None]):
+class SampleApp(CopySupportApp):
     """Minimal Textual app placeholder for the tracer bullet."""
 
     TITLE = APP_NAME
-    _inherit_bindings = False
-    BINDINGS: ClassVar[list[BindingType]] = []
 
     def on_mount(self) -> None:
         log_file = setup_file_logger(LOGGER_NAME, "textual-ui.log")
@@ -56,7 +61,18 @@ class SampleApp(App[None]):
         signal_path.write_text("quit", encoding="utf-8")
         logger = logging.getLogger(LOGGER_NAME)
         logger.info("Quit requested; wrote %s", signal_path)
+        await wait_for_signal_clear(
+            signal_path,
+            timeout=QUIT_SIGNAL_WAIT_TIMEOUT,
+            interval=QUIT_SIGNAL_WAIT_INTERVAL,
+        )
         self.exit()
+
+    def action_minimize(self) -> None:
+        signal_path = log_path(MINIMIZE_SIGNAL_FILENAME)
+        signal_path.write_text("minimize", encoding="utf-8")
+        logger = logging.getLogger(LOGGER_NAME)
+        logger.info("Minimize requested; wrote %s", signal_path)
 
     def compose(self) -> ComposeResult:
         yield NonTallHeader(show_clock=False)

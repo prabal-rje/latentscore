@@ -23,8 +23,10 @@ from . import webview_app
 from .branding import APP_NAME
 from .diagnostics_tui import APP_SPEC as DIAGNOSTICS_APP_SPEC
 from .logging_utils import (
+    DIAGNOSTICS_MINIMIZE_SIGNAL_FILENAME,
     DIAGNOSTICS_QUIT_SIGNAL_FILENAME,
     LOG_DIR_ENV,
+    MINIMIZE_SIGNAL_FILENAME,
     QUIT_SIGNAL_FILENAME,
     default_log_dir,
     log_path,
@@ -86,7 +88,7 @@ class MenuBarApp(rumps.App):
         window_width: int = 1000,
         window_height: int = 700,
         window_resizable: bool = False,
-        window_frameless: bool = False,
+        window_frameless: bool = True,
         window_easy_drag: bool = True,
         diagnostics_window_title: str = f"{APP_NAME} Diagnostics",
         diagnostics_window_width: int = 1400,
@@ -343,6 +345,12 @@ class MenuBarApp(rumps.App):
             "--height",
             str(self.window_height),
         ]
+        cmd.extend(
+            [
+                "--minimize-signal",
+                str(log_path(MINIMIZE_SIGNAL_FILENAME, self._app_support_dir)),
+            ]
+        )
         cmd.append("--resizable" if self.window_resizable else "--no-resizable")
         cmd.append("--frameless" if self.window_frameless else "--no-frameless")
         cmd.append("--easy-drag" if self.window_easy_drag else "--no-easy-drag")
@@ -474,6 +482,12 @@ class MenuBarApp(rumps.App):
             "--height",
             str(self.diagnostics_window_height),
         ]
+        cmd.extend(
+            [
+                "--minimize-signal",
+                str(log_path(DIAGNOSTICS_MINIMIZE_SIGNAL_FILENAME, self._app_support_dir)),
+            ]
+        )
         if self.diagnostics_window_screen_fraction is not None:
             cmd.extend(["--screen-fraction", str(self.diagnostics_window_screen_fraction)])
         cmd.append("--resizable" if self.diagnostics_window_resizable else "--no-resizable")
@@ -564,22 +578,22 @@ class MenuBarApp(rumps.App):
     def _poll_quit_signal(self, _timer: rumps.Timer) -> None:
         ui_signal = log_path(QUIT_SIGNAL_FILENAME, self._app_support_dir)
         if ui_signal.exists():
+            self._stop_webview()
+            self._stop_server()
             try:
                 ui_signal.unlink()
             except OSError:
                 return
-            self._stop_webview()
-            self._stop_server()
             return
         diagnostics_signal = log_path(DIAGNOSTICS_QUIT_SIGNAL_FILENAME, self._app_support_dir)
         if not diagnostics_signal.exists():
             return
+        self._stop_diagnostics_webview()
+        self._stop_diagnostics_server()
         try:
             diagnostics_signal.unlink()
         except OSError:
             return
-        self._stop_diagnostics_webview()
-        self._stop_diagnostics_server()
 
     def _alert(self, title: str, message: str) -> None:
         alert = getattr(rumps, "alert", None)

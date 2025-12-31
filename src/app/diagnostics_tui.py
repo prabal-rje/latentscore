@@ -5,14 +5,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from textual import events
-from textual.app import App, ComposeResult
+from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Header, Input, Static, TextArea
 
 from .branding import APP_NAME
-from .logging_utils import DIAGNOSTICS_QUIT_SIGNAL_FILENAME, LOG_DIR_ENV, default_log_dir
+from .logging_utils import (
+    DIAGNOSTICS_MINIMIZE_SIGNAL_FILENAME,
+    DIAGNOSTICS_QUIT_SIGNAL_FILENAME,
+    LOG_DIR_ENV,
+    default_log_dir,
+)
 from .loop import install_uvloop_policy
+from .quit_signal import wait_for_signal_clear
+from .tui_base import ChromeHeader, CopySupportApp
+
+DIAGNOSTICS_QUIT_WAIT_TIMEOUT = 2.0
+DIAGNOSTICS_QUIT_WAIT_INTERVAL = 0.05
 
 
 def _empty_lines() -> list[str]:
@@ -31,7 +41,14 @@ class _LogPane:
     highlight_line: int | None = None
 
 
-class DiagnosticsHeader(Header):
+class _DiagnosticsTextArea(TextArea):
+    app: "DiagnosticsApp"
+
+    def action_copy(self) -> None:
+        self.app.action_copy_selection()
+
+
+class DiagnosticsHeader(ChromeHeader):
     app: "DiagnosticsApp"
 
     def _on_click(self) -> None:
@@ -47,14 +64,12 @@ class DiagnosticsHeader(Header):
             app.action_show_help()
 
 
-class DiagnosticsApp(App[None]):
+class DiagnosticsApp(CopySupportApp):
     """Textual log viewer for diagnostics."""
 
-    _inherit_bindings = False
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("f", "toggle_follow", "Follow"),
-        Binding("Ctrl+c", "copy_selection", "Copy"),
         Binding("r", "reload", "Reload"),
         Binding("/", "focus_search", "Search"),
         Binding("escape", "close_search", "Close Search"),
@@ -174,8 +189,8 @@ class DiagnosticsApp(App[None]):
             id="size-warning",
         )
         # Use TextArea for proper text selection and copy support
-        self._menubar_log = TextArea(id="menubar-log", read_only=True)
-        self._ui_log = TextArea(id="ui-log", read_only=True)
+        self._menubar_log = _DiagnosticsTextArea(id="menubar-log", read_only=True)
+        self._ui_log = _DiagnosticsTextArea(id="ui-log", read_only=True)
         self._search_input = Input(
             placeholder="Type search query and press Enter", id="search-input"
         )
@@ -270,41 +285,18 @@ class DiagnosticsApp(App[None]):
         else:
             help_widget.add_class("visible")
 
-    def action_copy_selection(self) -> None:
-        selected_text = self._selected_text()
-        if not selected_text:
-            return
-        if not self._copy_text_to_clipboard(selected_text):
-            self.notify("Clipboard copy failed; ensure pyperclip is installed.", timeout=2.0)
+    def on_key(self, event: events.Key) -> None:
+        if event.key in ("meta+c", "super+c"):
+            self.action_copy_hint()
+            event.stop()
 
     def _selected_text(self) -> str | None:
-        target = self.focused
-        if isinstance(target, (TextArea, Input)):
-            return target.selected_text or None
+        selected_text = super()._selected_text()
+        if selected_text:
+            return selected_text
         if self._active_pane is None:
             return None
         return self._active_pane.widget.selected_text or None
-
-    def _copy_text_to_clipboard(self, text: str) -> bool:
-        if not text:
-            return False
-        try:
-            import importlib
-
-            pyperclip = importlib.import_module("pyperclip")
-        except Exception:
-            pyperclip = None
-        try:
-            if pyperclip is not None:
-                pyperclip.copy(text)
-                return True
-        except Exception:
-            pass
-        try:
-            self.copy_to_clipboard(text)
-            return True
-        except Exception:
-            return False
 
     def on_focus(self, event: events.Focus) -> None:
         control = event.control
@@ -339,7 +331,16 @@ class DiagnosticsApp(App[None]):
     async def action_quit(self) -> None:
         signal_path = self._log_dir / DIAGNOSTICS_QUIT_SIGNAL_FILENAME
         signal_path.write_text("quit", encoding="utf-8")
+        await wait_for_signal_clear(
+            signal_path,
+            timeout=DIAGNOSTICS_QUIT_WAIT_TIMEOUT,
+            interval=DIAGNOSTICS_QUIT_WAIT_INTERVAL,
+        )
         self.exit()
+
+    def action_minimize(self) -> None:
+        signal_path = self._log_dir / DIAGNOSTICS_MINIMIZE_SIGNAL_FILENAME
+        signal_path.write_text("minimize", encoding="utf-8")
 
     def _load_initial(self) -> None:
         for pane in self._panes:

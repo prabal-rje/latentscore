@@ -103,7 +103,8 @@ def test_webview_command_includes_window_args(monkeypatch) -> None:
     assert cmd[:3] == [sys.executable, "-m", webview_app.__name__]
     assert "--url" in cmd
     assert "--title" in cmd
-    assert "--no-frameless" in cmd
+    assert "--minimize-signal" in cmd
+    assert "--frameless" in cmd
     assert "--easy-drag" in cmd
 
 
@@ -116,7 +117,9 @@ def test_diagnostics_webview_command_includes_screen_fraction(monkeypatch) -> No
     assert "--screen-fraction" in cmd
     fraction_index = cmd.index("--screen-fraction") + 1
     assert cmd[fraction_index] == "0.75"
+    assert "--minimize-signal" in cmd
     assert "--resizable" in cmd
+    assert "--frameless" in cmd
     assert "--no-easy-drag" in cmd
 
 
