@@ -11,6 +11,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Header, Input, Static, TextArea
 
+from .branding import APP_NAME
 from .logging_utils import DIAGNOSTICS_QUIT_SIGNAL_FILENAME, LOG_DIR_ENV, default_log_dir
 from .loop import install_uvloop_policy
 
@@ -48,7 +49,8 @@ class DiagnosticsHeader(Header):
 
 
 class DiagnosticsApp(App[None]):
-    """Textual log viewer for LatentScore diagnostics."""
+    """Textual log viewer for diagnostics."""
+
     _inherit_bindings = False
     BINDINGS = [
         Binding("q", "quit", "Quit"),
@@ -175,7 +177,9 @@ class DiagnosticsApp(App[None]):
         # Use TextArea for proper text selection and copy support
         self._menubar_log = TextArea(id="menubar-log", read_only=True)
         self._ui_log = TextArea(id="ui-log", read_only=True)
-        self._search_input = Input(placeholder="Type search query and press Enter", id="search-input")
+        self._search_input = Input(
+            placeholder="Type search query and press Enter", id="search-input"
+        )
         help_text = (
             "Diagnostics viewer\n"
             "  /      search (press Enter to jump)\n"
@@ -379,8 +383,7 @@ class DiagnosticsApp(App[None]):
         resolved_width = width if width is not None else size.width
         resolved_height = height if height is not None else size.height
         too_small = (
-            resolved_width < self._min_viewport_width
-            or resolved_height < self._min_viewport_height
+            resolved_width < self._min_viewport_width or resolved_height < self._min_viewport_height
         )
         self._size_warning.set_class(too_small, "visible")
 
@@ -424,7 +427,7 @@ class DiagnosticsApp(App[None]):
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="LatentScore diagnostics viewer")
+    parser = argparse.ArgumentParser(description=f"{APP_NAME} diagnostics viewer")
     parser.add_argument(
         "--log-dir",
         type=Path,
@@ -437,6 +440,9 @@ def _parse_args() -> argparse.Namespace:
 def build_app(log_dir: Path | None = None) -> DiagnosticsApp:
     install_uvloop_policy()
     return DiagnosticsApp(log_dir or default_log_dir())
+
+
+APP_SPEC = f"{__name__}:{build_app.__name__}"
 
 
 def run() -> None:

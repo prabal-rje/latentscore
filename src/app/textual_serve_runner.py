@@ -6,9 +6,11 @@ import sys
 
 from textual_serve.server import Server
 
+from . import textual_app_runner
+
 
 def build_command(app_spec: str) -> str:
-    args = [sys.executable, "-m", "latentscore.textual_app_runner", "--app", app_spec]
+    args = [sys.executable, "-m", textual_app_runner.__name__, "--app", app_spec]
     return shlex.join(args)
 
 

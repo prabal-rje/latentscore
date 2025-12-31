@@ -3,14 +3,16 @@ from __future__ import annotations
 import argparse
 import importlib
 import platform
-from typing import Any
 from importlib.util import find_spec
+from typing import Any
+
+from .branding import APP_NAME
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Open a webview window.")
     parser.add_argument("--url", required=True)
-    parser.add_argument("--title", default="LatentScore")
+    parser.add_argument("--title", default=APP_NAME)
     parser.add_argument("--width", type=int, default=1000)
     parser.add_argument("--height", type=int, default=700)
     parser.add_argument(

@@ -1,7 +1,7 @@
 import pytest
 from textual.widgets import Static
 
-from latentscore.tui import HelloWorldApp
+from app.tui import HelloWorldApp
 
 
 @pytest.mark.asyncio

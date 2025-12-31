@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
-from latentscore.app import demo_run
-from latentscore.loop import run
+from app.app import demo_run
+from app.loop import run
 
 
 async def _current_loop_name() -> str:

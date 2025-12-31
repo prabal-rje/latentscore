@@ -9,9 +9,10 @@ from textual.binding import BindingType
 from textual.containers import Vertical
 from textual.widgets import Footer, Header, Static
 
+from .branding import APP_NAME
 from .logging_utils import QUIT_SIGNAL_FILENAME, log_path, setup_file_logger
 
-LOGGER_NAME = "latentscore.textual"
+LOGGER_NAME = f"{__package__ or 'app'}.textual"
 
 
 class NonTallHeader(Header):
@@ -27,22 +28,22 @@ class NonTallHeader(Header):
         self.set_class(False, "-tall")
 
 
-class LatentScoreApp(App[None]):
+class SampleApp(App[None]):
     """Minimal Textual app placeholder for the tracer bullet."""
 
-    TITLE = "LatentScore"
+    TITLE = APP_NAME
     _inherit_bindings = False
     BINDINGS: ClassVar[list[BindingType]] = []
 
     def on_mount(self) -> None:
         log_file = setup_file_logger(LOGGER_NAME, "textual-ui.log")
         logger = logging.getLogger(LOGGER_NAME)
-        logger.info("LatentScoreApp mounted (log check).")
-        logger.info("LatentScore logs at %s", log_file)
+        logger.info("%s mounted (log check).", self.__class__.__name__)
+        logger.info("%s logs at %s", APP_NAME, log_file)
 
     def on_ready(self) -> None:
         logger = logging.getLogger(LOGGER_NAME)
-        logger.info("LatentScoreApp ready (log check).")
+        logger.info("%s ready (log check).", self.__class__.__name__)
 
     def on_click(self, event: events.Click) -> None:
         if isinstance(event.control, NonTallHeader):
@@ -60,16 +61,22 @@ class LatentScoreApp(App[None]):
     def compose(self) -> ComposeResult:
         yield NonTallHeader(show_clock=False)
         with Vertical():
-            yield Static("LatentScore is running via the menubar app.", id="body")
+            yield Static(f"{APP_NAME} is running via the menubar app.", id="body")
             yield Static("Use the menubar item to open this UI.", id="hint")
             yield Static(f"Logs: {log_path('textual-ui.log')}", id="logs")
         yield Footer()
 
 
+APP_SPEC = f"{__name__}:{SampleApp.__name__}"
+
+
 def run() -> None:
     setup_file_logger(LOGGER_NAME, "textual-ui.log")
-    logging.getLogger(LOGGER_NAME).info("Launching LatentScoreApp (log check).")
-    LatentScoreApp().run()
+    logging.getLogger(LOGGER_NAME).info(
+        "Launching %s (log check).",
+        SampleApp.__name__,
+    )
+    SampleApp().run()
 
 
 if __name__ == "__main__":

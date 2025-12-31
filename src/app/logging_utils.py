@@ -5,8 +5,10 @@ import os
 import platform
 from pathlib import Path
 
-LOG_DIR_ENV = "LATENTSCORE_LOG_DIR"
-LOG_DIR_NAME = "LatentScore"
+from .branding import APP_ENV_PREFIX, APP_NAME, APP_SLUG
+
+LOG_DIR_ENV = f"{APP_ENV_PREFIX}_LOG_DIR"
+LOG_DIR_NAME = APP_NAME
 QUIT_SIGNAL_FILENAME = "textual-ui.quit"
 DIAGNOSTICS_QUIT_SIGNAL_FILENAME = "diagnostics-ui.quit"
 
@@ -17,7 +19,7 @@ def default_log_dir() -> Path:
         return Path(env_dir).expanduser()
     if platform.system() == "Darwin":
         return Path.home() / "Library" / "Logs" / LOG_DIR_NAME
-    return Path.home() / ".latentscore" / "logs"
+    return Path.home() / f".{APP_SLUG}" / "logs"
 
 
 def log_path(filename: str, app_support_dir: str | None = None) -> Path:

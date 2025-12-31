@@ -21,4 +21,4 @@ test:
 check: lint fmt-check typecheck test
 
 run:
-	python -m latentscore
+	python -m app

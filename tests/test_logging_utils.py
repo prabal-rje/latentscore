@@ -1,6 +1,6 @@
 import logging
 
-from latentscore.logging_utils import LOG_DIR_ENV, default_log_dir, log_path, setup_file_logger
+from app.logging_utils import LOG_DIR_ENV, default_log_dir, log_path, setup_file_logger
 
 
 def test_log_path_uses_env_override(tmp_path, monkeypatch) -> None:
@@ -11,7 +11,7 @@ def test_log_path_uses_env_override(tmp_path, monkeypatch) -> None:
 
 def test_setup_file_logger_creates_handler(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv(LOG_DIR_ENV, str(tmp_path))
-    logger_name = f"latentscore.test.{tmp_path.name}"
+    logger_name = f"app.test.{tmp_path.name}"
     path = setup_file_logger(logger_name, "app.log")
     assert path == tmp_path / "app.log"
     logger = logging.getLogger(logger_name)

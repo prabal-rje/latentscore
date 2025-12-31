@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import importlib
 import importlib.util
 import os
 import platform
@@ -14,10 +15,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import IO, Any, Optional
 
-import rumps  # type: ignore[import]
 import AppKit  # type: ignore[import]
+import rumps  # type: ignore[import]
 from rumps import utils as rumps_utils  # type: ignore[import]
 
+from . import webview_app
+from .branding import APP_NAME
+from .diagnostics_tui import APP_SPEC as DIAGNOSTICS_APP_SPEC
 from .logging_utils import (
     DIAGNOSTICS_QUIT_SIGNAL_FILENAME,
     LOG_DIR_ENV,
@@ -25,6 +29,7 @@ from .logging_utils import (
     default_log_dir,
     log_path,
 )
+from .textual_app import APP_SPEC as TEXTUAL_APP_SPEC
 
 NSApplication: Any = getattr(AppKit, "NSApplication")
 NSRunningApplication: Any = getattr(AppKit, "NSRunningApplication")
@@ -37,7 +42,7 @@ assert isinstance(NSApplicationActivateAllWindows, int)
 
 GREETING_TITLE = "Say hi"
 GREETING_MESSAGE = "Hi there!"
-OPEN_UI_TITLE = "Open LatentScore"
+OPEN_UI_TITLE = f"Open {APP_NAME}"
 OPEN_LOGS_TITLE = "Open Logs Folder"
 SEE_DIAGNOSTICS_TITLE = "See Diagnostics"
 QUIT_TITLE = "Quit"
@@ -73,16 +78,16 @@ class MenuBarApp(rumps.App):
         server_enabled: bool = True,
         server_host: str = "127.0.0.1",
         server_port: Optional[int] = None,
-        textual_target: str = "latentscore.textual_app:LatentScoreApp",
+        textual_target: str = TEXTUAL_APP_SPEC,
         server_ready_timeout: float = 3.0,
         server_ready_interval: float = 0.1,
-        window_title: str = "LatentScore",
+        window_title: str = APP_NAME,
         window_width: int = 1000,
         window_height: int = 700,
         window_resizable: bool = False,
         window_frameless: bool = False,
         window_easy_drag: bool = True,
-        diagnostics_window_title: str = "LatentScore Diagnostics",
+        diagnostics_window_title: str = f"{APP_NAME} Diagnostics",
         diagnostics_window_width: int = 1400,
         diagnostics_window_height: int = 900,
         diagnostics_window_resizable: bool = True,
@@ -137,7 +142,7 @@ class MenuBarApp(rumps.App):
             assert hasattr(rumps_utils, "application_support")
             setattr(rumps_utils, "application_support", _application_support)
 
-        super().__init__("LatentScore", quit_button=None)  # type: ignore[misc]
+        super().__init__(APP_NAME, quit_button=None)  # type: ignore[misc]
         self._register_signal_handlers()
         atexit.register(self._stop_server)
         atexit.register(self._stop_webview)
@@ -164,7 +169,7 @@ class MenuBarApp(rumps.App):
     def _on_hi_clicked(self, _sender: object) -> str:
         if self.enable_alerts:
             self._activate_app()
-            self._alert("latentscore", GREETING_MESSAGE)
+            self._alert(APP_NAME, GREETING_MESSAGE)
         return GREETING_MESSAGE
 
     def _on_open_clicked(self, _sender: object) -> str:
@@ -182,7 +187,7 @@ class MenuBarApp(rumps.App):
             subprocess.Popen(["open", str(log_dir)])
         elif self.enable_alerts:
             self._alert(
-                "latentscore",
+                APP_NAME,
                 f"Logs directory not found yet: {log_dir}\n{env_hint}",
             )
         return str(log_dir)
@@ -191,7 +196,7 @@ class MenuBarApp(rumps.App):
         if not self._ensure_diagnostics_server():
             if self.enable_alerts:
                 self._alert(
-                    "latentscore",
+                    APP_NAME,
                     "Diagnostics viewer unavailable. Install textual-serve to open logs.",
                 )
             return ""
@@ -220,8 +225,8 @@ class MenuBarApp(rumps.App):
         self._stop_server()
         if self.enable_alerts:
             self._alert(
-                "latentscore",
-                "LatentScore UI failed to start. Try again or run it from the terminal for details.",
+                APP_NAME,
+                f"{APP_NAME} UI failed to start. Try again or run it from the terminal for details.",
             )
         return False
 
@@ -232,7 +237,7 @@ class MenuBarApp(rumps.App):
         if cmd is None:
             if self.enable_alerts:
                 self._alert(
-                    "latentscore",
+                    APP_NAME,
                     "Textual web server is missing. Install textual-serve and try again.",
                 )
             return False
@@ -255,7 +260,7 @@ class MenuBarApp(rumps.App):
         return [
             sys.executable,
             "-m",
-            "latentscore.textual_serve_runner",
+            importlib.import_module(".textual_serve_runner", __package__).__name__,
             "--host",
             self.server_host,
             "--port",
@@ -292,7 +297,7 @@ class MenuBarApp(rumps.App):
         if cmd is None:
             if self.enable_alerts:
                 self._alert(
-                    "latentscore",
+                    APP_NAME,
                     "Native window requires pywebview. Install it to avoid opening a browser.",
                 )
             return False
@@ -306,7 +311,7 @@ class MenuBarApp(rumps.App):
         cmd = [
             sys.executable,
             "-m",
-            "latentscore.webview_app",
+            webview_app.__name__,
             "--url",
             url,
             "--title",
@@ -398,13 +403,13 @@ class MenuBarApp(rumps.App):
         return [
             sys.executable,
             "-m",
-            "latentscore.textual_serve_runner",
+            importlib.import_module(".textual_serve_runner", __package__).__name__,
             "--host",
             self.server_host,
             "--port",
             str(port),
             "--app",
-            "latentscore.diagnostics_tui:build_app",
+            DIAGNOSTICS_APP_SPEC,
         ]
 
     def _diagnostics_log_path(self) -> Path:
@@ -429,7 +434,7 @@ class MenuBarApp(rumps.App):
         cmd = [
             sys.executable,
             "-m",
-            "latentscore.webview_app",
+            webview_app.__name__,
             "--url",
             url,
             "--title",
@@ -440,12 +445,8 @@ class MenuBarApp(rumps.App):
             str(self.diagnostics_window_height),
         ]
         if self.diagnostics_window_screen_fraction is not None:
-            cmd.extend(
-                ["--screen-fraction", str(self.diagnostics_window_screen_fraction)]
-            )
-        cmd.append(
-            "--resizable" if self.diagnostics_window_resizable else "--no-resizable"
-        )
+            cmd.extend(["--screen-fraction", str(self.diagnostics_window_screen_fraction)])
+        cmd.append("--resizable" if self.diagnostics_window_resizable else "--no-resizable")
         cmd.append("--frameless" if self.window_frameless else "--no-frameless")
         cmd.append("--no-easy-drag")
         return cmd

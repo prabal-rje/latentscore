@@ -76,5 +76,5 @@ async def test_notify_user_early_exit_on_missing_recipient():
 
 ## Diagnostics log viewer
 ```bash
-python -m latentscore.diagnostics_tui --log-dir "$HOME/Library/Logs/LatentScore"
+python -m app.diagnostics_tui --log-dir "$HOME/Library/Logs/Sample App"
 ```
