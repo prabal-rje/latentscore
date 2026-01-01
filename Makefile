@@ -1,38 +1,42 @@
-.PHONY: install setup format fmt-check lint typecheck test check run download-model
+.PHONY: install setup format fmt-check lint typecheck test check run download-models download-llm download-embeddings
 
-# --- GUARD CLAUSE ---
 ifndef ENV_NAME
-$(error ❌ Error: ENV_NAME is missing. Usage: make install ENV_NAME=latentscore)
+$(error ❌ ENV_NAME missing. Usage: make install ENV_NAME=latentscore)
 endif
 
-# --- CONFIG ---
 MODELS_DIR := models
-LLM_DIR := $(MODELS_DIR)/gemma-3-270m-it-qat-4bit
-LLM_REPO := mlx-community/gemma-3-270m-it-qat-4bit
+LLM_DIR := $(MODELS_DIR)/gemma-3-1b-it-qat-8bit
+LLM_REPO := mlx-community/gemma-3-1b-it-qat-8bit
+EMBED_DIR := $(MODELS_DIR)/all-MiniLM-L6-v2
+EMBED_REPO := sentence-transformers/all-MiniLM-L6-v2
 
-# --- SYSTEM CHECKS ---
 check-system:
-	@echo "🔍 Checking System Dependencies..."
+	@echo "🔍 Checking system..."
 	@which sox >/dev/null 2>&1 || (echo "❌ SoX missing. Run: brew install sox" && exit 1)
-	@echo "✅ System binaries look good."
+	@echo "✅ System OK"
 
-# --- THE JUICED INSTALLER ---
 install: check-system
-	@echo "🍏 Setting up M4-Optimized Environment: $(ENV_NAME)..."
+	@echo "🍏 Setting up: $(ENV_NAME)..."
 	conda env update --name $(ENV_NAME) --file environment.yml --prune
-	@echo "✅ Install complete! Don't forget to run: conda activate $(ENV_NAME)"
+	@echo "✅ Done! Run: conda activate $(ENV_NAME)"
 
-# Alias
 setup: install
 
-# --- MODEL FETCHING ---
-download-model:
-	@echo "📥 Downloading Gemma 3 270M QAT (MLX)..."
-	@mkdir -p $(LLM_DIR)
-	@python -c "from huggingface_hub import snapshot_download; snapshot_download('$(LLM_REPO)', local_dir='$(LLM_DIR)')"
-	@echo "✅ Model ready in $(LLM_DIR)/"
+download-models: download-llm download-embeddings
+	@echo "✅ All models ready"
 
-# --- DEV TOOLS ---
+download-llm:
+	@echo "📥 Downloading Gemma 3 1B IT (4-bit)..."
+	@mkdir -p $(LLM_DIR)
+	python -c "from huggingface_hub import snapshot_download; snapshot_download('$(LLM_REPO)', local_dir='$(LLM_DIR)')"
+	@echo "✅ LLM ready: $(LLM_DIR)"
+
+download-embeddings:
+	@echo "📥 Downloading embeddings..."
+	@mkdir -p $(EMBED_DIR)
+	python -c "from huggingface_hub import snapshot_download; snapshot_download('$(EMBED_REPO)', local_dir='$(EMBED_DIR)')"
+	@echo "✅ Embeddings ready: $(EMBED_DIR)"
+
 format:
 	ruff format .
 

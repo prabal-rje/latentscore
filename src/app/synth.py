@@ -20,7 +20,6 @@ import numpy as np
 import soundfile as sf  # type: ignore[import]
 from numpy.typing import NDArray
 from scipy.signal import butter, lfilter, decimate  # type: ignore[import]
-from numba import njit, prange # type: ignore[import]
 
 # =============================================================================
 # CONSTANTS
@@ -1830,105 +1829,199 @@ if __name__ == "__main__":
     print("VibeSynth V1/V2 - Pure Python Synthesis Engine")
     print("=" * 50)
 
-    # Example 1: Direct config
-    print("\n1. Generating from direct config (Indian Wedding)...")
-    config = MusicConfig(
-        tempo=0.36,
-        root="d",
-        mode="dorian",
-        brightness=0.5,
-        space=0.75,
-        density=5,
-        bass="drone",
-        pad="warm_slow",
-        melody="ornamental",
-        rhythm="minimal",
-        texture="shimmer_slow",
-        accent="pluck",
-        motion=0.5,
-        attack="soft",
-        stereo=0.65,
-        depth=True,
-        echo=0.55,
-        human=0.18,
-        grain="warm",
-    )
-    config_to_audio(config, "indian_wedding.wav", duration=20.0)
-    print("   Saved: indian_wedding.wav")
 
-    # Example 2: From dict (simulating JSON from LLM)
-    print("\n2. Generating from dict (Dark Electronic)...")
-    dark_config = {
-        "tempo": 0.42,
-        "root": "a",
-        "mode": "minor",
-        "brightness": 0.4,
-        "space": 0.6,
-        "density": 6,
-        "layers": {
-            "bass": "pulsing",
-            "pad": "dark_sustained",
-            "melody": "arp_melody",
-            "rhythm": "electronic",
+    # Example 3: Bubblegum, sad, dead (from llm_to_synth.py, see @file_context_1)
+    import json
+    # These examples mirror the demo config blocks captured in @file_context_0:
+    demo_configs = [
+        {
+            # "justification": "The 'Bubblegum'-style sound is characterized by a bright, slightly distorted, and playful melody with a prominent bass line and a smooth, evolving pad.",
+            "tempo": 0.5,
+            "root": "a",
+            "mode": "major",
+            "brightness": 0.75,
+            "space": 0.5,
+            "density": 2,
+            "bass": "drone",
+            "pad": "warm_slow",
+            "melody": "contemplative",
+            "rhythm": "none",
             "texture": "shimmer",
             "accent": "bells",
+            "motion": 0.5,
+            "attack": "medium",
+            "stereo": 0.5,
+            "depth": False,
+            "echo": 0.25,
+            "human": 0.5,
+            "grain": "clean"
         },
-        "motion": 0.65,
-        "attack": "sharp",
-        "stereo": 0.7,
-        "depth": True,
-        "echo": 0.5,
-        "human": 0.0,
-        "grain": "gritty",
-    }
-    dict_to_audio(dark_config, "dark_electronic.wav", duration=20.0)
-    print("   Saved: dark_electronic.wav")
+        {
+            # "justification": "The sad vibe is characterized by a low-key sound and a sense of melancholy. The low intensity and muted tones create a feeling of quiet sorrow. The 'low' intensity of the bass and the 'dark' tone of the pad support this feeling. The 'soft' attack and 'warm' tone of the pad create a sense of longing and a feeling of sadness.",
+            "tempo": 0.25,
+            "root": "e",
+            "mode": "minor",
+            "brightness": 0.25,
+            "space": 0.25,
+            "density": 5,
+            "bass": "drone",
+            "pad": "warm_slow",
+            "melody": "contemplative",
+            "rhythm": "soft_four",
+            "texture": "shimmer_slow",
+            "accent": "bells",
+            "motion": 0.25,
+            "attack": "soft",
+            "stereo": 0.25,
+            "depth": True,
+            "echo": 0.5,
+            "human": 0.5,
+            "grain": "gritty"
+        },
+        {
+            # "justification": "The 'dead', a low volume synth with a simple sine wave and a low pitch.",
+            "tempo": 0.25,
+            "root": "c",
+            "mode": "minor",
+            "brightness": 0.25,
+            "space": 0.25,
+            "density": 2,
+            "bass": "drone",
+            "pad": "warm_slow",
+            "melody": "contemplative",
+            "rhythm": "none",
+            "texture": "shimmer_slow",
+            "accent": "bells",
+            "motion": 0.25,
+            "attack": "soft",
+            "stereo": 0.25,
+            "depth": False,
+            "echo": 0.25,
+            "human": 0.25,
+            "grain": "clean"
+        },
+    ]
+    demo_names = ["bubblegum.wav", "sad.wav", "dead.wav"]
+    demo_vibes = ["Bubblegum", "sad", "dead"]
 
-    # Example 3: From vibe string
-    print("\n3. Generating from vibe string (Underwater Cave)...")
-    generate_from_vibe(
-        "slow, peaceful, underwater cave, bioluminescence", "underwater_cave.wav", duration=20.0
-    )
-    print("   Saved: underwater_cave.wav")
+    for vibe, fname, config_dict in zip(demo_vibes, demo_names, demo_configs):
+        print(f"\n{'='*60}")
+        print(f"Vibe: {vibe}")
+        print('='*60)
+        config = MusicConfig(**config_dict)
+        print(json.dumps(config_dict, indent=2))
+        config_to_audio(config, fname, duration=20.0)
+        print(f"   Saved: {fname}")
 
-    print("\n" + "=" * 50)
+    print("\nAll demo audio exported.")
 
-    # Example 4: Morph between two configs
-    print("\n4. Generating morph (Morning → Evening)...")
 
-    morning = MusicConfig(
-        tempo=0.30,
-        root="c",
-        mode="major",
-        brightness=0.6,
-        space=0.8,
-        bass="drone",
-        pad="warm_slow",
-        melody="minimal",
-        motion=0.3,
-        attack="soft",
-        echo=0.7,
-    )
 
-    evening = MusicConfig(
-        tempo=0.42,
-        root="a",
-        mode="minor",
-        brightness=0.45,
-        space=0.6,
-        bass="pulsing",
-        pad="dark_sustained",
-        melody="arp_melody",
-        motion=0.65,
-        attack="medium",
-        echo=0.5,
-    )
 
-    # Generate 2-minute morph with overlap-add (no volume dips)
-    audio = generate_tween_with_automation(morning, evening, duration=120.0)
-    # audio = assemble(morning, duration=30.0)  # Just morning, no morphing
 
-    sf.write("morning_to_evening.wav", audio, SAMPLE_RATE)
-    print("   Saved: morning_to_evening.wav")
+# if __name__ == "__main__":
+#     print("VibeSynth V1/V2 - Pure Python Synthesis Engine")
+#     print("=" * 50)
 
-    print("\nDone! Generated 4 audio files.")
+#     # Example 1: Direct config
+#     print("\n1. Generating from direct config (Indian Wedding)...")
+#     config = MusicConfig(
+#         tempo=0.36,
+#         root="d",
+#         mode="dorian",
+#         brightness=0.5,
+#         space=0.75,
+#         density=5,
+#         bass="drone",
+#         pad="warm_slow",
+#         melody="ornamental",
+#         rhythm="minimal",
+#         texture="shimmer_slow",
+#         accent="pluck",
+#         motion=0.5,
+#         attack="soft",
+#         stereo=0.65,
+#         depth=True,
+#         echo=0.55,
+#         human=0.18,
+#         grain="warm",
+#     )
+#     config_to_audio(config, "indian_wedding.wav", duration=20.0)
+#     print("   Saved: indian_wedding.wav")
+
+#     # Example 2: From dict (simulating JSON from LLM)
+#     print("\n2. Generating from dict (Dark Electronic)...")
+#     dark_config = {
+#         "tempo": 0.42,
+#         "root": "a",
+#         "mode": "minor",
+#         "brightness": 0.4,
+#         "space": 0.6,
+#         "density": 6,
+#         "layers": {
+#             "bass": "pulsing",
+#             "pad": "dark_sustained",
+#             "melody": "arp_melody",
+#             "rhythm": "electronic",
+#             "texture": "shimmer",
+#             "accent": "bells",
+#         },
+#         "motion": 0.65,
+#         "attack": "sharp",
+#         "stereo": 0.7,
+#         "depth": True,
+#         "echo": 0.5,
+#         "human": 0.0,
+#         "grain": "gritty",
+#     }
+#     dict_to_audio(dark_config, "dark_electronic.wav", duration=20.0)
+#     print("   Saved: dark_electronic.wav")
+
+#     # Example 3: From vibe string
+#     print("\n3. Generating from vibe string (Underwater Cave)...")
+#     generate_from_vibe(
+#         "slow, peaceful, underwater cave, bioluminescence", "underwater_cave.wav", duration=20.0
+#     )
+#     print("   Saved: underwater_cave.wav")
+
+#     print("\n" + "=" * 50)
+
+#     # Example 4: Morph between two configs
+#     print("\n4. Generating morph (Morning → Evening)...")
+
+#     morning = MusicConfig(
+#         tempo=0.30,
+#         root="c",
+#         mode="major",
+#         brightness=0.6,
+#         space=0.8,
+#         bass="drone",
+#         pad="warm_slow",
+#         melody="minimal",
+#         motion=0.3,
+#         attack="soft",
+#         echo=0.7,
+#     )
+
+#     evening = MusicConfig(
+#         tempo=0.42,
+#         root="a",
+#         mode="minor",
+#         brightness=0.45,
+#         space=0.6,
+#         bass="pulsing",
+#         pad="dark_sustained",
+#         melody="arp_melody",
+#         motion=0.65,
+#         attack="medium",
+#         echo=0.5,
+#     )
+
+#     # Generate 2-minute morph with overlap-add (no volume dips)
+#     audio = generate_tween_with_automation(morning, evening, duration=120.0)
+#     # audio = assemble(morning, duration=30.0)  # Just morning, no morphing
+
+#     sf.write("morning_to_evening.wav", audio, SAMPLE_RATE)
+#     print("   Saved: morning_to_evening.wav")
+
+#     print("\nDone! Generated 4 audio files.")

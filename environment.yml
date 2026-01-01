@@ -7,25 +7,21 @@ dependencies:
   - scipy
   - pip
   - pip:
-    # 1. Audio I/O
+    # Audio
     - soundfile
     
-    # 2. LLM - MLX for Apple Silicon (replaces llama-cpp-python)
+    # LLM - MLX
     - mlx>=0.22
     - mlx-lm>=0.22
-    
-    # 3. LLM Routing (optional - for multi-provider support)
-    # Use openai provider to talk to mlx-lm server
-    - litellm
+    - llm-structured-output  # MLX-native JSON schema
     - "outlines[mlxlm]"    
-    - python-dotenv
     
-    # 4. Semantic Engine (if using embeddings)
+    # Embeddings
     - sentence-transformers
     - torch
     - scikit-learn
     
-    # 5. UI & App Frameworks
+    # UI
     - textual>=0.58
     - textual-serve>=1.0
     - rich
@@ -33,11 +29,12 @@ dependencies:
     - rumps>=0.4
     - pyinstaller
     
-    # 6. Utilities
+    # Utils
     - dependency-injector>=4.42
     - pyperclip>=1.8
+    - python-dotenv
     
-    # 7. Dev / Testing
+    # Dev
     - pyright>=1.1
     - pytest>=7.4
     - pytest-asyncio>=0.23
