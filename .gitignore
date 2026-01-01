@@ -1,17 +1,53 @@
+
+# --- System Junk ---
+
+.DS_Store
+*.log
 __pycache__/
 *.pyc
+
+# --- Environments ---
+
+# Never commit your virtual environments
+env/
+venv/
+.conda/
+.venv/
 .env
 *.env
-.DS_Store
+
+# --- Heavy Assets (The Binaries) ---
+
+# 1. Models: We download these via 'make download-models'
+models/
+*.ckpt
+*.tar
+
+# 2. Audio Assets: SoundFonts are huge (30MB+)
+assets/*.sf2
+assets/*.wav
+assets/*.mp3
+
+# 3. Build/Distribution Artifacts (PyInstaller output)
+build/
+dist/
+*.spec
+
+# --- Pytest, Ruff, Coverage ---
+
 .pytest_cache/
 .ruff_cache/
 .coverage
-.venv
-dist/
-build/
-.chats/
+
+# --- User Settings ---
+
 .vscode/
+
+# --- Miscellaneous ---
+
+.chats/
 .codex/*
 !.codex/setup.sh
 **/repomix-output.xml
 docs/plans/**/*.md
+

@@ -51,18 +51,6 @@ class _DiagnosticsTextArea(TextArea):
 class DiagnosticsHeader(ChromeHeader):
     app: "DiagnosticsApp"
 
-    def _on_click(self) -> None:
-        return
-
-    def watch_tall(self, tall: bool) -> None:
-        self.set_class(tall, "-tall")
-
-    def on_mouse_down(self, event: events.MouseDown) -> None:
-        if event.button == 1:
-            app = self.app
-            assert isinstance(app, DiagnosticsApp)
-            app.action_show_help()
-
 
 class DiagnosticsApp(CopySupportApp):
     """Textual log viewer for diagnostics."""
@@ -206,7 +194,7 @@ class DiagnosticsApp(CopySupportApp):
         self._help = Static(help_text, id="help")
 
     def compose(self) -> ComposeResult:
-        yield DiagnosticsHeader(show_clock=False)
+        yield DiagnosticsHeader(show_clock=True)
         yield self._help
         yield self._size_warning
         with Horizontal(id="search-bar"):

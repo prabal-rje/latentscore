@@ -32,7 +32,7 @@ Maintaining strict type integrity is **required for all merges**.
 
 ## ⚠️ MANDATORY: Write Plan First
 
-**You MUST always use the `write-plan` skill** before executing any task.
+**You MUST always use the `writing-plans` skill** before executing any task.
 
 - **Plan first, then act.**
 - Do not start writing code or running shell commands until you have established a plan.
@@ -42,7 +42,7 @@ Maintaining strict type integrity is **required for all merges**.
 
 ## ⚠️ MANDATORY: Use Context-Appropriate Skills
 
-**You MUST invoke skills based on task context**, in addition to the `write-plan` requirement.
+**You MUST invoke skills based on task context**, in addition to the `writing-plans` requirement.
 
 - Use `systematic-debugging` for bug investigations, regressions, or unclear behavior before making changes.
 - Use `writing-plans` when the user asks for a plan or when multi-step planning is needed.

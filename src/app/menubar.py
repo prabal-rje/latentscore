@@ -492,7 +492,7 @@ class MenuBarApp(rumps.App):
             cmd.extend(["--screen-fraction", str(self.diagnostics_window_screen_fraction)])
         cmd.append("--resizable" if self.diagnostics_window_resizable else "--no-resizable")
         cmd.append("--frameless" if self.window_frameless else "--no-frameless")
-        cmd.append("--no-easy-drag")
+        cmd.append("--easy-drag" if self.window_easy_drag else "--no-easy-drag")
         return cmd
 
     def _find_free_port(self) -> int:

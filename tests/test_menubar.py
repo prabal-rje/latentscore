@@ -120,6 +120,19 @@ def test_diagnostics_webview_command_includes_screen_fraction(monkeypatch) -> No
     assert "--minimize-signal" in cmd
     assert "--resizable" in cmd
     assert "--frameless" in cmd
+    assert "--easy-drag" in cmd
+
+
+def test_diagnostics_webview_command_respects_easy_drag(monkeypatch) -> None:
+    app = MenuBarApp(
+        enable_alerts=False,
+        initialize=False,
+        window_easy_drag=False,
+    )
+
+    monkeypatch.setattr("app.menubar.importlib.util.find_spec", lambda name: object())
+    cmd = app._diagnostics_webview_command("http://127.0.0.1:4242")
+    assert cmd is not None
     assert "--no-easy-drag" in cmd
 
 

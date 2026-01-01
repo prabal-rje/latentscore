@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.copy_hints import COPY_HINT_MESSAGE
-from app.diagnostics_tui import DiagnosticsApp
+from app.diagnostics_tui import DiagnosticsApp, DiagnosticsHeader
 from app.tui_base import HeaderControl
 
 
@@ -112,3 +112,13 @@ async def test_diagnostics_tui_shows_traffic_lights(tmp_path) -> None:
         assert pilot.app.query_one("#tl-close", HeaderControl)
         assert pilot.app.query_one("#tl-minimize", HeaderControl)
         assert pilot.app.query_one("#tl-menu", HeaderControl)
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_header_click_does_not_show_help(tmp_path) -> None:
+    async with DiagnosticsApp(tmp_path).run_test() as pilot:
+        help_widget = pilot.app.query_one("#help")
+        assert "visible" not in help_widget.classes
+        header = pilot.app.query_one(DiagnosticsHeader)
+        await pilot.click(header, offset=(1, 0))
+        assert "visible" not in help_widget.classes

@@ -412,8 +412,7 @@ SPLASH_WIDTH = 320
 SPLASH_HEIGHT = 80
 SPLASH_BACKGROUND_COLOR = "#000000"
 SPLASH_FONT_DATA = (
-    Path(__file__)
-    .with_name("press_start_2p.b64")
+    (Path(__file__).parents[2] / "assets" / "fonts" / "press_start_2p.b64")
     .read_text(encoding="utf-8")
     .strip()
     .replace("\n", "")
