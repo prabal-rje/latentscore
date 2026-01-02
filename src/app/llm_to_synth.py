@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import json
@@ -20,14 +21,10 @@ class VibeConfig(BaseModel):
 
     # Meta
     justification: str = Field(
-        description="Ultimate reasoning tying all parameter choices together for this config and how it matches the requested vibe. Talk about the CORE, the LAYERS, and other details."
+        description="Ultimate reasoning tying all parameter choices together for this config and how it matches the requested vibe. Talk about the CORE, the LAYERS, MELODY POLICY, and other details."
     )    
 
-
-    # # Core parameters and justification
-    # core_justification: str = Field(
-    #     description="Sonic reasoning for the 'core' parameters: tempo, root, mode, brightness, space, density."
-    # )
+    # Core parameters
     tempo: Literal["very_slow", "slow", "medium", "fast", "very_fast"] = Field(
         description="Speed/energy. very_slow=glacial, medium=moderate, very_fast=frenetic"
     )
@@ -47,18 +44,15 @@ class VibeConfig(BaseModel):
         description="Layer count. 2=minimal, 4=balanced, 6=lush/thick"
     )
 
-    # Layers and justification
-    # layers_justification: str = Field(
-    #     description="Sonic reasoning for 'layers' parameters: bass, pad, melody, rhythm, texture, accent."
-    # )
+    # Layers
     bass: Literal["drone", "sustained", "pulsing", "walking", "fifth_drone", "sub_pulse"] = Field(
         description="Bass character. drone=static, pulsing=rhythmic, walking=melodic movement"
     )
     pad: Literal["warm_slow", "dark_sustained", "cinematic", "thin_high", "ambient_drift", "stacked_fifths"] = Field(
         description="Pad texture. warm_slow=cozy, cinematic=epic, thin_high=ethereal"
     )
-    melody: Literal["contemplative", "rising", "falling", "minimal", "ornamental", "arp_melody"] = Field(
-        description="Melodic contour. rising=hopeful, falling=melancholic, minimal=sparse"
+    melody: Literal["procedural", "contemplative", "rising", "falling", "minimal", "ornamental", "arp_melody"] = Field(
+        description="Melodic style. procedural=generated with policy knobs, contemplative=slow sparse, arp_melody=fast arpeggios"
     )
     rhythm: Literal["none", "minimal", "heartbeat", "soft_four", "hats_only", "electronic"] = Field(
         description="Percussion style. none=ambient, heartbeat=organic pulse, electronic=synthetic"
@@ -70,10 +64,7 @@ class VibeConfig(BaseModel):
         description="Sparse melodic accents. bells=crystalline, pluck=intimate, chime=mystical"
     )
     
-    # V2 Parameters and justification
-    # v2_justification: str = Field(
-    #     description="Reasoning for 'V2' parameters: motion, attack, stereo, depth, echo, human, grain."
-    # )
+    # V2 Parameters
     motion: Literal["static", "slow", "medium", "fast", "chaotic"] = Field(
         description="LFO/modulation rate. static=frozen, medium=breathing, chaotic=constantly evolving"
     )
@@ -93,8 +84,49 @@ class VibeConfig(BaseModel):
     grain: Literal["clean", "warm", "gritty"] = Field(
         description="Oscillator character. clean=digital, warm=analog, gritty=distorted"
     )
+    
+    # ===== MELODY POLICY KNOBS (NEW!) =====
+    # These control the procedural melody generator when melody="procedural"
+    
+    melody_phrase_len: Literal[2, 4, 8] = Field(
+        default=4,
+        description="Phrase length in bars. 2=short punchy phrases, 4=balanced, 8=long flowing phrases"
+    )
+    melody_density: Literal["sparse", "light", "medium", "dense", "very_dense"] = Field(
+        default="medium",
+        description="Note density. sparse=few notes, medium=balanced, very_dense=many notes per bar"
+    )
+    melody_syncopation: Literal["none", "light", "medium", "heavy"] = Field(
+        default="light",
+        description="Off-beat emphasis. none=straight on-beat, heavy=lots of anticipation/delay"
+    )
+    melody_swing: Literal["straight", "light", "medium", "heavy"] = Field(
+        default="straight",
+        description="Swing feel. straight=even 8ths, heavy=jazz triplet feel"
+    )
+    melody_step_vs_leap: Literal["jumpy", "mixed", "smooth"] = Field(
+        default="smooth",
+        description="Interval preference. jumpy=big leaps, smooth=stepwise motion"
+    )
+    melody_chromatic: Literal["diatonic", "light", "moderate", "jazzy"] = Field(
+        default="diatonic",
+        description="Chromatic approach tones. diatonic=in-scale only, jazzy=bebop-style chromaticism"
+    )
+    melody_motif_repeat: Literal["never", "rare", "sometimes", "often", "always"] = Field(
+        default="sometimes",
+        description="Motif repetition. never=always new, always=high repetition for memorable themes"
+    )
+    melody_cadence_strength: Literal["weak", "medium", "strong"] = Field(
+        default="medium",
+        description="Phrase ending strength. weak=ambiguous, strong=clear resolution to root"
+    )
+    melody_tension_curve: Literal["flat", "arc", "ramp", "waves"] = Field(
+        default="arc",
+        description="Tension shape within phrase. arc=build-release, ramp=building, waves=oscillating"
+    )
 
-# Scored config: a single VibeConfig with a quality score (for single-call generation)
+
+# Scored config: a single VibeConfig with a quality score
 class ScoredVibeConfig(BaseModel):
     """A VibeConfig with a self-assessed quality score."""
     config: VibeConfig
@@ -112,11 +144,20 @@ STEREO_MAP = {"mono": 0.0, "narrow": 0.25, "medium": 0.5, "wide": 0.75, "ultra_w
 ECHO_MAP = {"none": 0.0, "subtle": 0.25, "medium": 0.5, "heavy": 0.75, "infinite": 0.95}
 HUMAN_MAP = {"robotic": 0.0, "tight": 0.15, "natural": 0.3, "loose": 0.5, "drunk": 0.8}
 
+# NEW: Melody policy mappings
+MELODY_DENSITY_MAP = {"sparse": 0.2, "light": 0.35, "medium": 0.5, "dense": 0.7, "very_dense": 0.9}
+MELODY_SYNCOPATION_MAP = {"none": 0.0, "light": 0.15, "medium": 0.3, "heavy": 0.5}
+MELODY_SWING_MAP = {"straight": 0.0, "light": 0.2, "medium": 0.4, "heavy": 0.6}
+MELODY_STEP_VS_LEAP_MAP = {"jumpy": 0.3, "mixed": 0.6, "smooth": 0.9}
+MELODY_CHROMATIC_MAP = {"diatonic": 0.0, "light": 0.1, "moderate": 0.2, "jazzy": 0.35}
+MELODY_MOTIF_REPEAT_MAP = {"never": 0.0, "rare": 0.15, "sometimes": 0.3, "often": 0.5, "always": 0.7}
+MELODY_CADENCE_MAP = {"weak": 0.3, "medium": 0.6, "strong": 0.9}
+
 FEW_SHOT_EXAMPLES = """
 Example 1:
 Vibe: "dark ambient underwater cave with bioluminescence"
 {
-  "justification": "Low tempo for stillness. Dorian mode adds mystery. High space simulates underwater reverb. Shimmer texture for bioluminescent sparkles. Sub-bass depth for pressure. Low brightness = murky water filtering light.",
+  "justification": "Low tempo for stillness. Dorian mode adds mystery. High space simulates underwater reverb. Shimmer texture for bioluminescent sparkles. Sub-bass depth for pressure. Low brightness = murky water filtering light. Procedural melody with sparse density and long phrases for ambient feel.",
   "tempo": "very_slow",
   "root": "d",
   "mode": "dorian",
@@ -125,7 +166,7 @@ Vibe: "dark ambient underwater cave with bioluminescence"
   "density": 4,
   "bass": "drone",
   "pad": "dark_sustained",
-  "melody": "minimal",
+  "melody": "procedural",
   "rhythm": "none",
   "texture": "shimmer_slow",
   "accent": "none",
@@ -135,63 +176,90 @@ Vibe: "dark ambient underwater cave with bioluminescence"
   "depth": true,
   "echo": "heavy",
   "human": "tight",
-  "grain": "warm"
+  "grain": "warm",
+  "melody_phrase_len": 8,
+  "melody_density": "sparse",
+  "melody_syncopation": "none",
+  "melody_swing": "straight",
+  "melody_step_vs_leap": "smooth",
+  "melody_chromatic": "diatonic",
+  "melody_motif_repeat": "rare",
+  "melody_cadence_strength": "weak",
+  "melody_tension_curve": "flat"
 }
 
 Example 2:
-Vibe: "uplifting sunrise over mountains"
+Vibe: "bouncy 8-bit video game like Mario"
 {
-  "justification": "Rising melody mirrors sun ascending. Major mode = hope. Increasing brightness like dawn light. Medium tempo = gentle awakening. Bells accent = morning clarity. Wide stereo = vast landscape.",
-  "tempo": "medium",
+  "justification": "Fast tempo for energy. Major mode = playful happiness. Sharp attack = punchy 8-bit transients. Gritty grain = bit-crushed character. Procedural melody with high density, motif repetition for memorable themes, and strong cadences for clear phrase endings.",
+  "tempo": "fast",
   "root": "c",
   "mode": "major",
-  "brightness": "bright",
-  "space": "large",
+  "brightness": "very_bright",
+  "space": "dry",
   "density": 4,
-  "bass": "sustained",
-  "pad": "warm_slow",
-  "melody": "rising",
-  "rhythm": "minimal",
-  "texture": "shimmer",
+  "bass": "pulsing",
+  "pad": "thin_high",
+  "melody": "procedural",
+  "rhythm": "electronic",
+  "texture": "none",
   "accent": "bells",
-  "motion": "medium",
-  "attack": "soft",
-  "stereo": "wide",
+  "motion": "fast",
+  "attack": "sharp",
+  "stereo": "narrow",
   "depth": false,
-  "echo": "medium",
-  "human": "natural",
-  "grain": "clean"
+  "echo": "subtle",
+  "human": "robotic",
+  "grain": "gritty",
+  "melody_phrase_len": 4,
+  "melody_density": "dense",
+  "melody_syncopation": "medium",
+  "melody_swing": "straight",
+  "melody_step_vs_leap": "mixed",
+  "melody_chromatic": "diatonic",
+  "melody_motif_repeat": "often",
+  "melody_cadence_strength": "strong",
+  "melody_tension_curve": "arc"
 }
 
 Example 3:
-Vibe: "cyberpunk nightclub in tokyo"
+Vibe: "jazz cafe at night, smooth and sophisticated"
 {
-  "justification": "Fast tempo for dance energy. Electronic rhythm = synthetic. Gritty grain = distorted club speakers. Sharp attack = punchy. Low space = claustrophobic club. High brightness = neon cutting through haze.",
-  "tempo": "fast",
-  "root": "a",
-  "mode": "minor",
-  "brightness": "bright",
-  "space": "small",
-  "density": 6,
-  "bass": "pulsing",
-  "pad": "cinematic",
-  "melody": "arp_melody",
-  "rhythm": "electronic",
+  "justification": "Medium tempo for relaxed swing. Dorian mode = jazzy sophistication. Walking bass = classic jazz movement. Procedural melody with swing, chromatic approaches for bebop flavor, varied motifs like improvisation.",
+  "tempo": "medium",
+  "root": "f",
+  "mode": "dorian",
+  "brightness": "medium",
+  "space": "medium",
+  "density": 5,
+  "bass": "walking",
+  "pad": "warm_slow",
+  "melody": "procedural",
+  "rhythm": "soft_four",
   "texture": "none",
-  "accent": "none",
-  "motion": "fast",
-  "attack": "sharp",
-  "stereo": "wide",
-  "depth": true,
+  "accent": "pluck",
+  "motion": "medium",
+  "attack": "medium",
+  "stereo": "medium",
+  "depth": false,
   "echo": "subtle",
-  "human": "robotic",
-  "grain": "gritty"
+  "human": "natural",
+  "grain": "warm",
+  "melody_phrase_len": 4,
+  "melody_density": "medium",
+  "melody_syncopation": "medium",
+  "melody_swing": "medium",
+  "melody_step_vs_leap": "mixed",
+  "melody_chromatic": "jazzy",
+  "melody_motif_repeat": "rare",
+  "melody_cadence_strength": "medium",
+  "melody_tension_curve": "arc"
 }
 
 Example 4:
 Vibe: "peaceful meditation in a zen garden"
 {
-  "justification": "Very slow tempo for mindfulness. Minimal density reduces mental clutter. Soft attacks = non-jarring. Natural human feel = organic imperfection. Chime accents = temple bells. Clean grain = clarity of mind.",
+  "justification": "Very slow tempo for mindfulness. Minimal density reduces mental clutter. Soft attacks = non-jarring. Natural human feel = organic imperfection. Chime accents = temple bells. Minimal procedural melody with sparse notes and weak cadences for continuous flow.",
   "tempo": "very_slow",
   "root": "f",
   "mode": "major",
@@ -200,7 +268,7 @@ Vibe: "peaceful meditation in a zen garden"
   "density": 2,
   "bass": "drone",
   "pad": "ambient_drift",
-  "melody": "minimal",
+  "melody": "procedural",
   "rhythm": "none",
   "texture": "breath",
   "accent": "chime",
@@ -210,13 +278,22 @@ Vibe: "peaceful meditation in a zen garden"
   "depth": false,
   "echo": "medium",
   "human": "natural",
-  "grain": "clean"
+  "grain": "clean",
+  "melody_phrase_len": 8,
+  "melody_density": "sparse",
+  "melody_syncopation": "none",
+  "melody_swing": "straight",
+  "melody_step_vs_leap": "smooth",
+  "melody_chromatic": "diatonic",
+  "melody_motif_repeat": "sometimes",
+  "melody_cadence_strength": "weak",
+  "melody_tension_curve": "flat"
 }
 
 Example 5:
 Vibe: "epic cinematic battle scene"
 {
-  "justification": "High tempo for urgency. Max density for wall of sound. Minor mode = tension. Sharp attacks = aggressive. Cinematic pad = orchestral weight. Depth for visceral sub-bass hits. Robotic human = mechanical precision.",
+  "justification": "Fast tempo for urgency. Max density for wall of sound. Minor mode = tension. Sharp attacks = aggressive hits. Cinematic pad for orchestral weight. Procedural melody with ramp tension building to climax, strong cadences for impact.",
   "tempo": "very_fast",
   "root": "d",
   "mode": "minor",
@@ -225,7 +302,7 @@ Vibe: "epic cinematic battle scene"
   "density": 6,
   "bass": "pulsing",
   "pad": "cinematic",
-  "melody": "rising",
+  "melody": "procedural",
   "rhythm": "soft_four",
   "texture": "none",
   "accent": "bells",
@@ -235,88 +312,56 @@ Vibe: "epic cinematic battle scene"
   "depth": true,
   "echo": "subtle",
   "human": "robotic",
-  "grain": "warm"
+  "grain": "warm",
+  "melody_phrase_len": 4,
+  "melody_density": "dense",
+  "melody_syncopation": "light",
+  "melody_swing": "straight",
+  "melody_step_vs_leap": "mixed",
+  "melody_chromatic": "light",
+  "melody_motif_repeat": "often",
+  "melody_cadence_strength": "strong",
+  "melody_tension_curve": "ramp"
 }
 
 Example 6:
-Vibe: "rainy afternoon in a cozy coffee shop"
+Vibe: "lo-fi hip hop beats to study to"
 {
-  "justification": "Slow tempo for relaxation. Warm grain = vintage speakers. Vinyl crackle = nostalgic ambiance. Medium brightness = soft indoor light. Pluck accent = acoustic guitar feel. Natural human = live performance intimacy.",
+  "justification": "Slow tempo for relaxation. Warm grain = vintage vibe. Vinyl crackle = nostalgic lo-fi character. Procedural melody with swing for groove, sparse-to-medium density, waves tension for gentle movement.",
   "tempo": "slow",
-  "root": "g",
-  "mode": "major",
-  "brightness": "medium",
+  "root": "d",
+  "mode": "dorian",
+  "brightness": "dark",
   "space": "small",
-  "density": 3,
+  "density": 4,
   "bass": "sustained",
   "pad": "warm_slow",
-  "melody": "contemplative",
+  "melody": "procedural",
   "rhythm": "minimal",
   "texture": "vinyl_crackle",
   "accent": "pluck",
   "motion": "slow",
   "attack": "soft",
-  "stereo": "narrow",
-  "depth": false,
-  "echo": "subtle",
-  "human": "natural",
-  "grain": "warm"
-}
-
-Example 7:
-Vibe: "floating through deep space alone"
-{
-  "justification": "Very slow tempo = weightlessness. Vast space = infinite void. Thin high pad = cold emptiness. Stars texture = distant galaxies. Ultra wide stereo = disorientation. No rhythm = timelessness. Minor mode = isolation.",
-  "tempo": "very_slow",
-  "root": "b",
-  "mode": "minor",
-  "brightness": "dark",
-  "space": "vast",
-  "density": 3,
-  "bass": "sub_pulse",
-  "pad": "thin_high",
-  "melody": "falling",
-  "rhythm": "none",
-  "texture": "stars",
-  "accent": "none",
-  "motion": "static",
-  "attack": "soft",
-  "stereo": "ultra_wide",
-  "depth": true,
-  "echo": "infinite",
-  "human": "robotic",
-  "grain": "clean"
-}
-
-Example 8:
-Vibe: "ancient forest at twilight with fireflies"
-{
-  "justification": "Slow tempo = nature's pace. Dorian mode = ancient mystery. Shimmer = firefly blinks. Breath texture = wind through leaves. Large space = forest canopy. Natural human = organic life. Warm grain = earthy tones.",
-  "tempo": "slow",
-  "root": "e",
-  "mode": "dorian",
-  "brightness": "dark",
-  "space": "large",
-  "density": 4,
-  "bass": "drone",
-  "pad": "ambient_drift",
-  "melody": "ornamental",
-  "rhythm": "none",
-  "texture": "shimmer_slow",
-  "accent": "chime",
-  "motion": "slow",
-  "attack": "soft",
-  "stereo": "wide",
+  "stereo": "medium",
   "depth": false,
   "echo": "medium",
   "human": "natural",
-  "grain": "warm"
+  "grain": "warm",
+  "melody_phrase_len": 8,
+  "melody_density": "light",
+  "melody_syncopation": "light",
+  "melody_swing": "medium",
+  "melody_step_vs_leap": "smooth",
+  "melody_chromatic": "light",
+  "melody_motif_repeat": "sometimes",
+  "melody_cadence_strength": "weak",
+  "melody_tension_curve": "waves"
 }
 
-Example 9:
+Example 7:
 Vibe: "80s synthwave driving at night"
 {
-  "justification": "Fast tempo = highway speed. Gritty grain = analog synths. Arp melody = classic synthwave. Electronic rhythm = drum machine. Bright = neon lights. Pulsing bass = driving force. Sharp attack = punchy gates.",
+  "justification": "Fast tempo = highway speed. Gritty grain = analog synths. Arp melody = classic synthwave. Electronic rhythm = drum machine. Bright = neon lights. Procedural could work but arp_melody fits the genre better.",
   "tempo": "fast",
   "root": "a",
   "mode": "minor",
@@ -335,63 +380,22 @@ Vibe: "80s synthwave driving at night"
   "depth": true,
   "echo": "medium",
   "human": "robotic",
-  "grain": "gritty"
+  "grain": "gritty",
+  "melody_phrase_len": 4,
+  "melody_density": "dense",
+  "melody_syncopation": "light",
+  "melody_swing": "straight",
+  "melody_step_vs_leap": "mixed",
+  "melody_chromatic": "diatonic",
+  "melody_motif_repeat": "often",
+  "melody_cadence_strength": "medium",
+  "melody_tension_curve": "arc"
 }
 
-Example 10:
-Vibe: "sad piano in an empty concert hall"
-{
-  "justification": "Slow tempo = grief. Minor mode = sadness. Vast space = empty hall reverb. Minimal density = solo instrument. Falling melody = descending tears. Clean grain = acoustic clarity. Loose human = emotional rubato.",
-  "tempo": "slow",
-  "root": "c#",
-  "mode": "minor",
-  "brightness": "medium",
-  "space": "vast",
-  "density": 2,
-  "bass": "sustained",
-  "pad": "thin_high",
-  "melody": "falling",
-  "rhythm": "none",
-  "texture": "none",
-  "accent": "pluck",
-  "motion": "static",
-  "attack": "soft",
-  "stereo": "medium",
-  "depth": false,
-  "echo": "heavy",
-  "human": "loose",
-  "grain": "clean"
-}
-
-Example 11:
-Vibe: "tribal drums around a bonfire"
-{
-  "justification": "Medium tempo = dancing pulse. Heartbeat rhythm = primal drums. Warm grain = fire crackle. Dorian mode = ancient ritual. Tight human = synchronized tribe. Medium space = outdoor clearing. Sharp attack = drum hits.",
-  "tempo": "medium",
-  "root": "d",
-  "mode": "dorian",
-  "brightness": "dark",
-  "space": "medium",
-  "density": 4,
-  "bass": "pulsing",
-  "pad": "dark_sustained",
-  "melody": "minimal",
-  "rhythm": "heartbeat",
-  "texture": "breath",
-  "accent": "none",
-  "motion": "medium",
-  "attack": "sharp",
-  "stereo": "medium",
-  "depth": true,
-  "echo": "subtle",
-  "human": "tight",
-  "grain": "warm"
-}
-
-Example 12:
+Example 8:
 Vibe: "haunted victorian mansion at midnight"
 {
-  "justification": "Very slow tempo = creeping dread. Minor mode = horror. Very dark brightness = shadows. Vast space = cavernous halls. Chime accent = grandfather clock. Walking bass = footsteps. Chaotic motion = paranormal activity.",
+  "justification": "Very slow tempo = creeping dread. Minor mode = horror. Very dark brightness = shadows. Vast space = cavernous halls. Procedural melody with chaotic motion, sparse notes, chromatic approaches for unsettling dissonance.",
   "tempo": "very_slow",
   "root": "g#",
   "mode": "minor",
@@ -400,7 +404,7 @@ Vibe: "haunted victorian mansion at midnight"
   "density": 3,
   "bass": "walking",
   "pad": "dark_sustained",
-  "melody": "falling",
+  "melody": "procedural",
   "rhythm": "none",
   "texture": "breath",
   "accent": "chime",
@@ -410,13 +414,22 @@ Vibe: "haunted victorian mansion at midnight"
   "depth": true,
   "echo": "heavy",
   "human": "loose",
-  "grain": "warm"
+  "grain": "warm",
+  "melody_phrase_len": 8,
+  "melody_density": "sparse",
+  "melody_syncopation": "none",
+  "melody_swing": "straight",
+  "melody_step_vs_leap": "jumpy",
+  "melody_chromatic": "moderate",
+  "melody_motif_repeat": "never",
+  "melody_cadence_strength": "weak",
+  "melody_tension_curve": "ramp"
 }
 
-Example 13:
+Example 9:
 Vibe: "cheerful summer beach party"
 {
-  "justification": "Fast tempo = party energy. Major mode = happiness. Very bright = sunshine. Small space = outdoor open air. Hats rhythm = upbeat. Rising melody = good vibes. Wide stereo = crowd spread out.",
+  "justification": "Fast tempo = party energy. Major mode = happiness. Very bright = sunshine. Small space = outdoor open air. Procedural melody with high density, strong motif repetition for catchy hooks, strong cadences.",
   "tempo": "fast",
   "root": "c",
   "mode": "major",
@@ -425,7 +438,7 @@ Vibe: "cheerful summer beach party"
   "density": 5,
   "bass": "pulsing",
   "pad": "warm_slow",
-  "melody": "rising",
+  "melody": "procedural",
   "rhythm": "hats_only",
   "texture": "shimmer",
   "accent": "bells",
@@ -435,182 +448,50 @@ Vibe: "cheerful summer beach party"
   "depth": false,
   "echo": "subtle",
   "human": "natural",
-  "grain": "clean"
+  "grain": "clean",
+  "melody_phrase_len": 4,
+  "melody_density": "dense",
+  "melody_syncopation": "medium",
+  "melody_swing": "light",
+  "melody_step_vs_leap": "mixed",
+  "melody_chromatic": "diatonic",
+  "melody_motif_repeat": "often",
+  "melody_cadence_strength": "strong",
+  "melody_tension_curve": "arc"
 }
 
-Example 14:
-Vibe: "lonely robot contemplating existence"
+Example 10:
+Vibe: "3AM coding session deep focus"
 {
-  "justification": "Slow tempo = processing thoughts. Minor mode = melancholy. Clean grain = digital precision. Robotic human = mechanical perfection. Arp melody = algorithmic patterns. Thin high pad = cold circuits. Medium echo = memory loops.",
+  "justification": "Slow tempo = sustained concentration. Dorian = mysterious but not sad. Sparse density = minimal distraction. Procedural melody with very low density, long phrases, no syncopation for unobtrusive background.",
   "tempo": "slow",
-  "root": "f#",
-  "mode": "minor",
-  "brightness": "medium",
+  "root": "e",
+  "mode": "dorian",
+  "brightness": "dark",
   "space": "medium",
   "density": 3,
   "bass": "drone",
-  "pad": "thin_high",
-  "melody": "arp_melody",
-  "rhythm": "minimal",
-  "texture": "none",
-  "accent": "bells",
-  "motion": "slow",
-  "attack": "medium",
-  "stereo": "narrow",
-  "depth": false,
-  "echo": "medium",
-  "human": "robotic",
-  "grain": "clean"
-}
-
-Example 15:
-Vibe: "mystical arabian desert night"
-{
-  "justification": "Medium tempo = camel caravan pace. Dorian mode = middle eastern feel. Ornamental melody = arabic scales. Warm grain = sand and heat. Large space = open desert. Stars texture = night sky. Breath texture = desert wind.",
-  "tempo": "medium",
-  "root": "d",
-  "mode": "dorian",
-  "brightness": "dark",
-  "space": "large",
-  "density": 4,
-  "bass": "fifth_drone",
   "pad": "ambient_drift",
-  "melody": "ornamental",
-  "rhythm": "minimal",
-  "texture": "stars",
-  "accent": "chime",
-  "motion": "medium",
-  "attack": "soft",
-  "stereo": "wide",
-  "depth": false,
-  "echo": "medium",
-  "human": "natural",
-  "grain": "warm"
-}
-
-Example 16:
-Vibe: "intense workout at the gym"
-{
-  "justification": "Very fast tempo = high BPM motivation. Sharp attack = punchy transients. Electronic rhythm = four on floor. Gritty grain = distorted energy. Bright = adrenaline. Max density = wall of sound. Robotic = machine-like precision.",
-  "tempo": "very_fast",
-  "root": "e",
-  "mode": "minor",
-  "brightness": "bright",
-  "space": "dry",
-  "density": 6,
-  "bass": "pulsing",
-  "pad": "cinematic",
-  "melody": "rising",
-  "rhythm": "electronic",
-  "texture": "none",
-  "accent": "none",
-  "motion": "chaotic",
-  "attack": "sharp",
-  "stereo": "wide",
-  "depth": true,
-  "echo": "none",
-  "human": "robotic",
-  "grain": "gritty"
-}
-
-Example 17:
-Vibe: "gentle lullaby for a sleeping baby"
-{
-  "justification": "Very slow tempo = soothing. Major mode = comfort and safety. Very soft attack = non-startling. Minimal density = simple and calming. Clean grain = pure tones. Narrow stereo = intimate closeness. Natural human = mother's touch.",
-  "tempo": "very_slow",
-  "root": "f",
-  "mode": "major",
-  "brightness": "dark",
-  "space": "small",
-  "density": 2,
-  "bass": "drone",
-  "pad": "warm_slow",
-  "melody": "falling",
+  "melody": "procedural",
   "rhythm": "none",
-  "texture": "breath",
+  "texture": "stars",
   "accent": "none",
-  "motion": "static",
+  "motion": "slow",
   "attack": "soft",
-  "stereo": "narrow",
-  "depth": false,
-  "echo": "subtle",
-  "human": "natural",
-  "grain": "clean"
-}
-
-Example 18:
-Vibe: "futuristic utopian city"
-{
-  "justification": "Medium tempo = efficient society. Major mode = optimism. Very bright = gleaming architecture. Clean grain = advanced technology. Rising melody = progress. Stacked fifths = harmonic perfection. Wide stereo = expansive cityscape.",
-  "tempo": "medium",
-  "root": "c",
-  "mode": "major",
-  "brightness": "very_bright",
-  "space": "large",
-  "density": 5,
-  "bass": "sustained",
-  "pad": "stacked_fifths",
-  "melody": "rising",
-  "rhythm": "minimal",
-  "texture": "shimmer",
-  "accent": "bells",
-  "motion": "medium",
-  "attack": "medium",
-  "stereo": "wide",
+  "stereo": "medium",
   "depth": false,
   "echo": "medium",
   "human": "tight",
-  "grain": "clean"
-}
-
-Example 19:
-Vibe: "drunk stumbling home at 3am"
-{
-  "justification": "Slow tempo = impaired movement. Drunk human = sloppy timing. Minor mode = regret. Dark brightness = streetlights. Walking bass = unsteady footsteps. Loose motion = swaying. Warm grain = blurred perception.",
-  "tempo": "slow",
-  "root": "a#",
-  "mode": "minor",
-  "brightness": "dark",
-  "space": "medium",
-  "density": 3,
-  "bass": "walking",
-  "pad": "dark_sustained",
-  "melody": "falling",
-  "rhythm": "minimal",
-  "texture": "vinyl_crackle",
-  "accent": "none",
-  "motion": "chaotic",
-  "attack": "soft",
-  "stereo": "wide",
-  "depth": false,
-  "echo": "heavy",
-  "human": "drunk",
-  "grain": "warm"
-}
-
-Example 20:
-Vibe: "majestic cathedral choir"
-{
-  "justification": "Slow tempo = reverence. Major mode = divine glory. Vast space = cathedral acoustics. Stacked fifths pad = choir harmonies. Rising melody = ascending to heaven. Heavy echo = stone walls. Soft attack = voices swelling.",
-  "tempo": "slow",
-  "root": "c",
-  "mode": "major",
-  "brightness": "medium",
-  "space": "vast",
-  "density": 5,
-  "bass": "drone",
-  "pad": "stacked_fifths",
-  "melody": "rising",
-  "rhythm": "none",
-  "texture": "breath",
-  "accent": "bells",
-  "motion": "slow",
-  "attack": "soft",
-  "stereo": "ultra_wide",
-  "depth": true,
-  "echo": "heavy",
-  "human": "natural",
-  "grain": "clean"
+  "grain": "clean",
+  "melody_phrase_len": 8,
+  "melody_density": "sparse",
+  "melody_syncopation": "none",
+  "melody_swing": "straight",
+  "melody_step_vs_leap": "smooth",
+  "melody_chromatic": "diatonic",
+  "melody_motif_repeat": "sometimes",
+  "melody_cadence_strength": "weak",
+  "melody_tension_curve": "flat"
 }
 """
 
@@ -620,9 +501,21 @@ You are a WORLD-CLASS music synthesis expert with an eye for detail and a deep u
 
 You've developed a system that allows you to generate music configurations that match a given vibe/mood description.
 
-Given a vibe/mood description, you previously generated following examples of synth configurations that match a particular vibe.
+The system now includes a PROCEDURAL MELODY GENERATOR with policy knobs that control:
+- Phrase structure (phrase_len)
+- Note density (how many notes per bar)
+- Syncopation (off-beat emphasis)
+- Swing (jazz triplet feel)
+- Step vs leap preference (smooth stepwise vs jumpy intervals)
+- Chromatic approach tones (diatonic vs jazzy)
+- Motif repetition (memorable themes vs constant variation)
+- Cadence strength (clear phrase endings vs ambiguous)
+- Tension curve (arc, ramp, waves, flat)
 
-Study these examples carefully and use THE MOST RELEVANT EXAMPLES TO THE GIVEN "VIBE" as inspiration for your next task.
+When melody="procedural", these policy knobs control the generated melody.
+For other melody types (contemplative, rising, falling, etc.), the policy knobs are ignored.
+
+Study these examples carefully and use THE MOST RELEVANT EXAMPLES TO THE GIVEN "VIBE" as inspiration.
 </role>
 
 <examples description="Examples of synth configurations that match a particular vibe">
@@ -631,15 +524,16 @@ Study these examples carefully and use THE MOST RELEVANT EXAMPLES TO THE GIVEN "
 
 <instructions>
 1. Generate ONE config for the vibe described in the <input> section.
-2. Include a justification explaining your sonic reasoning and your inspiration for the config based on the examples. Make sure to ONLY use the most relevant examples to the given "VIBE" in your justification.
-3. Provide a "score" from 0 to 100 rating how well this config captures the requested vibe. Be critical and honest - reserve 90+ for exceptional matches only.
-4. Output ONLY valid JSON in the following format:
+2. Include a justification explaining your sonic reasoning and your inspiration for the config based on the examples.
+3. When the vibe suggests melodic interest (games, jazz, pop), use melody="procedural" and set appropriate policy knobs.
+4. When the vibe is ambient/drone/minimal, you can use melody="minimal" or "procedural" with sparse settings.
+5. Provide a "score" from 0 to 100 rating how well this config captures the requested vibe.
+6. Output ONLY valid JSON in the following format:
 {{
   "config": {{ ... }},
   "score": <0-100>
 }}
-where config matches the structure in the examples, and score is your self-assessment (0-100) of how well it matches the vibe.
-5. Your answer should be a single JSON object matching this shape.
+where config matches the structure in the examples, and score is your self-assessment (0-100).
 </instructions>
 """
 
@@ -685,6 +579,41 @@ def vibe_to_scored_configs(vibe: str, num_runs: int = 3) -> List[ScoredVibeConfi
     return [_generate_single_config(vibe, i + 1) for i in range(num_runs)]
 
 
+def vibe_config_to_music_config(c: VibeConfig) -> Dict[str, Any]:
+    """Convert a VibeConfig to a MusicConfig-compatible dict."""
+    return {
+        "tempo": TEMPO_MAP[c.tempo],
+        "root": c.root,
+        "mode": c.mode,
+        "brightness": BRIGHTNESS_MAP[c.brightness],
+        "space": SPACE_MAP[c.space],
+        "density": c.density,
+        "bass": c.bass,
+        "pad": c.pad,
+        "melody": c.melody,
+        "rhythm": c.rhythm,
+        "texture": c.texture,
+        "accent": c.accent,
+        "motion": MOTION_MAP[c.motion],
+        "attack": c.attack,
+        "stereo": STEREO_MAP[c.stereo],
+        "depth": c.depth,
+        "echo": ECHO_MAP[c.echo],
+        "human": HUMAN_MAP[c.human],
+        "grain": c.grain,
+        # Melody policy parameters
+        "melody_phrase_len": c.melody_phrase_len,
+        "melody_density": MELODY_DENSITY_MAP[c.melody_density],
+        "melody_syncopation": MELODY_SYNCOPATION_MAP[c.melody_syncopation],
+        "melody_swing": MELODY_SWING_MAP[c.melody_swing],
+        "melody_step_vs_leap": MELODY_STEP_VS_LEAP_MAP[c.melody_step_vs_leap],
+        "melody_chromatic": MELODY_CHROMATIC_MAP[c.melody_chromatic],
+        "melody_motif_repeat": MELODY_MOTIF_REPEAT_MAP[c.melody_motif_repeat],
+        "melody_cadence_strength": MELODY_CADENCE_MAP[c.melody_cadence_strength],
+        "melody_tension_curve": c.melody_tension_curve,
+    }
+
+
 def vibe_to_multiconfig_with_reasoning(vibe: str, num_runs: int = 3) -> Tuple[Dict[str, Any], int, str]:
     """Generate configs via separate LLM calls, return all configs, best choice (1-indexed), and formatted output."""
     scored_configs = vibe_to_scored_configs(vibe, num_runs)
@@ -692,28 +621,8 @@ def vibe_to_multiconfig_with_reasoning(vibe: str, num_runs: int = 3) -> Tuple[Di
     configs: List[Tuple[Dict[str, Any], str]] = []
     scores: List[int] = []
     for sc in scored_configs:
-        c = sc.config  # Access the inner VibeConfig
-        cfg = {
-            "tempo": TEMPO_MAP[c.tempo],
-            "root": c.root,
-            "mode": c.mode,
-            "brightness": BRIGHTNESS_MAP[c.brightness],
-            "space": SPACE_MAP[c.space],
-            "density": c.density,
-            "bass": c.bass,
-            "pad": c.pad,
-            "melody": c.melody,
-            "rhythm": c.rhythm,
-            "texture": c.texture,
-            "accent": c.accent,
-            "motion": MOTION_MAP[c.motion],
-            "attack": c.attack,
-            "stereo": STEREO_MAP[c.stereo],
-            "depth": c.depth,
-            "echo": ECHO_MAP[c.echo],
-            "human": HUMAN_MAP[c.human],
-            "grain": c.grain,
-        }
+        c = sc.config
+        cfg = vibe_config_to_music_config(c)
         configs.append((cfg, c.justification))
         scores.append(sc.score)
     
@@ -737,176 +646,209 @@ def vibe_to_multiconfig_with_reasoning(vibe: str, num_runs: int = 3) -> Tuple[Di
     return (config_dict, best_choice, justifications)
 
 
+def vibe_to_audio(vibe: str, output_path: str = "output.wav", duration: float = 20.0) -> str:
+    """Generate audio from a vibe description using LLM config generation."""
+    scored_configs = vibe_to_scored_configs(vibe, num_runs=1)
+    best_config = scored_configs[0].config
+    
+    cfg_dict = vibe_config_to_music_config(best_config)
+    config = MusicConfig.from_dict(cfg_dict)
+    
+    from .synth import config_to_audio
+    return config_to_audio(config, output_path, duration)
+
+
 if __name__ == "__main__":
     # =========================================================================
-    # Hand-crafted configs in continuous space
+    # Hand-crafted configs in continuous space with melody policy
     # =========================================================================
 
     # Mario the Game: Bouncy 8-bit, bright, playful, iconic video game energy
     mario_config: Dict[str, Any] = {
-        "tempo": 0.72,           # Fast, energetic
-        "root": "c",             # Classic bright key
-        "mode": "major",         # Happy, playful
-        "brightness": 0.85,      # Crisp 8-bit highs
-        "space": 0.15,           # Dry, punchy (no reverb in NES)
-        "density": 4,            # Multiple layers but not overwhelming
-        "bass": "pulsing",       # Bouncy bass line
-        "pad": "thin_high",      # Chiptune leads are thin/bright
-        "melody": "arp_melody",  # Arpeggiated video game patterns
-        "rhythm": "electronic",  # Precise electronic drums
-        "texture": "none",       # Clean digital sound
-        "accent": "bells",       # Coin/power-up chimes
-        "motion": 0.65,          # Active modulation
-        "attack": "sharp",       # Punchy 8-bit transients
-        "stereo": 0.35,          # Narrower (mono NES feel)
-        "depth": False,          # No sub-bass in 8-bit
-        "echo": 0.12,            # Minimal delay
-        "human": 0.0,            # Robotic machine precision
-        "grain": "gritty",       # Bit-crushed digital character
+        "tempo": 0.72,
+        "root": "c",
+        "mode": "major",
+        "brightness": 0.85,
+        "space": 0.15,
+        "density": 4,
+        "bass": "pulsing",
+        "pad": "thin_high",
+        "melody": "procedural",  # Use procedural melody
+        "rhythm": "electronic",
+        "texture": "none",
+        "accent": "bells",
+        "motion": 0.65,
+        "attack": "sharp",
+        "stereo": 0.35,
+        "depth": False,
+        "echo": 0.12,
+        "human": 0.0,
+        "grain": "gritty",
+        # Melody policy for bouncy game music
+        "melody_phrase_len": 4,
+        "melody_density": 0.8,
+        "melody_syncopation": 0.3,
+        "melody_swing": 0.0,
+        "melody_step_vs_leap": 0.6,
+        "melody_chromatic": 0.05,
+        "melody_motif_repeat": 0.6,
+        "melody_cadence_strength": 0.8,
+        "melody_tension_curve": "arc",
     }
 
-    # Bubble Gum: Sweet, pink, pop, sparkly, light and airy
-    bubble_gum_config: Dict[str, Any] = {
-        "tempo": 0.58,           # Upbeat but not frantic
-        "root": "f",             # Warm, sweet key
-        "mode": "major",         # Happy, carefree
-        "brightness": 0.78,      # Bright and sparkly
-        "space": 0.45,           # Light room reverb
-        "density": 5,            # Full pop production
-        "bass": "sustained",     # Smooth supportive bass
-        "pad": "warm_slow",      # Cotton candy softness
-        "melody": "rising",      # Optimistic upward motion
-        "rhythm": "soft_four",   # Pop beat
-        "texture": "shimmer",    # Sparkly sweetness
-        "accent": "bells",       # Crystalline accents
-        "motion": 0.55,          # Gentle movement
-        "attack": "medium",      # Balanced transients
-        "stereo": 0.72,          # Wide pop mix
-        "depth": False,          # Light, not heavy
-        "echo": 0.35,            # Subtle delay
-        "human": 0.25,           # Slight natural feel
-        "grain": "clean",        # Polished pop sheen
+    # Lo-fi Study: Chill, vinyl crackle, relaxed
+    lofi_config: Dict[str, Any] = {
+        "tempo": 0.35,
+        "root": "d",
+        "mode": "dorian",
+        "brightness": 0.4,
+        "space": 0.3,
+        "density": 4,
+        "bass": "sustained",
+        "pad": "warm_slow",
+        "melody": "procedural",
+        "rhythm": "minimal",
+        "texture": "vinyl_crackle",
+        "accent": "pluck",
+        "motion": 0.3,
+        "attack": "soft",
+        "stereo": 0.5,
+        "depth": False,
+        "echo": 0.5,
+        "human": 0.3,
+        "grain": "warm",
+        # Lo-fi melody policy
+        "melody_phrase_len": 8,
+        "melody_density": 0.35,
+        "melody_syncopation": 0.15,
+        "melody_swing": 0.4,
+        "melody_step_vs_leap": 0.9,
+        "melody_chromatic": 0.15,
+        "melody_motif_repeat": 0.4,
+        "melody_cadence_strength": 0.5,
+        "melody_tension_curve": "waves",
     }
 
-    # Depression: Slow, heavy, dark, despondent, weight of existence
-    depression_config: Dict[str, Any] = {
-        "tempo": 0.18,           # Glacially slow, no energy
-        "root": "c#",            # Dark, uncomfortable key
-        "mode": "minor",         # Sadness, despair
-        "brightness": 0.12,      # Muffled, grey, no light
-        "space": 0.92,           # Vast empty void
-        "density": 2,            # Sparse, isolated
-        "bass": "drone",         # Oppressive weight
-        "pad": "dark_sustained", # Heavy grey clouds
-        "melody": "falling",     # Descending into darkness
-        "rhythm": "none",        # No motivation to move
-        "texture": "breath",     # Sighs, heaviness
-        "accent": "none",        # No bright spots
-        "motion": 0.08,          # Nearly static, frozen
-        "attack": "soft",        # No sharp edges, numb
-        "stereo": 0.88,          # Disorienting vastness
-        "depth": True,           # Heavy sub-bass weight
-        "echo": 0.82,            # Thoughts echoing endlessly
-        "human": 0.62,           # Unsteady, struggling
-        "grain": "warm",         # Muted, not harsh
+    # Jazz Cafe: Sophisticated, swinging, chromatic
+    jazz_config: Dict[str, Any] = {
+        "tempo": 0.45,
+        "root": "f",
+        "mode": "dorian",
+        "brightness": 0.5,
+        "space": 0.5,
+        "density": 5,
+        "bass": "walking",
+        "pad": "warm_slow",
+        "melody": "procedural",
+        "rhythm": "soft_four",
+        "texture": "none",
+        "accent": "pluck",
+        "motion": 0.5,
+        "attack": "medium",
+        "stereo": 0.6,
+        "depth": False,
+        "echo": 0.3,
+        "human": 0.25,
+        "grain": "warm",
+        # Jazz melody policy
+        "melody_phrase_len": 4,
+        "melody_density": 0.6,
+        "melody_syncopation": 0.4,
+        "melody_swing": 0.5,
+        "melody_step_vs_leap": 0.7,
+        "melody_chromatic": 0.35,
+        "melody_motif_repeat": 0.2,
+        "melody_cadence_strength": 0.6,
+        "melody_tension_curve": "arc",
     }
 
-    # Pineapple: Tropical, sunny, Caribbean, fresh, island vibes
-    pineapple_config: Dict[str, Any] = {
-        "tempo": 0.52,           # Relaxed tropical groove
-        "root": "g",             # Bright, sunny key
-        "mode": "major",         # Happy island vibes
-        "brightness": 0.68,      # Sunny but not harsh
-        "space": 0.55,           # Open air, beach
-        "density": 4,            # Layered but breezy
-        "bass": "walking",       # Reggae/calypso bass movement
-        "pad": "warm_slow",      # Warm tropical air
-        "melody": "ornamental",  # Steel drum melodic flourishes
-        "rhythm": "minimal",     # Island groove
-        "texture": "shimmer",    # Sun on water sparkle
-        "accent": "pluck",       # Guitar/ukulele plucks
-        "motion": 0.48,          # Gentle swaying
-        "attack": "medium",      # Relaxed transients
-        "stereo": 0.65,          # Wide beach soundscape
-        "depth": False,          # Light and breezy
-        "echo": 0.42,            # Beach reverb
-        "human": 0.38,           # Natural island feel
-        "grain": "warm",         # Sunny warmth
-    }
-
-    # Police: Urgent, tense, siren-like, pursuit, high alert
-    police_config: Dict[str, Any] = {
-        "tempo": 0.82,           # Fast, urgent pursuit
-        "root": "a",             # Tense, alert key
-        "mode": "minor",         # Tension, danger
-        "brightness": 0.72,      # Sirens cut through
-        "space": 0.28,           # Urban, close
-        "density": 5,            # High intensity layers
-        "bass": "pulsing",       # Heartbeat tension
-        "pad": "cinematic",      # Dramatic urgency
-        "melody": "arp_melody",  # Siren-like oscillation
-        "rhythm": "electronic",  # Mechanical precision
-        "texture": "none",       # Clean alert sound
-        "accent": "bells",       # Alarm tones
-        "motion": 0.78,          # Rapid modulation (siren wobble)
-        "attack": "sharp",       # Urgent transients
-        "stereo": 0.58,          # Focused but spatial
-        "depth": True,           # Sub-bass impact
-        "echo": 0.22,            # Short urban reflections
-        "human": 0.0,            # Robotic, mechanical
-        "grain": "gritty",       # Harsh, alerting
+    # Ambient Space: Vast, minimal, ethereal
+    ambient_config: Dict[str, Any] = {
+        "tempo": 0.2,
+        "root": "b",
+        "mode": "minor",
+        "brightness": 0.25,
+        "space": 0.95,
+        "density": 3,
+        "bass": "drone",
+        "pad": "ambient_drift",
+        "melody": "procedural",
+        "rhythm": "none",
+        "texture": "stars",
+        "accent": "chime",
+        "motion": 0.1,
+        "attack": "soft",
+        "stereo": 1.0,
+        "depth": True,
+        "echo": 0.9,
+        "human": 0.0,
+        "grain": "clean",
+        # Ambient melody policy
+        "melody_phrase_len": 8,
+        "melody_density": 0.15,
+        "melody_syncopation": 0.0,
+        "melody_swing": 0.0,
+        "melody_step_vs_leap": 0.95,
+        "melody_chromatic": 0.0,
+        "melody_motif_repeat": 0.2,
+        "melody_cadence_strength": 0.2,
+        "melody_tension_curve": "flat",
     }
 
     # Build configs list
     config_dicts: List[Dict[str, Any]] = [
         mario_config,
-        bubble_gum_config,
-        depression_config,
-        pineapple_config,
-        police_config,
+        lofi_config,
+        jazz_config,
+        ambient_config,
     ]
     config_names: List[str] = [
-        "Mario the Game",
-        "Bubble Gum",
-        "Depression",
-        "Pineapple",
-        "Police",
+        "Mario Game",
+        "Lo-fi Study",
+        "Jazz Cafe",
+        "Ambient Space",
     ]
 
     # Convert to MusicConfig
     configs: List[MusicConfig] = [MusicConfig.from_dict(d) for d in config_dicts]
 
-    # Print configs for sanity
+    # Print configs
     for name, cfg_dict in zip(config_names, config_dicts):
         print(f"\n{'='*70}")
         print(f"CONFIG: {name}")
         print('='*70)
         print(json.dumps(cfg_dict, indent=2))
 
-    # 4. Interpolate between the configs with tweening, concatenate output
-    all_outputs: List[NDArray[np.float64]] = []
-    chunk_duration = 30.0  # seconds per section
+    # Generate audio for each
     sr = 44100
+    for name, config in zip(config_names, configs):
+        filename = name.lower().replace(" ", "_") + ".wav"
+        print(f"\nGenerating: {filename}")
+        audio = assemble(config, duration=20.0, normalize=True)
+        sf.write(filename, audio, sr)
+        print(f"  Saved: {filename}")
 
-    if len(configs) == 1:
-        # Only one config, just render it
-        single_audio = assemble(configs[0], duration=chunk_duration, normalize=False)
-        all_outputs.append(single_audio)
-    else:
-        for i in range(len(configs) - 1):
-            config_a: MusicConfig = configs[i]
-            config_b: MusicConfig = configs[i + 1]
-
-            # Tween from config_a to config_b (slowly, ~16s fade)
-            num_tween_chunks = 8
-            for j in range(num_tween_chunks):
-                t = j / (num_tween_chunks - 1)
-                tweened = interpolate_configs(config_a, config_b, t)
-                # Note: Set normalize=False to prevent jumps, let final global normalize
-                chunk = assemble(tweened, duration=chunk_duration, normalize=False)
-                all_outputs.append(chunk)
+    # Morph demo: Mario → Jazz transition
+    print("\n" + "="*70)
+    print("Generating morph: Mario → Jazz (60s)")
+    print("="*70)
+    
+    all_outputs: List[NDArray[np.float64]] = []
+    chunk_duration = 15.0
+    num_tween_chunks = 4
+    
+    for j in range(num_tween_chunks):
+        t = j / (num_tween_chunks - 1)
+        tweened = interpolate_configs(configs[0], configs[2], t)
+        chunk = assemble(tweened, duration=chunk_duration, normalize=False)
+        all_outputs.append(chunk)
 
     full_audio: NDArray[np.float64] = np.concatenate(all_outputs)
-    # Save output to "test.wav"
-    sf.write("test.wav", full_audio, sr)
-    print(f"\nConcatenated tweened audio saved to test.wav")
+    max_val = np.max(np.abs(full_audio))
+    if max_val > 0:
+        full_audio = full_audio / max_val * 0.85
+    
+    sf.write("mario_to_jazz_morph.wav", full_audio, sr)
+    print("  Saved: mario_to_jazz_morph.wav")
+
+    print("\nAll demos generated!")
