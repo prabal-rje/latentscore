@@ -8,16 +8,14 @@ Architecture:
 
 1. Primitives: oscillators, envelopes, filters, effects
 2. Patterns: pre-baked layer templates (bass, pad, melody, rhythm, texture, accent)
-3. Procedural Melody: anchor+embellishment generation with phrase planning
-4. Assembler: config → audio conversion with V2 parameter transforms
+3. Assembler: config → audio conversion with V2 parameter transforms
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace, field
-from enum import Enum, auto
-from typing import Any, Callable, Dict, TypeAlias, cast, List, Tuple, Optional
 import random
+from dataclasses import dataclass, replace
+from typing import Any, Callable, Dict, List, TypeAlias, cast
 
 import numpy as np
 import soundfile as sf  # type: ignore[import]
@@ -68,15 +66,21 @@ MODE_INTERVALS: dict[str, tuple[int, ...]] = {
     "minor": (0, 2, 3, 5, 7, 8, 10),
     "dorian": (0, 2, 3, 5, 7, 9, 10),
     "mixolydian": (0, 2, 4, 5, 7, 9, 10),
+    "lydian": (0, 2, 4, 6, 7, 9, 11),
+    "phrygian": (0, 1, 3, 5, 7, 8, 10),
 }
 
-# Chord tones for each chord quality (scale degrees that are chord tones)
-CHORD_TONES: dict[str, tuple[int, ...]] = {
-    "major": (0, 2, 4),      # 1, 3, 5
-    "minor": (0, 2, 4),      # 1, b3, 5
-    "dom7": (0, 2, 4, 6),    # 1, 3, 5, b7
-    "min7": (0, 2, 4, 6),    # 1, b3, 5, b7
-    "maj7": (0, 2, 4, 6),    # 1, 3, 5, 7
+# Chord shapes (semitones from root)
+CHORD_SHAPES: dict[str, tuple[int, ...]] = {
+    "maj": (0, 4, 7),
+    "min": (0, 3, 7),
+    "maj7": (0, 4, 7, 11),
+    "min7": (0, 3, 7, 10),
+    "dom7": (0, 4, 7, 10),
+    "dim": (0, 3, 6),
+    "sus4": (0, 5, 7),
+    "sus2": (0, 2, 7),
+    "5": (0, 7),  # Power chord
 }
 
 # V2 parameter mappings
@@ -106,10 +110,35 @@ def freq_from_note(root: str, semitones: int = 0, octave: int = 4) -> float:
     """Get frequency for a note."""
     root_lower = root.lower()
     if root_lower not in NOTE_FREQS:
-        raise ValueError(f"Unknown root note: {root}. Valid: {list(NOTE_FREQS.keys())}")
-    base_freq = NOTE_FREQS[root_lower]
+        # Fallback for flats (e.g., "db" -> "c#")
+        flat_to_sharp: dict[str, str] = {
+            "db": "c#", "eb": "d#", "fb": "e", "gb": "f#",
+            "ab": "g#", "bb": "a#", "cb": "b",
+        }
+        root_lower = flat_to_sharp.get(root_lower, "c")
+    base_freq = NOTE_FREQS.get(root_lower, 261.63)
     octave_shift = octave - 4
     return base_freq * (2**octave_shift) * (2 ** (semitones / 12))
+
+
+def get_chord_tones(root: str, chord_type: str, octave: int = 4) -> List[float]:
+    """Get all frequencies for a specific chord."""
+    root_semi = ROOT_SEMITONES.get(root.lower(), 0)
+    intervals = CHORD_SHAPES.get(chord_type, CHORD_SHAPES["min"])
+
+    freqs: List[float] = []
+    for interval in intervals:
+        # Calculate absolute semitone from C4
+        total_semitones = root_semi + interval
+        # Adjust octave if we wrap around 12
+        oct_adjust = total_semitones // 12
+        semitone_in_octave = total_semitones % 12
+
+        # Calculate freq directly to avoid string lookup
+        base_c4 = 261.63
+        freq = base_c4 * (2 ** (octave - 4 + oct_adjust)) * (2 ** (semitone_in_octave / 12))
+        freqs.append(freq)
+    return freqs
 
 
 def generate_sine(
@@ -374,614 +403,6 @@ def add_note(signal: FloatArray, note: FloatArray, start_index: int) -> None:
         
         signal[start_index:] += clipped
 
-
-# =============================================================================
-# PART 1.5: PROCEDURAL MELODY SYSTEM
-# =============================================================================
-
-
-class MelodicRole(Enum):
-    """FSM states for melodic note roles."""
-    REST = auto()
-    CHORD_TONE = auto()
-    PASSING = auto()
-    NEIGHBOR = auto()
-    APPROACH = auto()
-    LEAP = auto()
-    CADENCE = auto()
-
-
-class TensionCurve(Enum):
-    """Tension envelope shapes for phrases."""
-    ARC = "arc"           # low → high → resolve
-    RAMP = "ramp"         # gradually increase tension
-    WAVES = "waves"       # rise/fall every bar
-    FLAT = "flat"         # constant tension
-
-
-@dataclass
-class Chord:
-    """Represents a chord in the progression."""
-    root_degree: int      # Scale degree of root (0-6)
-    quality: str          # "major", "minor", "dom7", etc.
-    duration_beats: float # Duration in beats
-    
-    def get_chord_tones(self) -> tuple[int, ...]:
-        """Get chord tones as scale degrees relative to chord root."""
-        return CHORD_TONES.get(self.quality, CHORD_TONES["major"])
-
-
-@dataclass
-class MelodyEvent:
-    """A single melody note event."""
-    start_seconds: float
-    duration_seconds: float
-    degree: int           # Scale degree
-    octave: int
-    velocity: float       # 0.0 to 1.0
-    role: MelodicRole = MelodicRole.CHORD_TONE
-
-
-@dataclass
-class Motif:
-    """A short melodic motif for repetition/variation."""
-    intervals: tuple[int, ...]      # Intervals from first note
-    durations: tuple[float, ...]    # Relative durations
-    
-    def transpose(self, semitones: int) -> "Motif":
-        """Transpose the motif by semitones."""
-        return Motif(
-            intervals=tuple(i + semitones for i in self.intervals),
-            durations=self.durations
-        )
-    
-    def augment(self, factor: float = 2.0) -> "Motif":
-        """Stretch durations."""
-        return Motif(
-            intervals=self.intervals,
-            durations=tuple(d * factor for d in self.durations)
-        )
-    
-    def diminish(self, factor: float = 0.5) -> "Motif":
-        """Compress durations."""
-        return self.augment(factor)
-    
-    def invert(self) -> "Motif":
-        """Invert intervals."""
-        return Motif(
-            intervals=tuple(-i for i in self.intervals),
-            durations=self.durations
-        )
-    
-    def vary_note(self, idx: int, delta: int) -> "Motif":
-        """Change one note by delta steps."""
-        new_intervals = list(self.intervals)
-        if 0 <= idx < len(new_intervals):
-            new_intervals[idx] += delta
-        return Motif(intervals=tuple(new_intervals), durations=self.durations)
-
-
-@dataclass
-class MelodyPolicy:
-    """
-    Policy knobs for procedural melody generation.
-    These are the parameters the LLM outputs to control melody behavior.
-    """
-    # Phrase structure
-    phrase_len_bars: int = 4            # 2, 4, or 8 bars per phrase
-    
-    # Rhythm
-    note_density: float = 0.5           # 0.0 (sparse) to 1.0 (dense)
-    syncopation: float = 0.2            # 0.0 (on-beat) to 1.0 (off-beat)
-    swing: float = 0.0                  # 0.0 (straight) to 1.0 (heavy swing)
-    
-    # Pitch behavior
-    step_vs_leap: float = 0.8           # 0.0 (all leaps) to 1.0 (all steps)
-    chromatic_approach_prob: float = 0.1  # Probability of chromatic approach tones
-    
-    # Motif
-    motif_repeat_prob: float = 0.3      # Probability of repeating/varying motif
-    motif_length: int = 4               # Notes in motif (3-6)
-    
-    # Phrase shape
-    cadence_strength: float = 0.7       # 0.0 (weak) to 1.0 (strong cadences)
-    register_range: tuple[int, int] = (4, 5)  # Octave range
-    tension_curve: TensionCurve = TensionCurve.ARC
-    
-    # Style modifiers
-    rest_probability: float = 0.15      # Probability of rest on weak beats
-
-
-@dataclass 
-class ChordProgression:
-    """A sequence of chords with timing."""
-    chords: List[Chord] = field(default_factory=list)
-    beats_per_bar: int = 4
-    
-    @classmethod
-    def simple_progression(cls, mode: str = "minor", bars: int = 4) -> "ChordProgression":
-        """Generate a simple chord progression for the given mode."""
-        if mode == "major":
-            # I - IV - V - I
-            chords = [
-                Chord(0, "major", 4),
-                Chord(3, "major", 4),
-                Chord(4, "major", 4),
-                Chord(0, "major", 4),
-            ]
-        elif mode == "minor":
-            # i - iv - VII - i
-            chords = [
-                Chord(0, "minor", 4),
-                Chord(3, "minor", 4),
-                Chord(6, "major", 4),
-                Chord(0, "minor", 4),
-            ]
-        elif mode == "dorian":
-            # i - IV - i - VII
-            chords = [
-                Chord(0, "minor", 4),
-                Chord(3, "major", 4),
-                Chord(0, "minor", 4),
-                Chord(6, "major", 4),
-            ]
-        else:  # mixolydian
-            # I - bVII - IV - I
-            chords = [
-                Chord(0, "major", 4),
-                Chord(6, "major", 4),
-                Chord(3, "major", 4),
-                Chord(0, "major", 4),
-            ]
-        
-        # Repeat to fill bars
-        while len(chords) < bars:
-            chords.extend(chords[:bars - len(chords)])
-        
-        return cls(chords=chords[:bars])
-    
-    def get_chord_at_beat(self, beat: float) -> Chord:
-        """Get the chord active at a given beat."""
-        current_beat = 0.0
-        for chord in self.chords:
-            if current_beat <= beat < current_beat + chord.duration_beats:
-                return chord
-            current_beat += chord.duration_beats
-        return self.chords[-1] if self.chords else Chord(0, "major", 4)
-    
-    def total_beats(self) -> float:
-        """Total duration in beats."""
-        return sum(c.duration_beats for c in self.chords)
-
-
-def get_tension_at_position(pos: float, curve: TensionCurve, phrase_len: float) -> float:
-    """
-    Get tension value (0-1) at a position within a phrase.
-    pos: 0.0 to phrase_len
-    """
-    t = pos / phrase_len if phrase_len > 0 else 0.0
-    t = min(max(t, 0.0), 1.0)
-    
-    if curve == TensionCurve.ARC:
-        # Bell curve: low at start/end, high in middle
-        return float(np.sin(t * np.pi))
-    elif curve == TensionCurve.RAMP:
-        # Linear increase
-        return t
-    elif curve == TensionCurve.WAVES:
-        # Multiple peaks
-        return float(0.5 + 0.5 * np.sin(t * 4 * np.pi))
-    else:  # FLAT
-        return 0.5
-
-
-def generate_motif(policy: MelodyPolicy, scale_len: int = 7) -> Motif:
-    """Generate a short melodic motif."""
-    num_notes = policy.motif_length
-    intervals = [0]  # Start on the root
-    durations = []
-    
-    for i in range(num_notes - 1):
-        # Prefer steps over leaps based on policy
-        if random.random() < policy.step_vs_leap:
-            # Step motion
-            interval = random.choice([-1, 1])
-        else:
-            # Leap
-            interval = random.choice([-3, -2, 2, 3])
-        
-        intervals.append(intervals[-1] + interval)
-    
-    # Generate durations (normalized)
-    base_dur = 1.0 / num_notes
-    for _ in range(num_notes):
-        # Add some variation
-        dur = base_dur * random.uniform(0.7, 1.3)
-        durations.append(dur)
-    
-    # Normalize durations to sum to 1.0
-    total = sum(durations)
-    durations = [d / total for d in durations]
-    
-    return Motif(intervals=tuple(intervals), durations=tuple(durations))
-
-
-def generate_anchor_notes(
-    chord_prog: ChordProgression,
-    policy: MelodyPolicy,
-    beats_per_second: float,
-    total_duration: float,
-    mode_intervals: tuple[int, ...]
-) -> List[MelodyEvent]:
-    """
-    Generate anchor notes (Pass A) - chord tones on strong beats.
-    """
-    anchors: List[MelodyEvent] = []
-    
-    total_beats = total_duration * beats_per_second
-    beats_per_bar = chord_prog.beats_per_bar
-    
-    # Determine anchor positions (beat 1 of each bar, sometimes beat 3)
-    beat = 0.0
-    prev_degree = 0
-    prev_octave = policy.register_range[0]
-    
-    while beat < total_beats:
-        chord = chord_prog.get_chord_at_beat(beat % chord_prog.total_beats())
-        chord_tones = chord.get_chord_tones()
-        
-        # Get phrase position for tension
-        phrase_beats = policy.phrase_len_bars * beats_per_bar
-        phrase_pos = beat % phrase_beats
-        tension = get_tension_at_position(phrase_pos, policy.tension_curve, phrase_beats)
-        
-        # Voice leading: prefer small intervals from previous anchor
-        best_degree = chord.root_degree
-        best_distance = 999
-        
-        for ct in chord_tones:
-            degree = (chord.root_degree + ct) % len(mode_intervals)
-            distance = abs(degree - prev_degree)
-            # Wrap around for voice leading
-            distance = min(distance, len(mode_intervals) - distance)
-            
-            if distance < best_distance:
-                best_distance = distance
-                best_degree = degree
-        
-        # Determine octave based on register arc and tension
-        octave_range = policy.register_range[1] - policy.register_range[0]
-        if policy.tension_curve == TensionCurve.ARC:
-            # Rise in middle of phrase, fall at end
-            octave = policy.register_range[0] + int(tension * octave_range)
-        else:
-            octave = prev_octave
-            # Small octave adjustments for voice leading
-            if best_degree < prev_degree - 3 and octave < policy.register_range[1]:
-                octave += 1
-            elif best_degree > prev_degree + 3 and octave > policy.register_range[0]:
-                octave -= 1
-        
-        # Check for cadence (end of phrase)
-        is_cadence = phrase_pos >= phrase_beats - beats_per_bar
-        
-        # At cadence, prefer root or 5th
-        if is_cadence and policy.cadence_strength > random.random():
-            best_degree = chord.root_degree
-            role = MelodicRole.CADENCE
-        else:
-            role = MelodicRole.CHORD_TONE
-        
-        # Calculate timing
-        start_sec = beat / beats_per_second
-        
-        # Duration: longer at cadences, shorter at high tension
-        base_dur = (beats_per_bar / 2) / beats_per_second  # Half bar
-        if is_cadence:
-            dur = base_dur * (1.0 + policy.cadence_strength)
-        else:
-            dur = base_dur * (1.0 - 0.3 * tension)
-        
-        # Velocity based on tension and beat position
-        velocity = 0.6 + 0.3 * tension
-        if beat % beats_per_bar == 0:  # Downbeat
-            velocity = min(1.0, velocity + 0.1)
-        
-        anchors.append(MelodyEvent(
-            start_seconds=start_sec,
-            duration_seconds=dur,
-            degree=best_degree,
-            octave=octave,
-            velocity=velocity,
-            role=role
-        ))
-        
-        prev_degree = best_degree
-        prev_octave = octave
-        
-        # Move to next anchor position
-        # Usually every bar, sometimes every half bar at high tension
-        if tension > 0.7 and random.random() < tension:
-            beat += beats_per_bar / 2
-        else:
-            beat += beats_per_bar
-    
-    return anchors
-
-
-def fill_between_anchors(
-    anchors: List[MelodyEvent],
-    policy: MelodyPolicy,
-    beats_per_second: float,
-    mode_intervals: tuple[int, ...],
-    chord_prog: ChordProgression
-) -> List[MelodyEvent]:
-    """
-    Generate fill notes (Pass B) between anchors.
-    Uses passing tones, neighbor tones, approach tones.
-    """
-    all_events: List[MelodyEvent] = []
-    
-    for i, anchor in enumerate(anchors):
-        all_events.append(anchor)
-        
-        # Get next anchor (if exists)
-        if i + 1 >= len(anchors):
-            continue
-        
-        next_anchor = anchors[i + 1]
-        gap_start = anchor.start_seconds + anchor.duration_seconds
-        gap_end = next_anchor.start_seconds
-        gap_duration = gap_end - gap_start
-        
-        if gap_duration < 0.1:  # Too short for fills
-            continue
-        
-        # Determine number of fill notes based on density and gap size
-        beats_in_gap = gap_duration * beats_per_second
-        max_notes = int(beats_in_gap * 2 * policy.note_density)
-        num_fills = random.randint(0, max(0, max_notes))
-        
-        if num_fills == 0:
-            continue
-        
-        # Determine fill strategy based on interval between anchors
-        interval = next_anchor.degree - anchor.degree
-        
-        fill_degrees: List[int] = []
-        
-        if abs(interval) <= 2:
-            # Close anchors: use neighbor tones
-            for _ in range(num_fills):
-                if random.random() < 0.5:
-                    # Upper neighbor
-                    fill_degrees.append(anchor.degree + 1)
-                else:
-                    # Lower neighbor
-                    fill_degrees.append(anchor.degree - 1)
-        elif abs(interval) <= 4:
-            # Medium distance: passing tones
-            step = 1 if interval > 0 else -1
-            current = anchor.degree + step
-            while len(fill_degrees) < num_fills and current != next_anchor.degree:
-                fill_degrees.append(current)
-                current += step
-        else:
-            # Large leap: add approach tone before next anchor
-            if random.random() < policy.chromatic_approach_prob:
-                # Chromatic approach (half step)
-                approach = next_anchor.degree - 1 if random.random() < 0.5 else next_anchor.degree + 1
-            else:
-                # Diatonic approach (whole step)
-                approach = next_anchor.degree - 1
-            fill_degrees.append(approach)
-            
-            # Maybe add one more fill
-            if num_fills > 1:
-                mid_degree = (anchor.degree + next_anchor.degree) // 2
-                fill_degrees.insert(0, mid_degree)
-        
-        # Limit fills
-        fill_degrees = fill_degrees[:num_fills]
-        
-        if not fill_degrees:
-            continue
-        
-        # Distribute fills across the gap
-        fill_duration = gap_duration / (len(fill_degrees) + 1)
-        
-        for j, degree in enumerate(fill_degrees):
-            # Apply swing
-            offset = (j + 1) * fill_duration
-            if policy.swing > 0 and j % 2 == 1:
-                offset += fill_duration * policy.swing * 0.3
-            
-            # Apply syncopation
-            if policy.syncopation > 0 and random.random() < policy.syncopation:
-                offset += fill_duration * random.uniform(-0.2, 0.2)
-            
-            start_sec = gap_start + offset
-            
-            # Shorter duration for fills
-            dur = fill_duration * 0.8
-            
-            # Lower velocity for non-chord tones
-            velocity = anchor.velocity * 0.7
-            
-            # Rest probability
-            if random.random() < policy.rest_probability:
-                continue
-            
-            # Determine role
-            if abs(degree - anchor.degree) == 1:
-                role = MelodicRole.NEIGHBOR
-            elif degree in [next_anchor.degree - 1, next_anchor.degree + 1]:
-                role = MelodicRole.APPROACH
-            else:
-                role = MelodicRole.PASSING
-            
-            all_events.append(MelodyEvent(
-                start_seconds=start_sec,
-                duration_seconds=dur,
-                degree=degree,
-                octave=anchor.octave,
-                velocity=velocity,
-                role=role
-            ))
-    
-    # Sort by start time
-    all_events.sort(key=lambda e: e.start_seconds)
-    return all_events
-
-
-def apply_motif_memory(
-    events: List[MelodyEvent],
-    policy: MelodyPolicy,
-    mode_intervals: tuple[int, ...]
-) -> List[MelodyEvent]:
-    """
-    Apply motif repetition and variation to make melody more memorable.
-    """
-    if len(events) < policy.motif_length * 2:
-        return events
-    
-    # Extract first few notes as the motif
-    motif_events = events[:policy.motif_length]
-    base_degree = motif_events[0].degree
-    
-    motif = Motif(
-        intervals=tuple(e.degree - base_degree for e in motif_events),
-        durations=tuple(e.duration_seconds for e in motif_events)
-    )
-    
-    result = list(events)
-    
-    # Find opportunities to insert motif variations
-    i = policy.motif_length
-    while i < len(result) - policy.motif_length:
-        if random.random() < policy.motif_repeat_prob:
-            # Choose a transformation
-            transform_type = random.choice(['transpose', 'vary', 'invert', 'none'])
-            
-            if transform_type == 'transpose':
-                # Transpose to current position's degree
-                target_degree = result[i].degree
-                delta = target_degree - base_degree
-                varied = motif.transpose(delta)
-            elif transform_type == 'vary':
-                # Change one note
-                idx = random.randint(0, len(motif.intervals) - 1)
-                delta = random.choice([-1, 1])
-                varied = motif.vary_note(idx, delta)
-            elif transform_type == 'invert':
-                varied = motif.invert()
-            else:
-                varied = motif
-            
-            # Apply the motif
-            base_start = result[i].start_seconds
-            base_octave = result[i].octave
-            base_velocity = result[i].velocity
-            
-            for j, (interval, dur) in enumerate(zip(varied.intervals, varied.durations)):
-                if i + j < len(result):
-                    result[i + j] = MelodyEvent(
-                        start_seconds=base_start + sum(varied.durations[:j]),
-                        duration_seconds=dur,
-                        degree=(base_degree + interval) % len(mode_intervals),
-                        octave=base_octave,
-                        velocity=base_velocity,
-                        role=MelodicRole.CHORD_TONE
-                    )
-            
-            i += policy.motif_length + random.randint(2, 6)
-        else:
-            i += 1
-    
-    return result
-
-
-def generate_procedural_melody(
-    params: "SynthParams",
-    policy: MelodyPolicy,
-    duration: float
-) -> List[MelodyEvent]:
-    """
-    Main entry point for procedural melody generation.
-    Combines anchor generation, fill notes, and motif memory.
-    """
-    mode_intervals = MODE_INTERVALS.get(params.mode, MODE_INTERVALS["minor"])
-    
-    # Create chord progression
-    bars = int(duration / (4 / (params.tempo * 2)))  # Rough bar count
-    bars = max(4, bars)
-    chord_prog = ChordProgression.simple_progression(params.mode, bars)
-    
-    # Calculate tempo
-    beats_per_second = params.tempo * 2  # Map tempo to reasonable BPS
-    
-    # Generate anchors (Pass A)
-    anchors = generate_anchor_notes(
-        chord_prog, policy, beats_per_second, duration, mode_intervals
-    )
-    
-    # Generate fills (Pass B)
-    events = fill_between_anchors(
-        anchors, policy, beats_per_second, mode_intervals, chord_prog
-    )
-    
-    # Apply motif memory
-    events = apply_motif_memory(events, policy, mode_intervals)
-    
-    return events
-
-
-def render_melody_events(
-    events: List[MelodyEvent],
-    params: "SynthParams",
-    duration: float
-) -> FloatArray:
-    """Render melody events to audio buffer."""
-    sr = SAMPLE_RATE
-    signal = np.zeros(int(sr * duration))
-    
-    osc = OSC_FUNCTIONS.get(params.osc_type, generate_triangle)
-    mode_intervals = MODE_INTERVALS.get(params.mode, MODE_INTERVALS["minor"])
-    
-    for event in events:
-        # Calculate frequency
-        semitone = mode_intervals[event.degree % len(mode_intervals)]
-        semitone += 12 * (event.degree // len(mode_intervals))
-        freq = freq_from_note(params.root, semitone, event.octave)
-        
-        # Generate note
-        note_dur = min(event.duration_seconds, duration - event.start_seconds)
-        if note_dur <= 0:
-            continue
-        
-        amp = 0.18 * event.velocity
-        note = osc(freq, note_dur, sr, amp)
-        
-        # Apply envelope based on role
-        if event.role == MelodicRole.CADENCE:
-            note = apply_adsr(note, 0.1 * params.attack_mult, 0.3, 0.6, 0.8 * params.attack_mult, sr)
-        elif event.role in [MelodicRole.PASSING, MelodicRole.NEIGHBOR, MelodicRole.APPROACH]:
-            note = apply_adsr(note, 0.02 * params.attack_mult, 0.1, 0.4, 0.15 * params.attack_mult, sr)
-        else:
-            note = apply_adsr(note, 0.08 * params.attack_mult, 0.25, 0.55, 0.4 * params.attack_mult, sr)
-        
-        # Apply filter
-        note = apply_lowpass(note, 800 * params.brightness + 200, sr)
-        
-        # Apply humanize
-        note = apply_humanize(note, params.human, sr)
-        
-        start_idx = int(event.start_seconds * sr)
-        add_note(signal, note, start_idx)
-    
-    return signal
-
-
 # =============================================================================
 # PART 2: PATTERN GENERATORS
 # =============================================================================
@@ -1006,9 +427,10 @@ class SynthParams:
     echo: float = 0.5
     human: float = 0.0
     grain: str = "clean"
-    
-    # Melody policy (optional, for procedural melody)
-    melody_policy: Optional[MelodyPolicy] = None
+
+    # Context-aware parameters for chord-following
+    chord_root: str = "c"  # The root of the CURRENT chord (not just song key)
+    chord_type: str = "min"  # The quality of the CURRENT chord
 
     @property
     def attack_mult(self) -> float:
@@ -1356,29 +778,8 @@ PAD_PATTERNS: dict[str, PatternFn] = {
 
 
 # -----------------------------------------------------------------------------
-# MELODY PATTERNS (Including Procedural)
+# MELODY PATTERNS
 # -----------------------------------------------------------------------------
-
-
-def melody_procedural(params: SynthParams) -> FloatArray:
-    """Procedurally generated melody using anchor+embellishment algorithm."""
-    sr = SAMPLE_RATE
-    dur = params.duration
-    
-    # Use melody policy if provided, otherwise create default
-    policy = params.melody_policy if params.melody_policy else MelodyPolicy()
-    
-    # Generate melody events
-    events = generate_procedural_melody(params, policy, dur)
-    
-    # Render to audio
-    signal = render_melody_events(events, params, dur)
-    
-    # Apply effects
-    signal = apply_delay(signal, 0.35, 0.4 * params.echo_mult, 0.3 * params.echo_mult, sr)
-    signal = apply_reverb(signal, params.space * 0.6, params.space * 0.8, sr)
-    
-    return signal
 
 
 def melody_contemplative(params: SynthParams) -> FloatArray:
@@ -1575,8 +976,104 @@ def melody_arp(params: SynthParams) -> FloatArray:
     return signal
 
 
+def melody_smart_generative(params: SynthParams) -> FloatArray:
+    """
+    Algorithmic melody generator that follows chords.
+    Uses 'Anchor Tones' on strong beats and 'Passing Tones' on weak beats.
+    """
+    sr = SAMPLE_RATE
+    dur = params.duration
+    osc = OSC_FUNCTIONS.get(params.osc_type, generate_triangle)
+
+    # 1. Determine Grid & Density based on Tempo/Style
+    # Tempo 0.15 (very slow) -> 8th notes, Tempo 0.9 (fast) -> 16th notes
+    is_fast = params.tempo > 0.6
+    subdivision = 0.25 if is_fast else 0.5  # beats per step (16th vs 8th)
+    bpm = 60 + (params.tempo * 100)  # Simple mapping: 0.0->60, 1.0->160
+    beat_dur = 60 / bpm
+    step_dur = beat_dur * subdivision
+    total_steps = int(dur / step_dur)
+
+    # 2. Get Pitch Collections
+    # Safe notes: Chord tones (Root, 3rd, 5th, 7th)
+    chord_tones = get_chord_tones(params.chord_root, params.chord_type, 5)
+    # Passing notes: Scale tones (Approximate using global scale)
+    scale_tones = [params.get_scale_freq(i, 5) for i in range(8)]
+
+    signal = np.zeros(int(sr * dur))
+
+    # State for voice leading
+    last_freq = chord_tones[0]
+
+    for i in range(total_steps):
+        # Calculate grid position
+        beat_pos = (i * subdivision) % 4.0  # Position in bar (0.0 to 3.75)
+        is_strong_beat = (beat_pos % 1.0) == 0  # On the beat
+        is_downbeat = beat_pos == 0
+
+        # Density probability check
+        # Motion parameter controls note density
+        prob = params.motion * 0.8
+        if is_strong_beat:
+            prob += 0.3  # Higher chance on beat
+        if is_downbeat:
+            prob += 0.2  # Even higher on downbeat
+
+        if random.random() > prob:
+            continue  # Rest
+
+        start = int(i * step_dur * sr)
+
+        # NOTE SELECTION ALGORITHM
+        target_freq = 0.0
+
+        if is_strong_beat:
+            # ANCHOR: Pick a chord tone
+            # Heuristic: Pick chord tone closest to last note (Voice Leading)
+            # Add some randomness to jump occasionally
+            if random.random() < 0.7:
+                target_freq = min(chord_tones, key=lambda x: abs(x - last_freq))
+            else:
+                target_freq = random.choice(chord_tones)
+        else:
+            # PASSING: Scale tone or Neighbor
+            # Heuristic: Pick any scale tone roughly nearby
+            target_freq = min(scale_tones, key=lambda x: abs(x - last_freq))
+
+            # Occasional chromatic approach (if 'jazz' or complex)
+            if params.human > 0.5 and random.random() < 0.2:
+                target_freq *= 1.059  # Shift up 1 semitone
+
+        last_freq = target_freq
+
+        # Render Note
+        # Duration: Short for fast, long for slow
+        note_len = step_dur * (0.5 if params.attack == "sharp" else 0.95)
+
+        note = osc(target_freq, note_len, sr, 0.15)
+
+        # Filter (Velocity)
+        cutoff = 500 + (params.brightness * 2000)
+        # Random velocity variation
+        cutoff *= random.uniform(0.8, 1.2)
+        note = apply_lowpass(note, cutoff, sr)
+
+        # Envelope
+        att = 0.01 * params.attack_mult
+        dec = 0.1
+        rel = 0.1 * params.attack_mult
+        note = apply_adsr(note, att, dec, 0.7, rel, sr)
+        note = apply_humanize(note, params.human, sr)
+
+        add_note(signal, note, start)
+
+    signal = apply_delay(signal, 0.35, 0.4 * params.echo_mult, 0.3 * params.echo_mult, sr)
+    signal = apply_reverb(signal, params.space * 0.5, params.space, sr)
+
+    return signal
+
+
 MELODY_PATTERNS: dict[str, PatternFn] = {
-    "procedural": melody_procedural,
     "contemplative": melody_contemplative,
     "contemplative_minor": melody_contemplative,
     "rising": melody_rising,
@@ -1586,6 +1083,8 @@ MELODY_PATTERNS: dict[str, PatternFn] = {
     "arp_melody": melody_arp,
     "call_response": melody_contemplative,
     "heroic": melody_rising,
+    "smart": melody_smart_generative,
+    "generative": melody_smart_generative,
 }
 
 
@@ -2061,17 +1560,10 @@ class MusicConfig:
     echo: float = 0.5
     human: float = 0.0
     grain: str = "clean"
-    
-    # Melody policy parameters (for procedural melody)
-    melody_phrase_len: int = 4
-    melody_density: float = 0.5
-    melody_syncopation: float = 0.2
-    melody_swing: float = 0.0
-    melody_step_vs_leap: float = 0.8
-    melody_chromatic: float = 0.1
-    melody_motif_repeat: float = 0.3
-    melody_cadence_strength: float = 0.7
-    melody_tension_curve: str = "arc"
+
+    # Chord-specific overrides for progression-following
+    chord_root: str = "c"
+    chord_type: str = "min"
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "MusicConfig":
@@ -2088,26 +1580,6 @@ class MusicConfig:
                 setattr(config, key, value)
 
         return config
-    
-    def get_melody_policy(self) -> MelodyPolicy:
-        """Convert config melody parameters to MelodyPolicy."""
-        tension_map = {
-            "arc": TensionCurve.ARC,
-            "ramp": TensionCurve.RAMP,
-            "waves": TensionCurve.WAVES,
-            "flat": TensionCurve.FLAT,
-        }
-        return MelodyPolicy(
-            phrase_len_bars=self.melody_phrase_len,
-            note_density=self.melody_density,
-            syncopation=self.melody_syncopation,
-            swing=self.melody_swing,
-            step_vs_leap=self.melody_step_vs_leap,
-            chromatic_approach_prob=self.melody_chromatic,
-            motif_repeat_prob=self.melody_motif_repeat,
-            cadence_strength=self.melody_cadence_strength,
-            tension_curve=tension_map.get(self.melody_tension_curve, TensionCurve.ARC),
-        )
 
 
 def assemble(config: MusicConfig, duration: float = 16.0, normalize: bool = True) -> FloatArray:
@@ -2123,9 +1595,6 @@ def assemble(config: MusicConfig, duration: float = 16.0, normalize: bool = True
                    to preserve relative dynamics.
     """
     sr = SAMPLE_RATE
-    
-    # Get melody policy from config
-    melody_policy = config.get_melody_policy()
 
     # Build synth params
     params = SynthParams(
@@ -2142,7 +1611,9 @@ def assemble(config: MusicConfig, duration: float = 16.0, normalize: bool = True
         echo=config.echo,
         human=config.human,
         grain=config.grain,
-        melody_policy=melody_policy,
+        # Chord context for progression-following
+        chord_root=config.chord_root,
+        chord_type=config.chord_type,
     )
 
     # Determine active layers based on density
@@ -2293,22 +1764,6 @@ def generate_from_vibe(vibe: str, output_path: str = "output.wav", duration: flo
         config.melody = "minimal"
     elif any(w in vibe_lower for w in ("rich", "full", "lush")):
         config.density = 6
-    
-    # Melody style from vibe
-    if any(w in vibe_lower for w in ("bouncy", "playful", "mario", "game")):
-        config.melody = "procedural"
-        config.melody_density = 0.8
-        config.melody_motif_repeat = 0.6
-        config.melody_step_vs_leap = 0.6
-        config.melody_syncopation = 0.3
-    elif any(w in vibe_lower for w in ("jazz", "bebop", "swing")):
-        config.melody = "procedural"
-        config.melody_chromatic = 0.3
-        config.melody_swing = 0.5
-        config.melody_syncopation = 0.4
-    elif any(w in vibe_lower for w in ("ambient", "drone", "minimal")):
-        config.melody = "minimal"
-        config.melody_density = 0.2
 
     return config_to_audio(config, output_path, duration)
 
@@ -2351,16 +1806,9 @@ def interpolate_configs(config_a: MusicConfig, config_b: MusicConfig, t: float) 
         echo=lerp(config_a.echo, config_b.echo, t),
         human=lerp(config_a.human, config_b.human, t),
         grain=config_a.grain if t < 0.5 else config_b.grain,
-        # Melody policy parameters
-        melody_phrase_len=config_a.melody_phrase_len if t < 0.5 else config_b.melody_phrase_len,
-        melody_density=lerp(config_a.melody_density, config_b.melody_density, t),
-        melody_syncopation=lerp(config_a.melody_syncopation, config_b.melody_syncopation, t),
-        melody_swing=lerp(config_a.melody_swing, config_b.melody_swing, t),
-        melody_step_vs_leap=lerp(config_a.melody_step_vs_leap, config_b.melody_step_vs_leap, t),
-        melody_chromatic=lerp(config_a.melody_chromatic, config_b.melody_chromatic, t),
-        melody_motif_repeat=lerp(config_a.melody_motif_repeat, config_b.melody_motif_repeat, t),
-        melody_cadence_strength=lerp(config_a.melody_cadence_strength, config_b.melody_cadence_strength, t),
-        melody_tension_curve=config_a.melody_tension_curve if t < 0.5 else config_b.melody_tension_curve,
+        # Chord context: switch at midpoint
+        chord_root=config_a.chord_root if t < 0.5 else config_b.chord_root,
+        chord_type=config_a.chord_type if t < 0.5 else config_b.chord_type,
     )
 
 
@@ -2535,117 +1983,199 @@ if __name__ == "__main__":
     print("VibeSynth V1/V2 - Pure Python Synthesis Engine")
     print("=" * 50)
 
-    # Demo: Procedural melody generation
-    print("\n1. Generating procedural melody demo...")
-    
-    # Mario-style bouncy config
-    mario_config = MusicConfig(
-        tempo=0.72,
-        root="c",
-        mode="major",
-        brightness=0.85,
-        space=0.15,
-        density=4,
-        bass="pulsing",
-        pad="thin_high",
-        melody="procedural",  # Use procedural melody!
-        rhythm="electronic",
-        texture="none",
-        accent="bells",
-        motion=0.65,
-        attack="sharp",
-        stereo=0.35,
-        depth=False,
-        echo=0.12,
-        human=0.0,
-        grain="gritty",
-        # Melody policy for bouncy game music
-        melody_phrase_len=4,
-        melody_density=0.8,
-        melody_syncopation=0.3,
-        melody_swing=0.0,
-        melody_step_vs_leap=0.6,
-        melody_chromatic=0.05,
-        melody_motif_repeat=0.6,
-        melody_cadence_strength=0.8,
-        melody_tension_curve="arc",
-    )
-    
-    config_to_audio(mario_config, "mario_procedural.wav", duration=20.0)
-    print("   Saved: mario_procedural.wav")
-    
-    # Lo-fi chill config
-    print("\n2. Generating lo-fi chill demo...")
-    lofi_config = MusicConfig(
-        tempo=0.35,
-        root="d",
-        mode="dorian",
-        brightness=0.4,
-        space=0.6,
-        density=4,
-        bass="sustained",
-        pad="warm_slow",
-        melody="procedural",
-        rhythm="minimal",
-        texture="vinyl_crackle",
-        accent="pluck",
-        motion=0.3,
-        attack="soft",
-        stereo=0.5,
-        depth=False,
-        echo=0.5,
-        human=0.3,
-        grain="warm",
-        # Lo-fi melody policy
-        melody_phrase_len=8,
-        melody_density=0.3,
-        melody_syncopation=0.1,
-        melody_swing=0.4,
-        melody_step_vs_leap=0.9,
-        melody_chromatic=0.15,
-        melody_motif_repeat=0.4,
-        melody_cadence_strength=0.5,
-        melody_tension_curve="waves",
-    )
-    
-    config_to_audio(lofi_config, "lofi_procedural.wav", duration=20.0)
-    print("   Saved: lofi_procedural.wav")
 
-    # Jazz-style config
-    print("\n3. Generating jazz cafe demo...")
-    jazz_config = MusicConfig(
-        tempo=0.45,
-        root="f",
-        mode="dorian",
-        brightness=0.5,
-        space=0.5,
-        density=5,
-        bass="walking",
-        pad="warm_slow",
-        melody="procedural",
-        rhythm="soft_four",
-        texture="none",
-        accent="pluck",
-        motion=0.5,
-        attack="medium",
-        stereo=0.6,
-        depth=False,
-        echo=0.3,
-        human=0.25,
-        grain="warm",
-        # Jazz melody policy
-        melody_phrase_len=4,
-        melody_density=0.6,
-        melody_syncopation=0.4,
-        melody_swing=0.5,
-        melody_step_vs_leap=0.7,
-        melody_chromatic=0.3,
-        melody_motif_repeat=0.2,
-        melody_cadence_strength=0.6,
-        melody_tension_curve="arc",
-    )
-    
-    config_to_audio(jazz_config, "jazz_procedural.wav", duration=20.0)
-    print("   Saved: jazz_procedural.wav")
+    # Example 3: Bubblegum, sad, dead (from llm_to_synth.py, see @file_context_1)
+    import json
+    # These examples mirror the demo config blocks captured in @file_context_0:
+    demo_configs = [
+        {
+            # "justification": "The 'Bubblegum'-style sound is characterized by a bright, slightly distorted, and playful melody with a prominent bass line and a smooth, evolving pad.",
+            "tempo": 0.5,
+            "root": "a",
+            "mode": "major",
+            "brightness": 0.75,
+            "space": 0.5,
+            "density": 2,
+            "bass": "drone",
+            "pad": "warm_slow",
+            "melody": "contemplative",
+            "rhythm": "none",
+            "texture": "shimmer",
+            "accent": "bells",
+            "motion": 0.5,
+            "attack": "medium",
+            "stereo": 0.5,
+            "depth": False,
+            "echo": 0.25,
+            "human": 0.5,
+            "grain": "clean"
+        },
+        {
+            # "justification": "The sad vibe is characterized by a low-key sound and a sense of melancholy. The low intensity and muted tones create a feeling of quiet sorrow. The 'low' intensity of the bass and the 'dark' tone of the pad support this feeling. The 'soft' attack and 'warm' tone of the pad create a sense of longing and a feeling of sadness.",
+            "tempo": 0.25,
+            "root": "e",
+            "mode": "minor",
+            "brightness": 0.25,
+            "space": 0.25,
+            "density": 5,
+            "bass": "drone",
+            "pad": "warm_slow",
+            "melody": "contemplative",
+            "rhythm": "soft_four",
+            "texture": "shimmer_slow",
+            "accent": "bells",
+            "motion": 0.25,
+            "attack": "soft",
+            "stereo": 0.25,
+            "depth": True,
+            "echo": 0.5,
+            "human": 0.5,
+            "grain": "gritty"
+        },
+        {
+            # "justification": "The 'dead', a low volume synth with a simple sine wave and a low pitch.",
+            "tempo": 0.25,
+            "root": "c",
+            "mode": "minor",
+            "brightness": 0.25,
+            "space": 0.25,
+            "density": 2,
+            "bass": "drone",
+            "pad": "warm_slow",
+            "melody": "contemplative",
+            "rhythm": "none",
+            "texture": "shimmer_slow",
+            "accent": "bells",
+            "motion": 0.25,
+            "attack": "soft",
+            "stereo": 0.25,
+            "depth": False,
+            "echo": 0.25,
+            "human": 0.25,
+            "grain": "clean"
+        },
+    ]
+    demo_names = ["bubblegum.wav", "sad.wav", "dead.wav"]
+    demo_vibes = ["Bubblegum", "sad", "dead"]
 
-    print("\nDone! Generated 3 procedural melody audio files.")
+    for vibe, fname, config_dict in zip(demo_vibes, demo_names, demo_configs):
+        print(f"\n{'='*60}")
+        print(f"Vibe: {vibe}")
+        print('='*60)
+        config = MusicConfig.from_dict(config_dict)
+        print(json.dumps(config_dict, indent=2))
+        config_to_audio(config, fname, duration=20.0)
+        print(f"   Saved: {fname}")
+
+    print("\nAll demo audio exported.")
+
+
+
+
+
+# if __name__ == "__main__":
+#     print("VibeSynth V1/V2 - Pure Python Synthesis Engine")
+#     print("=" * 50)
+
+#     # Example 1: Direct config
+#     print("\n1. Generating from direct config (Indian Wedding)...")
+#     config = MusicConfig(
+#         tempo=0.36,
+#         root="d",
+#         mode="dorian",
+#         brightness=0.5,
+#         space=0.75,
+#         density=5,
+#         bass="drone",
+#         pad="warm_slow",
+#         melody="ornamental",
+#         rhythm="minimal",
+#         texture="shimmer_slow",
+#         accent="pluck",
+#         motion=0.5,
+#         attack="soft",
+#         stereo=0.65,
+#         depth=True,
+#         echo=0.55,
+#         human=0.18,
+#         grain="warm",
+#     )
+#     config_to_audio(config, "indian_wedding.wav", duration=20.0)
+#     print("   Saved: indian_wedding.wav")
+
+#     # Example 2: From dict (simulating JSON from LLM)
+#     print("\n2. Generating from dict (Dark Electronic)...")
+#     dark_config = {
+#         "tempo": 0.42,
+#         "root": "a",
+#         "mode": "minor",
+#         "brightness": 0.4,
+#         "space": 0.6,
+#         "density": 6,
+#         "layers": {
+#             "bass": "pulsing",
+#             "pad": "dark_sustained",
+#             "melody": "arp_melody",
+#             "rhythm": "electronic",
+#             "texture": "shimmer",
+#             "accent": "bells",
+#         },
+#         "motion": 0.65,
+#         "attack": "sharp",
+#         "stereo": 0.7,
+#         "depth": True,
+#         "echo": 0.5,
+#         "human": 0.0,
+#         "grain": "gritty",
+#     }
+#     dict_to_audio(dark_config, "dark_electronic.wav", duration=20.0)
+#     print("   Saved: dark_electronic.wav")
+
+#     # Example 3: From vibe string
+#     print("\n3. Generating from vibe string (Underwater Cave)...")
+#     generate_from_vibe(
+#         "slow, peaceful, underwater cave, bioluminescence", "underwater_cave.wav", duration=20.0
+#     )
+#     print("   Saved: underwater_cave.wav")
+
+#     print("\n" + "=" * 50)
+
+#     # Example 4: Morph between two configs
+#     print("\n4. Generating morph (Morning → Evening)...")
+
+#     morning = MusicConfig(
+#         tempo=0.30,
+#         root="c",
+#         mode="major",
+#         brightness=0.6,
+#         space=0.8,
+#         bass="drone",
+#         pad="warm_slow",
+#         melody="minimal",
+#         motion=0.3,
+#         attack="soft",
+#         echo=0.7,
+#     )
+
+#     evening = MusicConfig(
+#         tempo=0.42,
+#         root="a",
+#         mode="minor",
+#         brightness=0.45,
+#         space=0.6,
+#         bass="pulsing",
+#         pad="dark_sustained",
+#         melody="arp_melody",
+#         motion=0.65,
+#         attack="medium",
+#         echo=0.5,
+#     )
+
+#     # Generate 2-minute morph with overlap-add (no volume dips)
+#     audio = generate_tween_with_automation(morning, evening, duration=120.0)
+#     # audio = assemble(morning, duration=30.0)  # Just morning, no morphing
+
+#     sf.write("morning_to_evening.wav", audio, SAMPLE_RATE)
+#     print("   Saved: morning_to_evening.wav")
+
+#     print("\nDone! Generated 4 audio files.")
