@@ -13,13 +13,131 @@ Architecture:
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Dict, Iterable, List, Sequence, Tuple, TypeAlias, cast
+from functools import lru_cache
+from typing import Any, Callable, Dict, Iterable, List, Sequence, Tuple, TypeAlias, TypedDict, cast
 
 import numpy as np
 import soundfile as sf  # type: ignore[import]
 from numpy.typing import NDArray
 from scipy.signal import butter, decimate, lfilter  # type: ignore[import]
+
+# -----------------------------------------------------------------------------
+# Optional: Spotify's 'pedalboard' (high-quality C++ DSP effects)
+# -----------------------------------------------------------------------------
+# We use pedalboard whenever it's available, but keep pure-numpy/scipy fallbacks
+# so this file remains usable even without the dependency.
+pedalboard_available = False
+Pedalboard = None  # type: ignore[assignment]
+PBReverb = PBDelay = PBLowpass = PBHighpass = None  # type: ignore[assignment]
+PBCompressor = PBLimiter = None  # type: ignore[assignment]
+PBBitcrush = PBDistortion = PBChorus = PBGain = None  # type: ignore[assignment]
+
+try:  # pragma: no cover
+    from pedalboard import (
+        Compressor as PBCompressor,
+    )
+    from pedalboard import (
+        Delay as PBDelay,
+    )
+    from pedalboard import (
+        HighpassFilter as PBHighpass,
+    )
+    from pedalboard import (
+        Limiter as PBLimiter,
+    )
+    from pedalboard import (
+        LowpassFilter as PBLowpass,
+    )
+    from pedalboard import (
+        Pedalboard,  # type: ignore[reportPrivateImportUsage]
+    )
+    from pedalboard import (
+        Reverb as PBReverb,
+    )
+
+    pedalboard_available = True
+
+    # Optional extras (not guaranteed to exist in every pedalboard version)
+    try:  # pragma: no cover
+        from pedalboard import Bitcrush as PBBitcrush  # type: ignore[import]
+    except Exception:
+        PBBitcrush = None  # type: ignore[assignment]
+
+    try:  # pragma: no cover
+        from pedalboard import Distortion as PBDistortion  # type: ignore[import]
+    except Exception:
+        PBDistortion = None  # type: ignore[assignment]
+
+    try:  # pragma: no cover
+        from pedalboard import Chorus as PBChorus  # type: ignore[import]
+    except Exception:
+        PBChorus = None  # type: ignore[assignment]
+
+    try:  # pragma: no cover
+        from pedalboard import Gain as PBGain  # type: ignore[import]
+    except Exception:
+        PBGain = None  # type: ignore[assignment]
+
+except Exception:
+    pedalboard_available = False
+
+
+def _clamp(x: float, lo: float, hi: float) -> float:
+    if x < lo:
+        return float(lo)
+    if x > hi:
+        return float(hi)
+    return float(x)
+
+
+def _pb_make_effect(effect_cls: Any, **kwargs: Any) -> Any:
+    """Best-effort instantiate a pedalboard effect across versions."""
+    if effect_cls is None:
+        return None
+    # Try keyword args (filtered by signature)
+    try:
+        sig = inspect.signature(effect_cls)
+        accepted = set(sig.parameters.keys())
+        filtered = {k: v for k, v in kwargs.items() if k in accepted}
+        if filtered:
+            return effect_cls(**filtered)
+    except Exception:
+        pass
+
+    # Fallback: try all kwargs directly
+    try:
+        return effect_cls(**kwargs)
+    except Exception:
+        pass
+
+    # Last resort: try first value positionally (covers simple constructors)
+    try:
+        if kwargs:
+            return effect_cls(next(iter(kwargs.values())))
+        return effect_cls()
+    except Exception:
+        return None
+
+
+def _pb_process_mono(signal: FloatArray, sr: int, effects: list[Any]) -> FloatArray:
+    """Run a mono buffer through a pedalboard chain."""
+    if not pedalboard_available or Pedalboard is None or not effects:
+        return signal
+
+    x = np.ascontiguousarray(np.asarray(signal, dtype=np.float32))
+    board = Pedalboard([fx for fx in effects if fx is not None])
+    y = board(x, sr)
+    return np.asarray(y, dtype=np.float64)
+
+
+@lru_cache(maxsize=256)
+def _butter2_cached(norm_cutoff_q: float, btype: str) -> FilterCoefficients:
+    """Cached 2nd-order Butterworth coefficients."""
+    b, a = cast(FilterCoefficients, butter(2, norm_cutoff_q, btype=btype, output="ba"))
+    return b, a
+
 
 # =============================================================================
 # CONSTANTS
@@ -83,6 +201,44 @@ DENSITY_LAYERS: dict[int, tuple[str, ...]] = {
 FloatArray: TypeAlias = NDArray[np.float64]
 OscFn: TypeAlias = Callable[[float, float, int, float], FloatArray]
 FilterCoefficients: TypeAlias = tuple[FloatArray, FloatArray]
+
+
+class MusicConfigDict(TypedDict, total=False):
+    tempo: float
+    root: str
+    mode: str
+    brightness: float
+    space: float
+    density: int
+    bass: str
+    pad: str
+    melody: str
+    rhythm: str
+    texture: str
+    accent: str
+    motion: float
+    attack: str
+    stereo: float
+    depth: bool
+    echo: float
+    human: float
+    grain: str
+    melody_engine: str
+    phrase_len_bars: int
+    melody_density: float
+    syncopation: float
+    swing: float
+    motif_repeat_prob: float
+    step_bias: float
+    chromatic_prob: float
+    cadence_strength: float
+    register_min_oct: int
+    register_max_oct: int
+    tension_curve: str
+    harmony_style: str
+    chord_change_bars: int
+    chord_extensions: str
+    seed: int
 
 
 # =============================================================================
@@ -220,9 +376,21 @@ def generate_square(
     return cast(FloatArray, amp * signal)
 
 
-def generate_noise(duration: float, sr: int = SAMPLE_RATE, amp: float = 0.1) -> FloatArray:
+def generate_noise(
+    duration: float,
+    sr: int = SAMPLE_RATE,
+    amp: float = 0.1,
+    rng: np.random.Generator | None = None,
+) -> FloatArray:
     """Generate white noise."""
-    return amp * np.random.randn(int(sr * duration))
+    n = int(sr * duration)
+    if n <= 0:
+        return cast(FloatArray, np.zeros(0, dtype=np.float64))
+
+    if rng is None:
+        return amp * np.random.randn(n)
+
+    return amp * rng.standard_normal(n)
 
 
 OSC_FUNCTIONS: dict[str, OscFn] = {
@@ -271,29 +439,97 @@ def apply_adsr(
 
 
 def apply_lowpass(signal: FloatArray, cutoff: float, sr: int = SAMPLE_RATE) -> FloatArray:
-    """Apply lowpass filter (causal, analog-style)."""
+    """Apply lowpass filter.
+
+    Prefers Spotify's pedalboard (if installed) for high-quality DSP, with a scipy fallback.
+    """
+    if cutoff <= 0:
+        return signal
+
+    # Pedalboard path
+    if pedalboard_available and PBLowpass is not None and Pedalboard is not None:
+        cutoff_hz = _clamp(float(cutoff), 5.0, (sr / 2) * 0.99)
+        fx = _pb_make_effect(
+            PBLowpass,
+            cutoff_frequency_hz=cutoff_hz,
+            cutoff_hz=cutoff_hz,
+        )
+        if fx is not None:
+            return _pb_process_mono(signal, sr, [fx])
+
+    # Scipy fallback (cached coefficients)
     nyquist = sr / 2
     normalized = min(max(cutoff / nyquist, 0.001), 0.99)
-    b, a = cast(FilterCoefficients, butter(2, normalized, btype="low", output="ba"))
+    normalized_q = float(round(normalized, 6))
+    b, a = _butter2_cached(normalized_q, "low")
     return cast(FloatArray, lfilter(b, a, signal))
 
 
 def apply_highpass(signal: FloatArray, cutoff: float, sr: int = SAMPLE_RATE) -> FloatArray:
-    """Apply highpass filter (causal, analog-style)."""
+    """Apply highpass filter.
+
+    Prefers Spotify's pedalboard (if installed) for high-quality DSP, with a scipy fallback.
+    """
+    if cutoff <= 0:
+        return signal
+
+    # Pedalboard path
+    if pedalboard_available and PBHighpass is not None and Pedalboard is not None:
+        cutoff_hz = _clamp(float(cutoff), 5.0, (sr / 2) * 0.99)
+        fx = _pb_make_effect(
+            PBHighpass,
+            cutoff_frequency_hz=cutoff_hz,
+            cutoff_hz=cutoff_hz,
+        )
+        if fx is not None:
+            return _pb_process_mono(signal, sr, [fx])
+
+    # Scipy fallback (cached coefficients)
     nyquist = sr / 2
     normalized = min(max(cutoff / nyquist, 0.001), 0.99)
-    b, a = cast(FilterCoefficients, butter(2, normalized, btype="high", output="ba"))
+    normalized_q = float(round(normalized, 6))
+    b, a = _butter2_cached(normalized_q, "high")
     return cast(FloatArray, lfilter(b, a, signal))
 
 
 def apply_delay(
-    signal: FloatArray, delay_time: float, feedback: float, wet: float, sr: int = SAMPLE_RATE
+    signal: FloatArray,
+    delay_time: float,
+    feedback: float,
+    wet: float,
+    sr: int = SAMPLE_RATE,
 ) -> FloatArray:
-    """Apply delay effect."""
+    """Apply delay effect.
+
+    - If pedalboard is available, uses its Delay (feedback + mix).
+    - Otherwise, falls back to a lightweight multi-tap delay.
+    """
+    if delay_time <= 0 or wet <= 0:
+        return signal
+
+    # Pedalboard path
+    if pedalboard_available and PBDelay is not None and Pedalboard is not None:
+        delay_s = _clamp(float(delay_time), 0.0, 2.0)
+        fb = _clamp(float(feedback), 0.0, 0.99)
+        mix = _clamp(float(wet), 0.0, 1.0)
+
+        fx = _pb_make_effect(
+            PBDelay,
+            delay_seconds=delay_s,
+            feedback=fb,
+            mix=mix,
+        )
+        if fx is not None:
+            return _pb_process_mono(signal, sr, [fx])
+
+    # Fallback: simple multi-tap delay
     delay_samples = int(delay_time * sr)
+    if delay_samples <= 0:
+        return signal
+
     output = signal.copy()
 
-    for i in range(1, 5):  # 5 delay taps
+    for i in range(1, 5):  # 4 delay taps
         offset = delay_samples * i
         if offset < len(signal):
             delayed = np.zeros_like(signal)
@@ -304,15 +540,44 @@ def apply_delay(
 
 
 def apply_reverb(signal: FloatArray, room: float, size: float, sr: int = SAMPLE_RATE) -> FloatArray:
-    """Simple reverb via multiple delays."""
+    """Reverb.
+
+    - If pedalboard is available, uses its Reverb for better quality.
+    - Otherwise, uses a simple multi-delay reverb (fast + dependency-free).
+    """
+    if room <= 0:
+        return signal
+
+    # Pedalboard path
+    if pedalboard_available and PBReverb is not None and Pedalboard is not None:
+        # Map the engine's controls to pedalboard's parameters (best-effort).
+        room_amt = _clamp(float(room), 0.0, 1.0)
+        room_size = _clamp(float(size), 0.0, 1.0)
+
+        # Pedalboard reverb can get very wet quickly; keep it conservative.
+        wet = _clamp(room_amt * 0.6, 0.0, 1.0)
+        dry = _clamp(1.0 - wet, 0.0, 1.0)
+        damping = _clamp(0.2 + (1.0 - room_size) * 0.6, 0.0, 1.0)
+
+        fx = _pb_make_effect(
+            PBReverb,
+            room_size=room_size,
+            damping=damping,
+            wet_level=wet,
+            dry_level=dry,
+            width=1.0,
+        )
+        if fx is not None:
+            return _pb_process_mono(signal, sr, [fx])
+
+    # Fallback: multiple delay lines at prime-ish intervals
     output = signal.copy()
 
-    # Multiple delay lines at prime-ish intervals (tuple)
     delays = (0.029, 0.037, 0.041, 0.053, 0.067)
 
     for i, delay in enumerate(delays):
         delay_samples = int(delay * size * sr)
-        if delay_samples < len(signal) and delay_samples > 0:
+        if 0 < delay_samples < len(signal):
             reverb = np.zeros_like(signal)
             reverb[delay_samples:] = signal[:-delay_samples] * room * (0.7**i)
             output += reverb
@@ -326,13 +591,28 @@ def generate_lfo(duration: float, rate: float, sr: int = SAMPLE_RATE) -> FloatAr
     return 0.5 + 0.5 * np.sin(2 * np.pi * rate * t)
 
 
-def apply_humanize(signal: FloatArray, amount: float, sr: int = SAMPLE_RATE) -> FloatArray:
-    """Apply subtle timing/amplitude humanization."""
+def apply_humanize(
+    signal: FloatArray,
+    amount: float,
+    sr: int = SAMPLE_RATE,
+    rng: np.random.Generator | None = None,
+) -> FloatArray:
+    """Apply subtle timing/amplitude humanization.
+
+    Note: `rng` is optional and only exists to make seeded renders deterministic.
+    """
+    _ = sr  # (kept for backwards compatibility / signature stability)
+
     if amount <= 0:
         return signal
 
+    if rng is None:
+        jitter = np.random.randn(len(signal))
+    else:
+        jitter = rng.standard_normal(len(signal))
+
     # Subtle amplitude variation
-    amp_lfo = 1.0 + (np.random.randn(len(signal)) * amount * 0.1)
+    amp_lfo = 1.0 + (jitter * amount * 0.1)
     amp_lfo = np.clip(amp_lfo, 0.9, 1.1)
 
     return signal * amp_lfo
@@ -730,7 +1010,7 @@ def bass_walking(params: SynthParams) -> FloatArray:
             0.22 * params.attack_mult,
             sr,
         )
-        note = apply_humanize(note, params.human, sr)
+        note = apply_humanize(note, params.human, sr, params.rng)
         add_note(signal, note, int(start_sec * sr))
 
     signal = apply_reverb(signal, params.space * 0.3, params.space * 0.8, sr)
@@ -840,7 +1120,7 @@ def pad_warm_slow(params: SynthParams) -> FloatArray:
 
     signal = apply_reverb(signal, params.space * 0.7, params.space * 0.9, sr)
     signal = apply_delay(signal, 0.35, 0.3 * params.echo_mult, 0.25 * params.echo_mult, sr)
-    signal = apply_humanize(signal, params.human, sr)
+    signal = apply_humanize(signal, params.human, sr, params.rng)
 
     return signal
 
@@ -1367,7 +1647,7 @@ def melody_procedural(params: SynthParams) -> FloatArray:
         atk = (0.05 if ev.is_anchor else 0.03) * params.attack_mult
         rel = (0.22 if ev.is_anchor else 0.16) * params.attack_mult
         note = apply_adsr(note, atk, 0.12, 0.55, rel, sr)
-        note = apply_humanize(note, params.human * 0.6, sr)
+        note = apply_humanize(note, params.human * 0.6, sr, params.rng)
 
         add_note(signal, note, start_idx)
 
@@ -1399,7 +1679,7 @@ def melody_contemplative(params: SynthParams) -> FloatArray:
         note = osc(freq, note_dur * 1.5, sr, 0.18)
         note = apply_lowpass(note, 800 * params.brightness + 200, sr)
         note = apply_adsr(note, 0.1 * params.attack_mult, 0.3, 0.6, 0.8 * params.attack_mult, sr)
-        note = apply_humanize(note, params.human, sr)
+        note = apply_humanize(note, params.human, sr, params.rng)
 
         add_note(signal, note, start)
 
@@ -1430,7 +1710,7 @@ def melody_rising(params: SynthParams) -> FloatArray:
         note = osc(freq, note_dur * 1.8, sr, 0.16)
         note = apply_lowpass(note, 900 * params.brightness + 250, sr)
         note = apply_adsr(note, 0.08 * params.attack_mult, 0.25, 0.55, 0.9 * params.attack_mult, sr)
-        note = apply_humanize(note, params.human, sr)
+        note = apply_humanize(note, params.human, sr, params.rng)
 
         add_note(signal, note, start)
 
@@ -1461,7 +1741,7 @@ def melody_falling(params: SynthParams) -> FloatArray:
         note = osc(freq, note_dur * 1.6, sr, 0.17)
         note = apply_lowpass(note, 850 * params.brightness + 220, sr)
         note = apply_adsr(note, 0.1 * params.attack_mult, 0.28, 0.52, 0.85 * params.attack_mult, sr)
-        note = apply_humanize(note, params.human, sr)
+        note = apply_humanize(note, params.human, sr, params.rng)
 
         add_note(signal, note, start)
 
@@ -1492,7 +1772,7 @@ def melody_minimal(params: SynthParams) -> FloatArray:
         note = osc(freq, note_dur * 2.5, sr, 0.20)
         note = apply_lowpass(note, 600 * params.brightness + 150, sr)
         note = apply_adsr(note, 0.15 * params.attack_mult, 0.4, 0.5, 1.2 * params.attack_mult, sr)
-        note = apply_humanize(note, params.human, sr)
+        note = apply_humanize(note, params.human, sr, params.rng)
 
         add_note(signal, note, start)
 
@@ -1530,7 +1810,7 @@ def melody_ornamental(params: SynthParams) -> FloatArray:
         main_note = apply_adsr(
             main_note, 0.08 * params.attack_mult, 0.3, 0.55, 0.8 * params.attack_mult, sr
         )
-        main_note = apply_humanize(main_note, params.human, sr)
+        main_note = apply_humanize(main_note, params.human, sr, params.rng)
 
         grace_start = start
         main_start = start + int(note_dur * 0.15 * sr)
@@ -1618,7 +1898,7 @@ def rhythm_minimal(params: SynthParams) -> FloatArray:
         pitch_env = np.exp(-np.linspace(0, 8, len(kick)))
         kick = kick * pitch_env
         kick = apply_lowpass(kick, 150, sr)
-        kick = apply_humanize(kick, params.human, sr)
+        kick = apply_humanize(kick, params.human, sr, params.rng)
 
         add_note(signal, kick, start)
 
@@ -1672,7 +1952,7 @@ def rhythm_soft_four(params: SynthParams) -> FloatArray:
         pitch_env = np.exp(-np.linspace(0, 6, len(kick)))
         kick = kick * pitch_env
         kick = apply_lowpass(kick, 100, sr)
-        kick = apply_humanize(kick, params.human, sr)
+        kick = apply_humanize(kick, params.human, sr, params.rng)
 
         add_note(signal, kick, start)
 
@@ -1695,10 +1975,10 @@ def rhythm_hats_only(params: SynthParams) -> FloatArray:
 
         # Hi-hat: filtered noise
         hat_dur = 0.05
-        hat = generate_noise(hat_dur, sr, 0.08)
+        hat = generate_noise(hat_dur, sr, 0.08, params.rng)
         hat = apply_highpass(hat, 6000, sr)
         hat = apply_adsr(hat, 0.001, 0.02, 0.1, 0.03, sr)
-        hat = apply_humanize(hat, params.human, sr)
+        hat = apply_humanize(hat, params.human, sr, params.rng)
 
         add_note(signal, hat, start)
 
@@ -1728,7 +2008,7 @@ def rhythm_electronic(params: SynthParams) -> FloatArray:
             add_note(signal, kick, start)
 
         if hat_pattern[i]:
-            hat = generate_noise(0.06, sr, 0.06)
+            hat = generate_noise(0.06, sr, 0.06, params.rng)
             hat = apply_highpass(hat, 7000, sr)
             hat = apply_adsr(hat, 0.001, 0.02, 0.1, 0.04, sr)
             add_note(signal, hat, start)
@@ -1816,21 +2096,26 @@ def texture_vinyl_crackle(params: SynthParams) -> FloatArray:
     """Vinyl crackle texture."""
     sr = SAMPLE_RATE
     dur = params.duration
+    rng = params.rng
 
     # Sparse noise impulses
     signal = np.zeros(int(sr * dur))
 
     num_crackles = int(dur * 20)  # ~20 crackles per second
+    max_pos = len(signal) - 100
 
-    for _ in range(num_crackles):
-        pos = np.random.randint(0, len(signal) - 100)
-        crackle = generate_noise(0.002, sr, np.random.uniform(0.01, 0.04))
-        crackle = apply_highpass(crackle, 2000, sr)
+    if max_pos > 0:
+        for _ in range(num_crackles):
+            pos = int(rng.integers(0, max_pos))
+            amp = float(rng.uniform(0.01, 0.04))
 
-        add_note(signal, crackle, pos)
+            crackle = generate_noise(0.002, sr, amp, rng)
+            crackle = apply_highpass(crackle, 2000, sr)
+
+            add_note(signal, crackle, pos)
 
     # Soft background hiss
-    hiss = generate_noise(dur, sr, 0.008)
+    hiss = generate_noise(dur, sr, 0.008, rng)
     hiss = apply_lowpass(hiss, 8000, sr)
     hiss = apply_highpass(hiss, 1000, sr)
     signal += hiss
@@ -1844,7 +2129,7 @@ def texture_breath(params: SynthParams) -> FloatArray:
     dur = params.duration
 
     # Filtered noise with slow envelope
-    signal = generate_noise(dur, sr, 0.06)
+    signal = generate_noise(dur, sr, 0.06, params.rng)
 
     # Bandpass around a note frequency
     freq = params.get_scale_freq(0, 3)
@@ -1865,6 +2150,7 @@ def texture_stars(params: SynthParams) -> FloatArray:
     """Twinkling stars texture."""
     sr = SAMPLE_RATE
     dur = params.duration
+    rng = params.rng
 
     signal = np.zeros(int(sr * dur))
 
@@ -1874,16 +2160,19 @@ def texture_stars(params: SynthParams) -> FloatArray:
     # Scale degrees for stars (tuple)
     star_degrees = (0, 2, 4, 5)
 
-    for _ in range(num_stars):
-        pos = np.random.randint(0, len(signal) - sr)
+    max_pos = len(signal) - sr
+    if max_pos > 0:
+        for _ in range(num_stars):
+            pos = int(rng.integers(0, max_pos))
 
-        degree = np.random.choice(star_degrees)
-        freq = params.get_scale_freq(degree, 6)
+            degree = int(rng.choice(star_degrees))
+            freq = params.get_scale_freq(degree, 6)
 
-        star = generate_sine(freq, 0.3, sr, np.random.uniform(0.02, 0.05))
-        star = apply_adsr(star, 0.01, 0.1, 0.1, 0.2, sr)
+            amp = float(rng.uniform(0.02, 0.05))
+            star = generate_sine(freq, 0.3, sr, amp)
+            star = apply_adsr(star, 0.01, 0.1, 0.1, 0.2, sr)
 
-        add_note(signal, star, pos)
+            add_note(signal, star, pos)
 
     signal = apply_delay(signal, 0.4, 0.5 * params.echo_mult, 0.4 * params.echo_mult, sr)
     signal = apply_reverb(signal, params.space * 0.9, params.space, sr)
@@ -1939,7 +2228,7 @@ def accent_bells(params: SynthParams) -> FloatArray:
         bell += generate_sine(freq * 2.0, bell_dur, sr, 0.06)
         bell += generate_sine(freq * 3.0, bell_dur, sr, 0.03)
         bell = apply_adsr(bell, 0.005 * params.attack_mult, 0.2, 0.1, 0.6 * params.attack_mult, sr)
-        bell = apply_humanize(bell, params.human, sr)
+        bell = apply_humanize(bell, params.human, sr, params.rng)
 
         add_note(signal, bell, start)
 
@@ -1971,7 +2260,7 @@ def accent_pluck(params: SynthParams) -> FloatArray:
         pluck = apply_adsr(
             pluck, 0.003 * params.attack_mult, 0.15, 0.05, 0.4 * params.attack_mult, sr
         )
-        pluck = apply_humanize(pluck, params.human, sr)
+        pluck = apply_humanize(pluck, params.human, sr, params.rng)
 
         add_note(signal, pluck, start)
 
@@ -1983,6 +2272,7 @@ def accent_chime(params: SynthParams) -> FloatArray:
     """Wind chime accents."""
     sr = SAMPLE_RATE
     dur = params.duration
+    rng = params.rng
 
     signal = np.zeros(int(sr * dur))
 
@@ -1992,18 +2282,21 @@ def accent_chime(params: SynthParams) -> FloatArray:
     # Chime degrees (tuple)
     chime_degrees = (0, 2, 4, 5, 6)
 
-    for _ in range(num_chimes):
-        pos = np.random.randint(0, len(signal) - sr)
+    max_pos = len(signal) - sr
+    if max_pos > 0:
+        for _ in range(num_chimes):
+            pos = int(rng.integers(0, max_pos))
 
-        degree = np.random.choice(chime_degrees)
-        freq = params.get_scale_freq(degree, 5)
+            degree = int(rng.choice(chime_degrees))
+            freq = params.get_scale_freq(degree, 5)
 
-        chime_dur = 1.2
-        chime = generate_sine(freq, chime_dur, sr, np.random.uniform(0.06, 0.12))
-        chime += generate_sine(freq * 2.0, chime_dur, sr, 0.03)
-        chime = apply_adsr(chime, 0.002, 0.3, 0.05, 0.9, sr)
+            chime_dur = 1.2
+            amp = float(rng.uniform(0.06, 0.12))
+            chime = generate_sine(freq, chime_dur, sr, amp)
+            chime += generate_sine(freq * 2.0, chime_dur, sr, 0.03)
+            chime = apply_adsr(chime, 0.002, 0.3, 0.05, 0.9, sr)
 
-        add_note(signal, chime, pos)
+            add_note(signal, chime, pos)
 
     signal = apply_delay(signal, 0.3, 0.4 * params.echo_mult, 0.3 * params.echo_mult, sr)
     signal = apply_reverb(signal, params.space * 0.75, params.space * 0.9, sr)
@@ -2227,6 +2520,74 @@ def build_harmony_plan(config: MusicConfig, params: SynthParams) -> HarmonyPlan:
     return HarmonyPlan(chords=tuple(chords), beats_per_bar=beats_per_bar)
 
 
+def apply_master_fx(
+    signal: FloatArray,
+    config: MusicConfig,
+    sr: int = SAMPLE_RATE,
+    loudness: bool = True,
+) -> FloatArray:
+    """Optional master-bus FX using Spotify's pedalboard when available.
+
+    This is intentionally subtle and safe:
+    - If pedalboard isn't installed, it's a no-op.
+    - If `loudness` is False, it skips compressor/limiter to preserve dynamics
+      for chunked automation renders.
+    """
+    if not pedalboard_available or Pedalboard is None:
+        return signal
+
+    fx_chain: list[Any] = []
+
+    # --- Tone / color --------------------------------------------------------
+    grain = getattr(config, "grain", "clean")
+    if grain == "warm":
+        if PBDistortion is not None:
+            # Gentle saturation
+            fx_chain.append(_pb_make_effect(PBDistortion, drive_db=3.0))
+    elif grain == "gritty":
+        if PBBitcrush is not None:
+            # Subtle lo-fi crunch (conservative defaults)
+            fx_chain.append(_pb_make_effect(PBBitcrush, bit_depth=10))
+        if PBDistortion is not None:
+            fx_chain.append(_pb_make_effect(PBDistortion, drive_db=6.0))
+
+    # Add subtle chorus for motion if available
+    motion = float(getattr(config, "motion", 0.0))
+    stereo = float(getattr(config, "stereo", 0.0))
+    if PBChorus is not None and motion > 0.7 and stereo > 0.2:
+        # Best-effort: many pedalboard versions support some subset of these params
+        fx_chain.append(
+            _pb_make_effect(
+                PBChorus,
+                rate_hz=_clamp(0.15 + motion * 0.8, 0.05, 5.0),
+                depth=_clamp(0.05 + motion * 0.25, 0.0, 1.0),
+                mix=_clamp(0.06 + stereo * 0.18, 0.0, 0.5),
+            )
+        )
+
+    # --- Loudness glue -------------------------------------------------------
+    if loudness:
+        if PBCompressor is not None:
+            fx_chain.append(
+                _pb_make_effect(
+                    PBCompressor,
+                    threshold_db=-24.0,
+                    ratio=2.0,
+                    attack_ms=5.0,
+                    release_ms=80.0,
+                )
+            )
+        if PBLimiter is not None:
+            fx_chain.append(_pb_make_effect(PBLimiter, threshold_db=-1.0))
+
+    # Filter out Nones and bail if nothing constructed successfully
+    fx_chain = [fx for fx in fx_chain if fx is not None]
+    if not fx_chain:
+        return signal
+
+    return _pb_process_mono(signal, sr, fx_chain)
+
+
 def assemble(config: MusicConfig, duration: float = 16.0, normalize: bool = True) -> FloatArray:
     """
     Assemble all layers into final audio.
@@ -2303,6 +2664,9 @@ def assemble(config: MusicConfig, duration: float = 16.0, normalize: bool = True
     if "accent" in active_layers and config.accent != "none":
         accent_fn = ACCENT_PATTERNS.get(config.accent, accent_none)
         output += accent_fn(params)
+
+    # Master bus FX (pedalboard when available).
+    output = apply_master_fx(output, config, sr, loudness=normalize)
 
     # Normalize only if requested
     if normalize:
@@ -2506,23 +2870,49 @@ def morph_audio(
 
 
 def crossfade(audio_a: FloatArray, audio_b: FloatArray, crossfade_samples: int) -> FloatArray:
-    """Crossfade between two audio arrays at the midpoint."""
+    """Crossfade between two audio arrays around the midpoint.
+
+    This helper is deliberately defensive:
+    - clamps the crossfade length to the available audio
+    - handles very short buffers
+    - supports odd crossfade lengths
+    """
     min_len = min(len(audio_a), len(audio_b))
+    if min_len <= 0:
+        return np.zeros(0, dtype=np.float64)
+
+    a = audio_a[:min_len]
+    b = audio_b[:min_len]
+
+    cf = int(max(0, crossfade_samples))
+    if cf <= 1:
+        mid = min_len // 2
+        return np.concatenate((a[:mid], b[mid:]))
+
+    cf = min(cf, min_len)
+
     mid = min_len // 2
-    half_cf = crossfade_samples // 2
+    half = cf // 2
+    start = mid - half
+    end = start + cf
 
-    fade_out = np.linspace(1.0, 0.0, crossfade_samples)
-    fade_in = np.linspace(0.0, 1.0, crossfade_samples)
+    if start < 0:
+        start = 0
+        end = cf
+    if end > min_len:
+        end = min_len
+        start = max(0, end - cf)
 
-    result = np.concatenate(
-        (
-            audio_a[: mid - half_cf],
-            audio_a[mid - half_cf : mid + half_cf] * fade_out
-            + audio_b[mid - half_cf : mid + half_cf] * fade_in,
-            audio_b[mid + half_cf : min_len],
-        )
-    )
+    cf = end - start
+    if cf <= 1:
+        return np.concatenate((a[:start], b[start:]))
 
+    fade_out = np.linspace(1.0, 0.0, cf)
+    fade_in = 1.0 - fade_out
+
+    cross = a[start:end] * fade_out + b[start:end] * fade_in
+
+    result = np.concatenate((a[:start], cross, b[end:]))
     return result
 
 
@@ -2653,7 +3043,7 @@ if __name__ == "__main__":
     import json
 
     # These examples mirror the demo config blocks captured in @file_context_0:
-    demo_configs = [
+    demo_configs: list[MusicConfigDict] = [
         {
             # "justification": "The 'Bubblegum'-style sound is characterized by a bright, slightly distorted, and playful melody with a prominent bass line and a smooth, evolving pad.",
             "tempo": 0.5,
@@ -2728,9 +3118,7 @@ if __name__ == "__main__":
         print(f"\n{'=' * 60}")
         print(f"Vibe: {vibe}")
         print("=" * 60)
-        config = MusicConfig(
-            **cast(Dict[str, Any], config_dict)
-        )  # demo literals are fixed/validated.
+        config = MusicConfig(**config_dict)
         print(json.dumps(config_dict, indent=2))
         config_to_audio(config, fname, duration=20.0)
         print(f"   Saved: {fname}")

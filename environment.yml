@@ -9,6 +9,7 @@ dependencies:
   - pip:
     # Audio
     - soundfile
+    - pedalboard
     
     # LLM - MLX
     - mlx>=0.22
@@ -28,6 +29,9 @@ dependencies:
     - pywebview>=4.4
     - rumps>=0.4
     - pyinstaller
+
+    # Async
+    - uvloop
     
     # Utils
     - dependency-injector>=4.42

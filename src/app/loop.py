@@ -9,7 +9,7 @@ if sys.platform.startswith("win"):
     uvloop = None
 else:
     try:
-        import uvloop as _uvloop
+        import uvloop as _uvloop  # type: ignore[import]  # uvloop stubs missing in this env.
     except ImportError:
         uvloop = None
     else:
