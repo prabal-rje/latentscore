@@ -44,3 +44,10 @@ dependencies:
     - pytest-asyncio>=0.23
     - pytest-cov>=4.1
     - ruff>=0.6
+
+    # RAVE ONLY
+    - torchvision
+    - torchaudio
+    - huggingface_hub
+    - ffmpeg
+    - acids-rave

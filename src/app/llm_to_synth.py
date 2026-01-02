@@ -1925,6 +1925,146 @@ Output:
   },
   "score": 92
 }
+```
+
+**Example 36**
+Input: "Domestic Violence (from victim perspective) - walking on eggshells, stifled breath, nowhere to run, heart in throat, fragile silence"
+Output:
+
+```json
+{
+  "config": {
+    "justification": "VIBE DECOMPOSITION: Walking on eggshells = extreme tension, suppression of sound, fear of triggering. Stifled breath = erratic organic texture, suffocation. Nowhere to run = claustrophobia, small dry space. Heart in throat = internal physiological rhythm, overpowering the environment. Fragile silence = thin high frequencies, emptiness that feels dangerous. SONIC TRANSLATION: Eggshells → 'very_slow' tempo (time frozen), 'soft' attack (trying not to make noise). Stifled breath → 'breath' texture, 'human' natural. Claustrophobia → 'small' space, 'narrow' stereo. Heartbeat → 'heartbeat' rhythm (non-negotiable). Fragile → 'thin_high' pad (glassy anxiety), 'minimal' melody. COHERENCE CHECK: Must be 'very_dark' or 'dark' to represent hiding. 'Depth' true implies the visceral pit in the stomach. 'Bass' sub_pulse tracks the internal dread. REFERENCE ANCHORING: The sound of a panic attack in a closet. Isolation and terror.",
+    "tempo": "very_slow",
+    "root": "f#",
+    "mode": "minor",
+    "brightness": "very_dark",
+    "space": "small",
+    "density": 3,
+    "bass": "sub_pulse",
+    "pad": "thin_high",
+    "melody": "minimal",
+    "rhythm": "heartbeat",
+    "texture": "breath",
+    "accent": "none",
+    "motion": "static",
+    "attack": "soft",
+    "stereo": "narrow",
+    "depth": true,
+    "echo": "none",
+    "human": "natural",
+    "grain": "clean",
+    "melody_engine": "procedural",
+    "phrase_len_bars": 2,
+    "melody_density": "very_sparse",
+    "syncopation": "light",
+    "swing": "none",
+    "motif_repeat": "rare",
+    "step_vs_leap": "step",
+    "chromatic": "light",
+    "cadence": "weak",
+    "register": "high",
+    "tension_curve": "ramp",
+    "harmony": "cinematic",
+    "chord_change": "very_slow",
+    "chord_extensions": "triads"
+  },
+  "score": 95
+}
+
+```
+
+**Example 37**
+Input: "Domestic Violence (from aggressor perspective) - red mist, distorted reality, looming power, volatile control, suffocating presence"
+Output:
+
+```json
+{
+  "config": {
+    "justification": "VIBE DECOMPOSITION: Red mist = blurred vision, anger, heat. Distorted reality = bit-crushed, gritty, unstable pitch. Looming power = massive low end, occupying all space. Volatile control = sudden loud accents, chaotic changes. Suffocating presence = heavy density, no silence. SONIC TRANSLATION: Red mist → 'gritty' grain (mental haze), 'distortion'. Looming → 'drone' bass (constant threat), 'dark_sustained' pad. Volatile → 'chaotic' motion, 'brass_hit' or 'blip_random' (sudden snaps). Suffocating → 'dry' space (in your face), 'density' 6. COHERENCE CHECK: 'Minor' mode is too clean; needs dissonance, but 'minor' is the best setting available—rely on 'chromatic' melody settings. 'Rhythm' should be 'none' or 'heartbeat'—let's go 'heartbeat' for the adrenaline of rage. REFERENCE ANCHORING: The Shining score or industrial noise. A headache turning into violence.",
+    "tempo": "slow",
+    "root": "a#",
+    "mode": "minor",
+    "brightness": "dark",
+    "space": "dry",
+    "density": 6,
+    "bass": "drone",
+    "pad": "dark_sustained",
+    "melody": "falling",
+    "rhythm": "heartbeat",
+    "texture": "glitch",
+    "accent": "blip_random",
+    "motion": "chaotic",
+    "attack": "sharp",
+    "stereo": "mono",
+    "depth": true,
+    "echo": "none",
+    "human": "drunk",
+    "grain": "gritty",
+    "melody_engine": "procedural",
+    "phrase_len_bars": 4,
+    "melody_density": "medium",
+    "syncopation": "heavy",
+    "swing": "none",
+    "motif_repeat": "often",
+    "step_vs_leap": "leapy",
+    "chromatic": "heavy",
+    "cadence": "strong",
+    "register": "low",
+    "tension_curve": "ramp",
+    "harmony": "cinematic",
+    "chord_change": "slow",
+    "chord_extensions": "triads"
+  },
+  "score": 92
+}
+
+```
+
+**Example 38**
+Input: "Domestic Violence (from police perspective) - flashing red and blue, radio static, tactical urgency, chaotic intervention, mechanical procedure"
+Output:
+
+```json
+{
+  "config": {
+    "justification": "VIBE DECOMPOSITION: Flashing red/blue = strobing lights, disorienting visuals, alternating pitch. Radio static = high frequency noise, glitch, communication bursts. Tactical urgency = fast tempo, driving forward, adrenaline. Mechanical procedure = robotic timing, emotionless intervention. SONIC TRANSLATION: Flashing lights → 'pulsing' bass (siren-like), 'arp_melody' (strobing). Radio → 'glitch' texture, 'noise_wash'. Urgency → 'fast' tempo, 'electronic' rhythm (driving beat). Mechanical → 'robotic' humanization, 'clean' grain. COHERENCE CHECK: 'Brightness' very_bright (floodlights/sirens). 'Space' medium (street/hallway). The contrast between the emotional domestic scene and the cold, fast police response. REFERENCE ANCHORING: Action movie tension cue or Cops theme intro vibe. High alert.",
+    "tempo": "fast",
+    "root": "c",
+    "mode": "minor",
+    "brightness": "very_bright",
+    "space": "medium",
+    "density": 5,
+    "bass": "pulsing",
+    "pad": "thin_high",
+    "melody": "arp_melody",
+    "rhythm": "electronic",
+    "texture": "glitch",
+    "accent": "blip",
+    "motion": "fast",
+    "attack": "sharp",
+    "stereo": "wide",
+    "depth": false,
+    "echo": "subtle",
+    "human": "robotic",
+    "grain": "clean",
+    "melody_engine": "pattern",
+    "phrase_len_bars": 2,
+    "melody_density": "busy",
+    "syncopation": "straight",
+    "swing": "none",
+    "motif_repeat": "often",
+    "step_vs_leap": "step",
+    "chromatic": "none",
+    "cadence": "strong",
+    "register": "mid",
+    "tension_curve": "ramp",
+    "harmony": "cinematic",
+    "chord_change": "fast",
+    "chord_extensions": "triads"
+  },
+  "score": 90
+}
 
 ```
 """
