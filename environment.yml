@@ -10,6 +10,7 @@ dependencies:
     # Audio
     - soundfile
     - pedalboard
+    - sf2_loader
     
     # LLM - MLX
     - mlx>=0.22
