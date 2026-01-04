@@ -3,7 +3,7 @@
 - This document contains notes about what path we took, and why.
 - This is not necessarily the *same* path I took ... but a linearlized, non-convoluted version of my thoughts at the moment meant to be an easier read.
 
-
+Qwen3-0.6B | Gemma 3 - 270M | SmolLM2 - 360M | Granite-3.0 - 350M Instruct
 STEP 1:
 
 I found Strudel.CC and was amazed ... you could play music on your machine without knowing *anything* about it.
@@ -80,11 +80,15 @@ There were ... some ways:
 
 - Then came MidiLLM - this music essentially doesn't sound harmonius. I abandoned this pretty quickly ... not to mention the LLM size was not exactly tiny ... so more compute and bad results? nah thanks.
 
+- Then I tried MusicGen-small 300M ... it took 40s to generate 20s of low-quality audio which wasn't "self-repeating" either ... but it was the best option I found! Remember, this outputs
+  audio tokens at *each point* ... meanwhile I just want to output a config file ... a much simpler task. I tried generating "Mario the game song" and it was ... trash ... relative to what this new system generated.
+
 - I could use a massive LLM running locally ... but that'd just defeat the point of a 'light' application running in the background all the time.
   Not to mention even large LLMs didn't do well at composing music! Only SOTA models could do *well*
 
   I also realized that, for this reason I should probably only make the app compatible w/ Apple Silicon macs ... old Macs are too slow and are going to not be able to handle the continuous load.
   My goal then became to run something that could "run easily on even an M1 macbook air!"
+
 
 - After all these attempts ... I just gave up lol. And returned to my original approach of using a custom fine-tuned LLM to drive the V2 config ...
 

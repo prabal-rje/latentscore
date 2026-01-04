@@ -7,21 +7,21 @@ Working model sources:
 2. Tangible Music Lab - trained on 9,455 musical loops! (Best for variety)
 """
 
-import os
-import sys
 import subprocess
+import sys
 from pathlib import Path
+
 
 def install_deps():
     """Install required packages."""
     deps = [
         "torch",
-        "torchaudio", 
+        "torchaudio",
         "numpy",
         "sounddevice",
         "huggingface_hub",
     ]
-    
+
     print("Installing dependencies...")
     for dep in deps:
         subprocess.run([sys.executable, "-m", "pip", "install", "-q", dep], check=True)
@@ -43,7 +43,6 @@ MODEL_REGISTRY = {
         "latent_dim": 16,
         "sample_rate": 48000,
     },
-    
     # # === INTELLIGENT INSTRUMENTS LAB ===
     # "organ": {
     #     "repo": "Intelligent-Instruments-Lab/rave-models",
@@ -126,59 +125,61 @@ RECOMMENDED = ["loops", "organ", "birds", "water"]
 def download_models(model_dir: Path, models: list[str] | None = None):
     """Download models from HuggingFace."""
     from huggingface_hub import hf_hub_download
-    
+
     model_dir.mkdir(parents=True, exist_ok=True)
-    
+
     if models is None:
         models = RECOMMENDED
-    
+
     downloaded = {}
-    
+
     for model_name in models:
         if model_name not in MODEL_REGISTRY:
             print(f"⚠️  Unknown model: {model_name}")
             print(f"   Available: {list(MODEL_REGISTRY.keys())}")
             continue
-        
+
         info = MODEL_REGISTRY[model_name]
         target_path = model_dir / f"{model_name}.ts"
-        
+
         if target_path.exists():
             print(f"✅ {model_name}: Already downloaded ({target_path})")
             downloaded[model_name] = target_path
             continue
-        
+
         print(f"⬇️  {model_name}: {info['description']}")
         print(f"   From: {info['repo']}/{info['filename']}")
-        
+
         try:
             path = hf_hub_download(
                 repo_id=info["repo"],
                 filename=info["filename"],
             )
-            
+
             # Copy to our standard location
             import shutil
+
             shutil.copy(path, target_path)
-            
+
             downloaded[model_name] = target_path
             print(f"   ✅ Saved to {target_path}")
-            
+
         except Exception as e:
             print(f"   ❌ Failed: {e}")
-    
+
     return downloaded
 
 
 def benchmark_model(model_path: Path, device: str = "mps") -> dict:
     """Benchmark a model for real-time capability."""
-    import torch
     import time
-    
+
+    import torch
+
     print(f"\n🔬 Benchmarking: {model_path.stem}")
-    
+
     results = {"path": str(model_path), "device": device}
-    
+
     try:
         model = torch.jit.load(str(model_path))
         model = model.to(device)
@@ -188,13 +189,13 @@ def benchmark_model(model_path: Path, device: str = "mps") -> dict:
         results["error"] = f"Load failed: {e}"
         print(f"   ❌ {results['error']}")
         return results
-    
+
     try:
         with torch.no_grad():
             # Try to find latent dim by encoding test audio
             test_audio = torch.randn(1, 1, 48000).to(device)  # 1 second
-            
-            if hasattr(model, 'encode'):
+
+            if hasattr(model, "encode"):
                 z = model.encode(test_audio)
                 latent_dim = z.shape[1]
                 latent_length = z.shape[2]
@@ -208,17 +209,17 @@ def benchmark_model(model_path: Path, device: str = "mps") -> dict:
                 latent_length = 128
                 results["latent_dim"] = latent_dim
                 results["compression"] = "unknown"
-            
+
             # Benchmark decode speed
             z = torch.randn(1, latent_dim, latent_length * 2).to(device)
-            
+
             # Warmup
             for _ in range(3):
                 _ = model.decode(z)
                 if device == "mps":
                     torch.mps.synchronize()
-            
-            # Timed runs  
+
+            # Timed runs
             times = []
             for _ in range(10):
                 start = time.perf_counter()
@@ -226,49 +227,51 @@ def benchmark_model(model_path: Path, device: str = "mps") -> dict:
                 if device == "mps":
                     torch.mps.synchronize()
                 times.append(time.perf_counter() - start)
-            
+
             audio_samples = audio.shape[-1]
             audio_duration = audio_samples / 48000
             avg_time = sum(times) / len(times)
-            
+
             results["audio_duration"] = f"{audio_duration:.3f}s"
             results["generation_time"] = f"{avg_time:.3f}s"
             results["realtime_factor"] = audio_duration / avg_time
             results["realtime_ok"] = audio_duration > avg_time
-            
+
             status = "✅" if results["realtime_ok"] else "❌"
-            print(f"   {status} {audio_duration:.3f}s audio in {avg_time:.3f}s = {results['realtime_factor']:.1f}x realtime")
-            
+            print(
+                f"   {status} {audio_duration:.3f}s audio in {avg_time:.3f}s = {results['realtime_factor']:.1f}x realtime"
+            )
+
             if device == "mps":
                 mem_mb = torch.mps.current_allocated_memory() / 1024 / 1024
                 results["memory_mb"] = f"{mem_mb:.1f}"
                 print(f"   Memory: {mem_mb:.1f} MB")
-                
+
     except Exception as e:
         results["error"] = str(e)
         print(f"   ❌ Benchmark failed: {e}")
-    
+
     return results
 
 
 def benchmark_all(model_dir: Path):
     """Benchmark all downloaded models."""
     import torch
-    
+
     device = "mps" if torch.backends.mps.is_available() else "cpu"
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"BENCHMARKING (device: {device})")
-    print('='*60)
-    
+    print("=" * 60)
+
     results = {}
     for model_path in sorted(model_dir.glob("*.ts")):
         results[model_path.stem] = benchmark_model(model_path, device)
-    
+
     # Summary
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("SUMMARY")
-    print('='*60)
-    
+    print("=" * 60)
+
     for name, res in sorted(results.items()):
         if "error" in res:
             print(f"❌ {name}: {res['error']}")
@@ -276,7 +279,7 @@ def benchmark_all(model_dir: Path):
             print(f"✅ {name}: {res['realtime_factor']:.1f}x realtime")
         else:
             print(f"⚠️  {name}: {res['realtime_factor']:.1f}x (may be slow)")
-    
+
     return results
 
 
@@ -559,9 +562,10 @@ def write_streamer(path: Path):
 # MAIN
 # =============================================================================
 
+
 def main():
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="RAVE Setup v2")
     parser.add_argument("--dir", type=Path, default=Path("./rave_models"))
     parser.add_argument("--download", nargs="*", help="Models to download (default: recommended)")
@@ -569,25 +573,25 @@ def main():
     parser.add_argument("--all", action="store_true", help="Download all models")
     parser.add_argument("--benchmark", action="store_true", help="Benchmark models")
     parser.add_argument("--skip-deps", action="store_true")
-    
+
     args = parser.parse_args()
-    
+
     if args.list:
         print("Available RAVE models:")
-        print("="*60)
+        print("=" * 60)
         for name, info in MODEL_REGISTRY.items():
             rec = "⭐" if name in RECOMMENDED else "  "
             print(f"{rec} {name:12} - {info['description']}")
-        print(f"\n⭐ = Recommended for mood-responsive music")
+        print("\n⭐ = Recommended for mood-responsive music")
         return
-    
-    print("="*60)
+
+    print("=" * 60)
     print("RAVE SETUP v2")
-    print("="*60)
-    
+    print("=" * 60)
+
     if not args.skip_deps:
         install_deps()
-    
+
     # Determine models to download
     if args.all:
         models = list(MODEL_REGISTRY.keys())
@@ -595,22 +599,22 @@ def main():
         models = args.download if args.download else RECOMMENDED
     else:
         models = RECOMMENDED
-    
+
     print(f"\n📁 Model directory: {args.dir}")
     print(f"📦 Models: {models}")
-    
+
     downloaded = download_models(args.dir, models)
-    
+
     if args.benchmark or downloaded:
         benchmark_all(args.dir)
-    
+
     # Write streamer
     streamer_path = args.dir / "rave_streamer.py"
     write_streamer(streamer_path)
-    
-    print(f"\n{'='*60}")
+
+    print(f"\n{'=' * 60}")
     print("NEXT STEPS")
-    print("="*60)
+    print("=" * 60)
     print(f"""
 1. Test streaming:
    cd {args.dir}

@@ -33,6 +33,10 @@ build/
 dist/
 *.spec
 
+# --- Node/Frontend ---
+
+node_modules/
+
 # --- Pytest, Ruff, Coverage ---
 
 .pytest_cache/
@@ -51,3 +55,5 @@ dist/
 **/repomix-output.xml
 docs/plans/**/*.md
 
+rave_models/
+*.wav

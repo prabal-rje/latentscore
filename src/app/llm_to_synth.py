@@ -4,39 +4,42 @@ import json
 import re
 from typing import Any, Callable, Dict, List, Literal, Tuple, cast
 
+import mlx.core as mx
 import mlx_lm
 import numpy as np
 import outlines
 import soundfile as sf  # type: ignore[import]  # soundfile stubs missing in this env.
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field
-import mlx.core as mx
 
 from . import synth as synth_old
+
 # from . import synth_NEW_BACKUP as synth_new  # Commented out with main block
 
 MODEL_PATH = "./models/gemma-3-1b-it-qat-8bit"
 
+
 def make_repetition_penalty_sampler(penalty: float = 1.1):
     seen_tokens: list[int] = []
-    
+
     def sampler(logprobs: mx.array) -> mx.array:
         nonlocal seen_tokens
-        
-        logprobs_flat = logprobs.squeeze().tolist()
-        
+
+        logprobs_flat = cast(list[float], logprobs.squeeze().tolist())
+
         for tok in set(seen_tokens):
             if logprobs_flat[tok] > 0:
                 logprobs_flat[tok] /= penalty
             else:
                 logprobs_flat[tok] *= penalty
-        
+
         penalized = mx.array(logprobs_flat)
         result = mx.argmax(penalized, axis=-1, keepdims=True)
-        seen_tokens.append(result.item())
+        seen_tokens.append(int(result.item()))
         return result
-    
+
     return sampler
+
 
 class VibeConfig(BaseModel):
     """A curated vibe-to-synth mapping with staged justifications."""
@@ -235,7 +238,6 @@ Write in shorthand. Be specific. Commit to bold choices. Generic = wrong.""",
     )
 
 
-
 # Scored config: a single VibeConfig with a quality score (for single-call generation)
 class ScoredVibeConfig(BaseModel):
     """A VibeConfig with a self-assessed quality score."""
@@ -243,7 +245,7 @@ class ScoredVibeConfig(BaseModel):
     config: VibeConfig
     score: int = Field(
         # NOTE: ignore these restrictions - it keeps throwing errors for some reason by breaching the range restrictions...
-        # ge=0, 
+        # ge=0,
         # le=100,
         description="Self-assessed quality score from 0 to 100. Higher is better. Rate how well this config captures the requested vibe.",
     )
@@ -3685,8 +3687,6 @@ where config matches the structure in the examples, and score is your self-asses
 # 2. Include a justification explaining your sonic reasoning and your inspiration for the config based on the examples. Make sure to ONLY use the most relevant examples to the given "VIBE" in your justification.
 
 
-
-
 print(f"Loading model from {MODEL_PATH}...")
 load_result = mlx_lm.load(MODEL_PATH)
 raw_model = load_result[0]
@@ -3719,7 +3719,12 @@ Seed: {seed}
 <output>
 """
 
-        result = model(prompt, output_type=ScoredVibeConfig, max_tokens=3_000, sampler=make_repetition_penalty_sampler(1.35)) # type: ignore[arg-type]
+        result = model(
+            prompt,
+            output_type=ScoredVibeConfig,
+            max_tokens=3_000,
+            sampler=make_repetition_penalty_sampler(1.35),
+        )  # type: ignore[arg-type]
 
         try:
             return ScoredVibeConfig.model_validate_json(result)
@@ -4099,28 +4104,29 @@ def vibe_to_config_dict(vibe: str) -> Tuple[Dict[str, Any], str]:
 # Render all few-shot examples from FEW_SHOT_EXAMPLES
 # =============================================================================
 
+
 def extract_examples_from_few_shot() -> List[Tuple[str, Dict[str, Any]]]:
     """Extract all example configs from FEW_SHOT_EXAMPLES string.
-    
+
     Returns list of (vibe_name, config_dict) tuples.
     """
     examples: List[Tuple[str, Dict[str, Any]]] = []
-    
+
     # Pattern to match each example block
     # Example format: **Example N**\nInput: "vibe description"\nOutput:\n```json\n{...}\n```
     example_pattern = re.compile(
         r'\*\*Example \d+\*\*\s*\nInput:\s*"([^"]+)"\s*\nOutput:\s*\n```json\s*\n(.*?)\n```',
-        re.DOTALL
+        re.DOTALL,
     )
-    
+
     for match in example_pattern.finditer(FEW_SHOT_EXAMPLES):
         vibe_name = match.group(1)
         json_str = match.group(2)
-        
+
         # Parse the JSON (it contains "config" and "score" keys)
         parsed = json.loads(json_str)
         config = parsed["config"]
-        
+
         # Convert VibeConfig-style keys to synth config dict format
         cfg_dict: Dict[str, Any] = {
             "tempo": TEMPO_MAP[config["tempo"]],
@@ -4159,10 +4165,26 @@ def extract_examples_from_few_shot() -> List[Tuple[str, Dict[str, Any]]]:
             "chord_change_bars": CHORD_CHANGE_BARS_MAP[config.get("chord_change", "medium")],
             "chord_extensions": config.get("chord_extensions", "triads"),
         }
-        
+
         examples.append((vibe_name, cfg_dict))
-    
+
     return examples
+
+
+def build_config_library() -> list[dict[str, Any]]:
+    """Build a config library suitable for embedding + retrieval."""
+    examples = extract_examples_from_few_shot()
+    library: list[dict[str, Any]] = []
+    for index, (vibe_name, cfg_dict) in enumerate(examples, start=1):
+        slug = sanitize_filename(vibe_name)
+        library.append(
+            {
+                "id": f"{index:04d}_{slug}",
+                "description": vibe_name,
+                "config": cfg_dict,
+            }
+        )
+    return library
 
 
 def sanitize_filename(name: str) -> str:
@@ -4174,40 +4196,40 @@ def sanitize_filename(name: str) -> str:
 if __name__ == "__main__":
     import os
     import time
-    
+
     # Extract all examples from FEW_SHOT_EXAMPLES
     examples = extract_examples_from_few_shot()
     print(f"Found {len(examples)} examples to render")
-    
+
     # Setup output directory
     timestamp = int(time.time())
     out_dir = f"{timestamp}_examples"
     os.makedirs(out_dir, exist_ok=True)
-    
+
     song_duration = 30.0  # 30 seconds per example (faster rendering)
     sr = 44100
-    
+
     # Setup soundfile writer
     sf_any = cast(Any, sf)
     sf_write = cast(
         Callable[[str, NDArray[Any], int], None],
         sf_any.write,
     )
-    
+
     # Render each example
     for i, (vibe_name, cfg_dict) in enumerate(examples):
         print(f"\n{'=' * 70}")
         print(f"Rendering example {i + 1}/{len(examples)}: {vibe_name}")
         print("=" * 70)
-        
+
         # Convert to MusicConfig and render using old synth
         cfg = synth_old.MusicConfig.from_dict(cfg_dict)
         audio = synth_old.assemble(cfg, duration=song_duration, normalize=True)
-        
+
         # Save to file
         safe_name = sanitize_filename(vibe_name)
         out_path = os.path.join(out_dir, f"{i + 1:02d}_{safe_name}.wav")
         sf_write(out_path, audio, sr)
         print(f"Wrote {out_path} ({song_duration}s)")
-    
+
     print(f"\nAll {len(examples)} examples saved to: {out_dir}/")
