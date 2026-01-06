@@ -6,10 +6,10 @@ If you don't have Conda installed already, download and install [Miniconda](http
 
 ### 2. Create a New Environment
 
-Open your terminal and create a new environment named `sample_app_env` (arm64 Conda on Apple Silicon):
+Open your terminal and create a new environment named `latentscore-3` (arm64 Conda on Apple Silicon):
 
 ```bash
-conda create -n sample_app_env python=3.13
+conda create -n latentscore-3 python=3.10
 ```
 
 *Feel free to set a different Python version if required.*
@@ -19,7 +19,7 @@ conda create -n sample_app_env python=3.13
 Before installing packages, activate the new environment:
 
 ```bash
-conda activate sample_app_env
+conda activate latentscore-3
 ```
 
 ### 4. Install Requirements
@@ -35,7 +35,7 @@ pip install -r requirements.txt
 You only need to **create and set up** the environment once! The next time you want to contribute, just activate the environment:
 
 ```bash
-conda activate sample_app_env
+conda activate latentscore-3
 ```
 
 Now you are ready to start working!

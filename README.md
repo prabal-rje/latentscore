@@ -4,7 +4,7 @@ Minimal tracer-bullet slice for async Python using `uvloop` by default (when ava
 
 ## Quickstart
 - Apple Silicon recommended; use an arm64 Conda (e.g. Miniforge) when possible.
-- `conda create -n sample_app_env python=3.13` and `conda activate sample_app_env`.
+- `conda create -n latentscore-3 python=3.10` and `conda activate latentscore-3`.
 - `pip install -r requirements.txt`.
 - Run the demo: `PYTHONPATH=src python -m app` (or `pip install -e .` once).
 
@@ -90,7 +90,7 @@ cp patch5/textual_app.py src/app/textual_app.py
 ## Usage
 
 ```bash
-conda activate sample_app_env
+conda activate latentscore-3
 PYTHONPATH=src python -m app.menubar
 ```
 
