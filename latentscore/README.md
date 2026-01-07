@@ -1,0 +1,70 @@
+# Latentscore DX
+
+This package wraps the core LatentScore API with a small DX layer for audio-first workflows.
+
+## Quickstart
+
+```python
+import latentscore as ls
+
+audio = ls.render("warm sunrise over water")
+audio.play()  # optional: requires latentscore[play]
+audio.save(".examples/quickstart.wav")
+```
+
+## DX objects
+
+- `Audio`: `.save(path)`, `.play()`, `np.asarray(audio)`
+- `AudioStream`: iterates chunks, `.save(path)`, `.play()`, `.collect()`
+- `Track` + `Playlist`: composition helpers for longer flows
+
+## Streaming
+
+```python
+import latentscore as ls
+
+for chunk in ls.stream("dark ambient", "sunrise", duration=60, transition=5):
+    speaker.write(chunk)
+```
+
+## Composition
+
+```python
+import latentscore as ls
+
+playlist = ls.Playlist(
+    tracks=[
+        ls.Track(content="dark ambient", duration=20, transition=3),
+        ls.Track(content=ls.MusicConfig(tempo="fast"), duration=20, transition=3),
+        ls.Track(content=ls.MusicConfigUpdate(brightness="dark"), duration=20, transition=3),
+    ]
+)
+
+playlist.render().save(".examples/playlist.wav")
+```
+
+## Models
+
+- `"fast"` (default): local embedding model
+- `"expressive"` / `"local"`: local MLX LLM
+- `"external:<model-name>"`: LiteLLM adapter shorthand
+
+## Playback extras
+
+```bash
+pip install "latentscore[play]"
+```
+
+## Demo
+
+Run from the repo root:
+
+```bash
+python -m latentscore.demo
+```
+
+Outputs land in `.examples/` at the project root.
+
+## More details
+
+See `docs/latentscore-dx.md` for the full tiered DX guide, model options, and audio contract.

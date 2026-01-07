@@ -91,7 +91,7 @@ def _load_simpleaudio() -> PlaybackBackend | None:
     def _to_int16(samples: FloatArray, sample_rate: int) -> NDArray[np.int16]:
         normalized = ensure_audio_contract(samples, sample_rate=sample_rate)
         clipped = np.clip(normalized, -1.0, 1.0)
-        return (clipped * 32767).astype(np.int16)
+        return (clipped * 32_767).astype(np.int16)
 
     def _play_audio(samples: FloatArray, sample_rate: int) -> None:
         audio = _to_int16(samples, sample_rate)

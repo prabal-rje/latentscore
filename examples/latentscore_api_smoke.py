@@ -77,9 +77,9 @@ async def _write_astream(path: Path, model: LiteLLMAdapter) -> None:
 
 
 def main() -> None:
-    api_key = _load_api_key(ANTHROPIC_API_ENV)
+    api_key = _load_api_key(GEMINI_API_ENV)
     adapter = LiteLLMAdapter(
-        model=ANTHROPIC_MODEL,
+        model=GEMINI_MODEL,
         api_key=api_key,
         litellm_kwargs={"timeout": 60},
     )
@@ -104,8 +104,8 @@ def main() -> None:
 
         stream_path = output_dir / "stream_transition.wav"
         stream(
-            "mario the video game",
             "warm sunrise",
+            "mario the video game",
             MusicConfigUpdate(tempo="slow", brightness="dark"),
             duration=STREAM_SECONDS,
             transition=STREAM_TRANSITION_SECONDS,
