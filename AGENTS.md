@@ -112,6 +112,7 @@ This is NON-NEGOTIABLE. No exceptions.
 - Tests/tooling: none present initially. If you add code, include at least smoke tests or runnable examples and note how to execute them.
 - Defaults: stay ASCII unless a file already uses Unicode; add comments only when logic is non-obvious; avoid destructive git commands.
 - Exception handling: never add bare `try/except` with `pass` or silent swallowing. If handling errors, be explicit about the exception types and the behavior; otherwise let it raise.
+- Latentscore exception policy: never allow exceptions in `latentscore/` to go unlogged. Any caught exception must emit at least a warning or info log before being swallowed or re-raised.
 - Tooling: canonical flow is `make check` (ruff check, ruff format --check, pyright, pytest with coverage). Use `make format` to apply formatting (`ruff format`); lint with `ruff check`.
 - Type checking: run `pyright` every single time you change any Python file.
 - Async: install `uvloop` as the default event loop policy; favor async-first APIs and avoid mixing threads unless bounded and deliberate. `python -m latentscore` runs a demo slice using uvloop.

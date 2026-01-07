@@ -14,13 +14,13 @@ Architecture:
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any, Callable, TypeAlias, cast
 
 import numpy as np
 import soundfile as sf  # type: ignore[import]
 from numpy.typing import NDArray
+from pydantic import BaseModel, ConfigDict, model_validator
 from scipy.signal import butter, decimate, lfilter  # type: ignore[import]
 
 from .config import (
@@ -420,8 +420,7 @@ def add_note(signal: FloatArray, note: FloatArray, start_index: int) -> None:
 # =============================================================================
 
 
-@dataclass
-class SynthParams:
+class SynthParams(BaseModel):
     """Parameters passed to all synthesis functions."""
 
     root: RootNote = "c"
@@ -439,6 +438,8 @@ class SynthParams:
     echo: float = 0.5
     human: float = 0.0
     grain: GrainStyle = "clean"
+
+    model_config = ConfigDict(extra="forbid")
 
     @property
     def attack_mult(self) -> float:
@@ -1454,8 +1455,7 @@ ACCENT_PATTERNS: Mapping[AccentStyle, PatternFn] = MappingProxyType(
 # =============================================================================
 
 
-@dataclass
-class MusicConfig:
+class MusicConfig(BaseModel):
     """Complete V1/V2 configuration."""
 
     tempo: float = 0.35
@@ -1482,23 +1482,24 @@ class MusicConfig:
     human: float = 0.0
     grain: GrainStyle = "clean"
 
+    model_config = ConfigDict(extra="ignore")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _flatten_layers(cls, data: object) -> object:
+        if not isinstance(data, Mapping):
+            return data
+        merged = dict(data)
+        layers = merged.pop("layers", None)
+        if isinstance(layers, Mapping):
+            for key, value in layers.items():
+                merged.setdefault(key, value)
+        return merged
+
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> "MusicConfig":
         """Create config from dict (e.g., from JSON)."""
-        config = cls()
-
-        for key, value in d.items():
-            match (key, value):
-                case ("layers", Mapping() as layers):
-                    for layer_key, layer_value in layers.items():
-                        if hasattr(config, layer_key):
-                            setattr(config, layer_key, layer_value)
-                case (layer_key, _) if hasattr(config, layer_key):
-                    setattr(config, layer_key, value)
-                case _:
-                    pass
-
-        return config
+        return cls.model_validate(d)
 
 
 def assemble(config: MusicConfig, duration: float = 16.0, normalize: bool = True) -> FloatArray:
@@ -1545,7 +1546,7 @@ def assemble(config: MusicConfig, duration: float = 16.0, normalize: bool = True
 
     if config.depth:
         # Add sub-bass layer
-        sub_params = replace(params, duration=duration)
+        sub_params = params.model_copy(update={"duration": duration})
         output += bass_sub_pulse(sub_params) * 0.6
 
     if "pad" in active_layers:

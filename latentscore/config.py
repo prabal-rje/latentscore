@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Literal, Mapping, MutableMapping, Optional, TypeVar
+import logging
+from typing import Any, Callable, Literal, Mapping, Optional, TypeVar
 
 from pydantic import (
     BaseModel,
     ConfigDict,
-    Field,
     ValidationError,
-    model_validator,
 )
 
 from .errors import InvalidConfigError
+
+_LOGGER = logging.getLogger("latentscore.config")
 
 TempoLabel = Literal["very_slow", "slow", "medium", "fast", "very_fast"]
 BrightnessLabel = Literal["very_dark", "dark", "medium", "bright", "very_bright"]
@@ -314,9 +315,9 @@ class MusicConfig(BaseModel):
     human: HumanFeelLabel = "robotic"
     grain: GrainStyle = "clean"
 
-    extras: dict[str, Any] = Field(default_factory=dict)
+    # extras: dict[str, Any] = Field(default_factory=dict)
 
-    model_config = ConfigDict(extra="allow")
+    # model_config = ConfigDict(extra="allow")
 
     def to_internal(self) -> _MusicConfigInternal:
         return _MusicConfigInternal(
@@ -340,15 +341,6 @@ class MusicConfig(BaseModel):
             human=human_to_float(self.human),
             grain=self.grain,
         )
-
-    @model_validator(mode="after")
-    def _capture_extras(self) -> "MusicConfig":
-        extra = dict(self.model_extra) if self.model_extra else {}
-        if extra:
-            self.extras.update(extra)
-            if isinstance(self.model_extra, MutableMapping):
-                self.model_extra.clear()
-        return self
 
 
 class _MusicConfigUpdateInternal(BaseModel):
@@ -477,6 +469,7 @@ def parse_update(payload: Mapping[str, Any]) -> MusicConfigUpdate:
     try:
         return MusicConfigUpdate.model_validate(payload)
     except ValidationError as exc:  # pragma: no cover - defensive
+        _LOGGER.warning("Failed to parse config update: %s", exc, exc_info=True)
         raise InvalidConfigError(str(exc)) from exc
 
 
@@ -486,6 +479,7 @@ def parse_config(payload: Mapping[str, Any]) -> MusicConfig:
     try:
         return MusicConfig.model_validate(payload)
     except ValidationError as exc:  # pragma: no cover - defensive
+        _LOGGER.warning("Failed to parse config payload: %s", exc, exc_info=True)
         raise InvalidConfigError(str(exc)) from exc
 
 

@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Callable, Coroutine
-
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
+import json
 
 from ..config import MusicConfig
 from ..errors import ConfigGenerateError, LLMInferenceError, ModelNotAvailableError
+from ..models import build_expressive_prompt
 
-_DEFAULT_TEMPERATURE = 0.2
-_JSON_RESPONSE_FORMAT: dict[str, str] = {"type": "json_object"}
+_DEFAULT_TEMPERATURE = 0.0
+# _JSON_RESPONSE_FORMAT: dict[str, str] = {"type": "json_object", "enforce_validations": "true", "strict": "true"}
 _atexit_guard_registered = False
 _safe_get_event_loop_installed = False
-
+_LOGGER = logging.getLogger("latentscore.providers.litellm")
 
 def _safe_async_cleanup(
     cleanup_coro: Callable[[], Coroutine[Any, Any, None]],
@@ -20,31 +22,20 @@ def _safe_async_cleanup(
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
+        _LOGGER.info("LiteLLM cleanup running outside an event loop.")
         loop = None
 
     if loop is not None:
         try:
             loop.create_task(cleanup_coro())
-        except Exception:
-            return
+        except Exception as exc:
+            _LOGGER.warning("LiteLLM async cleanup task failed: %s", exc, exc_info=True)
         return
 
     try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop is None or loop.is_closed():
-        try:
-            asyncio.run(cleanup_coro())
-        except Exception:
-            return
-        return
-
-    try:
-        loop.run_until_complete(cleanup_coro())
-    except Exception:
-        return
+        asyncio.run(cleanup_coro())
+    except Exception as exc:
+        _LOGGER.warning("LiteLLM async cleanup failed: %s", exc, exc_info=True)
 
 
 def _install_safe_get_event_loop() -> None:
@@ -59,10 +50,12 @@ def _install_safe_get_event_loop() -> None:
         try:
             loop = original_get_event_loop()
         except RuntimeError:
+            _LOGGER.info("LiteLLM cleanup creating a new event loop.")
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             return loop
         if loop.is_closed():
+            _LOGGER.info("LiteLLM cleanup replacing a closed event loop.")
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
         return loop
@@ -72,8 +65,9 @@ def _install_safe_get_event_loop() -> None:
     try:
         from litellm.llms.custom_httpx.async_client_cleanup import (
             close_litellm_async_clients,
-        )
-    except Exception:
+        ) 
+    except Exception as exc:
+        _LOGGER.info("LiteLLM cleanup import unavailable: %s", exc)
         return
     _safe_async_cleanup(close_litellm_async_clients)
 
@@ -103,6 +97,15 @@ def _content_snippet(content: str, limit: int = 200) -> str:
     return f"{cleaned[:limit]}..."
 
 
+class _LiteLLMRequest(BaseModel):
+    model: str
+    messages: list[dict[str, str]]
+    temperature: float | None = None
+    response_format: BaseModel | type[BaseModel] | None = None
+    api_key: str | None = None
+    
+
+
 class LiteLLMAdapter:
     """LiteLLM model wrapper implementing the async model protocol."""
 
@@ -111,20 +114,24 @@ class LiteLLMAdapter:
         model: str,
         *,
         api_key: str | None = None,
-        temperature: float = _DEFAULT_TEMPERATURE,
+        temperature: float | None = None,
         system_prompt: str | None = None,
-        response_format: dict[str, str] | None = _JSON_RESPONSE_FORMAT,
+        response_format: BaseModel | type[BaseModel] | None = MusicConfig,
+        reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "default"] | None = None,
     ) -> None:
         self._model = model
         self._api_key = api_key
         self._temperature = temperature
         self._system_prompt = system_prompt
+        self._base_prompt = build_expressive_prompt()
         self._response_format = response_format
+        self._reasoning_effort = reasoning_effort
 
     def close(self) -> None:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
+            _LOGGER.info("LiteLLM close running outside event loop.")
             asyncio.run(self.aclose())
             return
         loop.create_task(self.aclose())
@@ -132,7 +139,8 @@ class LiteLLMAdapter:
     async def aclose(self) -> None:
         try:
             import litellm  # type: ignore[import]  # Optional dependency at runtime.
-        except ImportError:
+        except ImportError as exc:
+            _LOGGER.info("LiteLLM not installed; skipping async close: %s", exc)
             return
 
         _register_safe_get_event_loop_atexit()
@@ -147,35 +155,40 @@ class LiteLLMAdapter:
         try:
             from litellm import acompletion  # type: ignore[import]
         except ImportError as exc:
+            _LOGGER.warning("LiteLLM not installed: %s", exc)
             raise ModelNotAvailableError("litellm is not installed") from exc
 
         _register_safe_get_event_loop_atexit()
-        messages: list[dict[str, str]] = []
+        messages: list[dict[str, str]] = [{"role": "system", "content": self._base_prompt}]
         if self._system_prompt:
             messages.append({"role": "system", "content": self._system_prompt})
+
+        schema_str: str = ""
+        if self._response_format:
+            schema_str = f"<schema>{json.dumps(self._response_format.model_json_schema(), indent=2)}</schema>"
         messages.append(
             {
                 "role": "user",
-                "content": f"Generate config for: {vibe}\nReturn only JSON.",
+                "content": f"{schema_str}\n<vibe>{vibe}</vibe>\n<output>",
             }
         )
 
-        request: dict[str, Any] = {
-            "model": self._model,
-            "messages": messages,
-            "temperature": self._temperature,
-        }
-        if self._response_format is not None:
-            request["response_format"] = self._response_format
-        if self._api_key:
-            request["api_key"] = self._api_key
+        request = _LiteLLMRequest(
+            model=self._model,
+            messages=messages,
+            temperature=self._temperature,
+            response_format=self._response_format,
+            api_key=self._api_key or None,
+        ).model_dump(exclude_none=True)
 
         try:
             # LiteLLM response typing is not exported; keep runtime checks below.
-            response: Any = await acompletion(  # type: ignore[reportUnknownVariableType]
-                **request
+            response: Any = await acompletion( 
+                **request,
+                reasoning_effort=self._reasoning_effort
             )
         except Exception as exc:  # pragma: no cover - provider errors
+            _LOGGER.warning("LiteLLM request failed: %s", exc, exc_info=True)
             raise LLMInferenceError(str(exc)) from exc
 
         content = ""
@@ -194,6 +207,9 @@ class LiteLLMAdapter:
                 try:
                     return MusicConfig.model_validate_json(extracted)
                 except ValidationError:
-                    pass
+                    _LOGGER.warning(
+                        "LiteLLM returned invalid JSON after extraction.", exc_info=True
+                    )
             snippet = _content_snippet(content) or "<empty>"
+            _LOGGER.warning("LiteLLM returned invalid JSON: %s", snippet)
             raise ConfigGenerateError(f"LiteLLM returned non-JSON content: {snippet}") from exc

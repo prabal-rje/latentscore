@@ -4,13 +4,12 @@ import asyncio
 import functools
 import logging
 import os
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol, Sequence, TypeGuard
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .config import MusicConfig
 from .errors import ConfigGenerateError, LLMInferenceError, ModelNotAvailableError
@@ -159,33 +158,34 @@ Vibe: "epic cinematic battle scene"
 }
 """
 
-SYSTEM_PROMPT = f"""
-<role description="Detailed description of the role you must embody to successfully complete the task">
-You are a WORLD-CLASS music synthesis expert with an eye for detail and a deep understanding of music theory.
-
-You've developed a system that allows you to generate music configurations that match a given vibe/mood description.
-
-Given a vibe/mood description, you previously generated following examples of synth configurations that match a particular vibe.
-
-Study these examples carefully and use THE MOST RELEVANT EXAMPLES TO THE GIVEN "VIBE" as inspiration for your next task.
-</role>
-
-<examples description="Examples of synth configurations that match a particular vibe">
-{FEW_SHOT_EXAMPLES}
-</examples>
-
-<instructions>
-1. Generate ONE config for the vibe described in the <input> section.
-2. Output ONLY valid JSON for a single MusicConfig object matching the example structure.
-3. Your answer should be a single JSON object with only config fields.
-</instructions>
-"""
+_EXPRESSIVE_PROMPT = "\n".join(
+    [
+        "Role:",
+        "You are a world-class music synthesis expert with deep music theory knowledge.",
+        "",
+        "Task:",
+        "- Given a vibe/mood description, generate ONE MusicConfig JSON object.",
+        "- Use the source examples as guidance for value choices.",
+        "",
+        "Output requirements:",
+        "- Return only JSON (no markdown, no explanations).",
+        "- Use only the keys shown in the examples.",
+        "",
+        "Source examples:",
+        FEW_SHOT_EXAMPLES.strip(),
+    ]
+)
 
 
-@dataclass(frozen=True)
-class ExampleConfig:
+def build_expressive_prompt() -> str:
+    return _EXPRESSIVE_PROMPT
+
+
+class ExampleConfig(BaseModel):
     vibe: str
     config: MusicConfig
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
 FAST_EXAMPLES: tuple[ExampleConfig, ...] = (
@@ -393,7 +393,7 @@ class FastEmbeddingModel:
         try:
             return self._embed_and_select(vibe)
         except Exception as exc:  # pragma: no cover - runtime fallback
-            _LOGGER.warning("Fast model fallback: %s", exc)
+            _LOGGER.warning("Fast model fallback: %s", exc, exc_info=True)
             return _heuristic_config(vibe)
 
     @functools.lru_cache(maxsize=1)
@@ -401,6 +401,7 @@ class FastEmbeddingModel:
         try:
             from sentence_transformers import SentenceTransformer  # type: ignore[import]
         except ImportError as exc:
+            _LOGGER.warning("sentence-transformers not installed: %s", exc, exc_info=True)
             raise ModelNotAvailableError("sentence-transformers is not installed") from exc
 
         model_dir = self._model_dir
@@ -455,6 +456,7 @@ class ExpressiveMlxModel:
         try:
             from huggingface_hub import snapshot_download  # type: ignore[import]
         except ImportError as exc:
+            _LOGGER.warning("huggingface_hub not installed: %s", exc, exc_info=True)
             raise ModelNotAvailableError("huggingface_hub is not installed") from exc
 
         _LOGGER.info(
@@ -470,6 +472,7 @@ class ExpressiveMlxModel:
             import mlx_lm  # type: ignore[import]
             import outlines  # type: ignore[import]
         except ImportError as exc:
+            _LOGGER.warning("MLX dependencies not installed: %s", exc, exc_info=True)
             raise ModelNotAvailableError("MLX dependencies are not installed") from exc
 
         model_dir = self._resolve_model_dir()
@@ -491,7 +494,7 @@ class ExpressiveMlxModel:
 
     def _build_prompt(self, vibe: str) -> str:
         return (
-            f"{SYSTEM_PROMPT}\n\n"
+            f"{build_expressive_prompt()}\n\n"
             '<input description="The vibe/mood description to generate configs for">\n'
             f'Vibe: "{vibe}"\n'
             "</input>\n\n"
@@ -507,8 +510,10 @@ class ExpressiveMlxModel:
                 raw = model(prompt, output_type=MusicConfig, max_tokens=_LLM_MAX_TOKENS)
                 return MusicConfig.model_validate_json(raw)
             except ValidationError as exc:
+                _LOGGER.warning("Expressive model returned invalid JSON: %s", exc, exc_info=True)
                 last_error = exc
             except Exception as exc:  # pragma: no cover - model provider errors
+                _LOGGER.warning("Expressive model inference failed: %s", exc, exc_info=True)
                 last_error = exc
 
         message = f"Failed to generate config for vibe {vibe!r}."

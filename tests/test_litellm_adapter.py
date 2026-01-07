@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import warnings
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -9,6 +10,7 @@ import litellm
 import pytest
 
 from latentscore.errors import ConfigGenerateError
+from latentscore.models import build_expressive_prompt
 from latentscore.providers.litellm import LiteLLMAdapter, _safe_async_cleanup
 
 
@@ -26,10 +28,14 @@ async def test_litellm_adapter_enforces_json(
 
     monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
 
-    adapter = LiteLLMAdapter(model="gemini/gemini-2.0-flash")
+    adapter = LiteLLMAdapter(model="gemini/gemini-3-flash-preview")
     await adapter.generate("warm sunrise")
 
     assert captured["response_format"] == {"type": "json_object"}
+    messages = captured["messages"]
+    assert isinstance(messages, list)
+    assert messages[0]["role"] == "system"
+    assert messages[0]["content"] == build_expressive_prompt()
 
 
 @pytest.mark.asyncio
@@ -43,7 +49,7 @@ async def test_litellm_adapter_non_json_error_includes_snippet(
 
     monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
 
-    adapter = LiteLLMAdapter(model="gemini/gemini-2.0-flash")
+    adapter = LiteLLMAdapter(model="gemini/gemini-3-flash-preview")
 
     with pytest.raises(ConfigGenerateError) as excinfo:
         await adapter.generate("warm sunrise")
@@ -57,7 +63,7 @@ def test_litellm_adapter_aclose_awaits_litellm(
     aclose = AsyncMock()
     monkeypatch.setattr(litellm, "aclose", aclose, raising=False)
 
-    adapter = LiteLLMAdapter(model="gemini/gemini-2.0-flash")
+    adapter = LiteLLMAdapter(model="gemini/gemini-3-flash-preview")
     asyncio.run(adapter.aclose())
 
     aclose.assert_awaited_once()
@@ -81,3 +87,13 @@ def test_safe_async_cleanup_uses_asyncio_run_for_closed_loop() -> None:
 
     assert ran["value"] is True
     assert not [warn for warn in captured if issubclass(warn.category, RuntimeWarning)]
+
+
+def test_safe_async_cleanup_logs_failures(caplog: pytest.LogCaptureFixture) -> None:
+    async def cleanup() -> None:
+        raise RuntimeError("boom")
+
+    caplog.set_level(logging.WARNING)
+    _safe_async_cleanup(cleanup)
+
+    assert any("boom" in record.getMessage() for record in caplog.records)

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterable, AsyncIterator, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict
 from typing import Any, Coroutine, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,6 +31,7 @@ from .synth import assemble, interpolate_configs
 StreamContent = str | ConfigInput | UpdateInput
 
 _MIN_CHUNK_SECONDS = 1e-6
+_LOGGER = logging.getLogger("latentscore.main")
 
 
 class Streamable(BaseModel):
@@ -50,10 +51,15 @@ def _run_async(coro: Coroutine[Any, Any, T]) -> T:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
+        _LOGGER.info("No running event loop; running coroutine directly.")
         return asyncio.run(coro)
 
     with ThreadPoolExecutor(max_workers=1) as executor:
         return executor.submit(lambda: asyncio.run(coro)).result()
+
+
+def _log_exception(context: str, exc: Exception) -> None:
+    _LOGGER.warning("%s failed: %s", context, exc, exc_info=True)
 
 
 def _to_synth_config(config: _MusicConfigInternal) -> SynthConfig:
@@ -81,7 +87,7 @@ def _to_synth_config(config: _MusicConfigInternal) -> SynthConfig:
 
 
 def _from_synth_config(config: SynthConfig) -> _MusicConfigInternal:
-    return _MusicConfigInternal(**asdict(config))
+    return _MusicConfigInternal(**config.model_dump())
 
 
 def _apply_update(
@@ -183,16 +189,20 @@ def render(
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
 ) -> FloatArray:
-    resolved = resolve_model(model)
-    match config:
-        case None:
-            base = _run_async(resolved.generate(vibe)).to_internal()
-        case _:
-            base = coerce_internal_config(config)
-    target = _apply_update(base, update)
+    try:
+        resolved = resolve_model(model)
+        match config:
+            case None:
+                base = _run_async(resolved.generate(vibe)).to_internal()
+            case _:
+                base = coerce_internal_config(config)
+        target = _apply_update(base, update)
 
-    audio = assemble(_to_synth_config(target), duration)
-    return ensure_audio_contract(audio, sample_rate=SAMPLE_RATE)
+        audio = assemble(_to_synth_config(target), duration)
+        return ensure_audio_contract(audio, sample_rate=SAMPLE_RATE)
+    except Exception as exc:
+        _log_exception("render", exc)
+        raise
 
 
 def stream(
@@ -203,61 +213,65 @@ def stream(
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
 ) -> Iterable[FloatArray]:
-    items_obj: object = items
-    match items_obj:
-        case Streamable():  # type: ignore[reportUnnecessaryComparison]
-            raise InvalidConfigError("stream expects an iterable of Streamable items")
-        case str():  # type: ignore[reportUnnecessaryComparison]
-            raise InvalidConfigError("stream expects an iterable of Streamable items")
-        case _:
-            pass
-
-    match chunk_seconds:
-        case (float() | int()) as value if value <= 0:
-            raise InvalidConfigError("chunk_seconds must be greater than 0")
-        case float() | int():
-            pass
-        case _:
-            raise InvalidConfigError("chunk_seconds must be a number")
-
-    current = coerce_internal_config(config) if config is not None else None
-    resolved = resolve_model(model)
-
-    def _chunk_for(config_item: _MusicConfigInternal) -> FloatArray:
-        chunk = assemble(_to_synth_config(config_item), chunk_seconds)
-        return ensure_audio_contract(chunk, sample_rate=SAMPLE_RATE)
-
-    for item in items:
-        target = _resolve_target(
-            item.content,
-            current=current,
-            model=resolved,
-            update=update,
-        )
-        total_chunks = _chunk_count(item.duration, chunk_seconds)
-        transition_chunks = (
-            0
-            if current is None
-            else min(total_chunks, _transition_steps(item.transition_duration, chunk_seconds))
-        )
-
-        if transition_chunks > 0:
-            for config_item in _iter_transition_configs(current, target, transition_chunks):
-                current = config_item
-                yield _chunk_for(config_item)
-        else:
-            current = target
-
-        match current:
-            case _MusicConfigInternal() as current_config:
-                pass
-            case None:
-                raise InvalidConfigError("Stream exhausted without a current config")
+    try:
+        items_obj: object = items
+        match items_obj:
+            case Streamable():  # type: ignore[reportUnnecessaryComparison]
+                raise InvalidConfigError("stream expects an iterable of Streamable items")
+            case str():  # type: ignore[reportUnnecessaryComparison]
+                raise InvalidConfigError("stream expects an iterable of Streamable items")
             case _:
-                raise InvalidConfigError("Stream exhausted with an invalid config")
+                pass
 
-        for _ in range(total_chunks - transition_chunks):
-            yield _chunk_for(current_config)
+        match chunk_seconds:
+            case (float() | int()) as value if value <= 0:
+                raise InvalidConfigError("chunk_seconds must be greater than 0")
+            case float() | int():
+                pass
+            case _:
+                raise InvalidConfigError("chunk_seconds must be a number")
+
+        current = coerce_internal_config(config) if config is not None else None
+        resolved = resolve_model(model)
+
+        def _chunk_for(config_item: _MusicConfigInternal) -> FloatArray:
+            chunk = assemble(_to_synth_config(config_item), chunk_seconds)
+            return ensure_audio_contract(chunk, sample_rate=SAMPLE_RATE)
+
+        for item in items:
+            target = _resolve_target(
+                item.content,
+                current=current,
+                model=resolved,
+                update=update,
+            )
+            total_chunks = _chunk_count(item.duration, chunk_seconds)
+            transition_chunks = (
+                0
+                if current is None
+                else min(total_chunks, _transition_steps(item.transition_duration, chunk_seconds))
+            )
+
+            if transition_chunks > 0:
+                for config_item in _iter_transition_configs(current, target, transition_chunks):
+                    current = config_item
+                    yield _chunk_for(config_item)
+            else:
+                current = target
+
+            match current:
+                case _MusicConfigInternal() as current_config:
+                    pass
+                case None:
+                    raise InvalidConfigError("Stream exhausted without a current config")
+                case _:
+                    raise InvalidConfigError("Stream exhausted with an invalid config")
+
+            for _ in range(total_chunks - transition_chunks):
+                yield _chunk_for(current_config)
+    except Exception as exc:
+        _log_exception("stream", exc)
+        raise
 
 
 def stream_texts(
@@ -270,24 +284,28 @@ def stream_texts(
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
 ) -> Iterable[FloatArray]:
-    match prompts:
-        case str():
-            raise InvalidConfigError("stream_texts expects an iterable of strings")
-        case _:
-            pass
+    try:
+        match prompts:
+            case str():
+                raise InvalidConfigError("stream_texts expects an iterable of strings")
+            case _:
+                pass
 
-    items = _wrap_streamables(
-        prompts,
-        duration=duration,
-        transition_duration=transition_duration,
-    )
-    return stream(
-        items,
-        chunk_seconds=chunk_seconds,
-        model=model,
-        config=config,
-        update=update,
-    )
+        items = _wrap_streamables(
+            prompts,
+            duration=duration,
+            transition_duration=transition_duration,
+        )
+        return stream(
+            items,
+            chunk_seconds=chunk_seconds,
+            model=model,
+            config=config,
+            update=update,
+        )
+    except Exception as exc:
+        _log_exception("stream_texts", exc)
+        raise
 
 
 def stream_configs(
@@ -300,25 +318,29 @@ def stream_configs(
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
 ) -> Iterable[FloatArray]:
-    configs_obj: object = configs
-    match configs_obj:
-        case MusicConfig() | _MusicConfigInternal():  # type: ignore[reportUnnecessaryComparison]
-            raise InvalidConfigError("stream_configs expects an iterable of config objects")
-        case _:
-            pass
+    try:
+        configs_obj: object = configs
+        match configs_obj:
+            case MusicConfig() | _MusicConfigInternal():  # type: ignore[reportUnnecessaryComparison]
+                raise InvalidConfigError("stream_configs expects an iterable of config objects")
+            case _:
+                pass
 
-    items = _wrap_streamables(
-        configs,
-        duration=duration,
-        transition_duration=transition_duration,
-    )
-    return stream(
-        items,
-        chunk_seconds=chunk_seconds,
-        model=model,
-        config=config,
-        update=update,
-    )
+        items = _wrap_streamables(
+            configs,
+            duration=duration,
+            transition_duration=transition_duration,
+        )
+        return stream(
+            items,
+            chunk_seconds=chunk_seconds,
+            model=model,
+            config=config,
+            update=update,
+        )
+    except Exception as exc:
+        _log_exception("stream_configs", exc)
+        raise
 
 
 def stream_updates(
@@ -331,30 +353,38 @@ def stream_updates(
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
 ) -> Iterable[FloatArray]:
-    updates_obj: object = updates
-    match updates_obj:
-        case MusicConfigUpdate() | _MusicConfigUpdateInternal():  # type: ignore[reportUnnecessaryComparison]
-            raise InvalidConfigError("stream_updates expects an iterable of update objects")
-        case _:
-            pass
+    try:
+        updates_obj: object = updates
+        match updates_obj:
+            case MusicConfigUpdate() | _MusicConfigUpdateInternal():  # type: ignore[reportUnnecessaryComparison]
+                raise InvalidConfigError("stream_updates expects an iterable of update objects")
+            case _:
+                pass
 
-    items = _wrap_streamables(
-        updates,
-        duration=duration,
-        transition_duration=transition_duration,
-    )
-    return stream(
-        items,
-        chunk_seconds=chunk_seconds,
-        model=model,
-        config=config,
-        update=update,
-    )
+        items = _wrap_streamables(
+            updates,
+            duration=duration,
+            transition_duration=transition_duration,
+        )
+        return stream(
+            items,
+            chunk_seconds=chunk_seconds,
+            model=model,
+            config=config,
+            update=update,
+        )
+    except Exception as exc:
+        _log_exception("stream_updates", exc)
+        raise
 
 
 def save_wav(path: str, audio_or_chunks: AudioNumbers | Iterable[AudioNumbers]) -> str:
-    written = write_wav(path, audio_or_chunks, sample_rate=SAMPLE_RATE)
-    return str(written)
+    try:
+        written = write_wav(path, audio_or_chunks, sample_rate=SAMPLE_RATE)
+        return str(written)
+    except Exception as exc:
+        _log_exception("save_wav", exc)
+        raise
 
 
 def _coerce_async_items(
@@ -423,53 +453,60 @@ async def astream(
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
 ) -> AsyncIterable[FloatArray]:
-    match chunk_seconds:
-        case (float() | int()) as value if value <= 0:
-            raise InvalidConfigError("chunk_seconds must be greater than 0")
-        case float() | int():
-            pass
-        case _:
-            raise InvalidConfigError("chunk_seconds must be a number")
-
-    current = coerce_internal_config(config) if config is not None else None
-    resolved = resolve_model(model)
-
-    async def _render_chunk(config_item: _MusicConfigInternal) -> FloatArray:
-        return await asyncio.to_thread(
-            lambda: ensure_audio_contract(
-                assemble(_to_synth_config(config_item), chunk_seconds),
-                sample_rate=SAMPLE_RATE,
-            )
-        )
-
-    async for item in _coerce_async_items(items):
-        target = await _resolve_target_async(
-            item.content,
-            current=current,
-            model=resolved,
-            update=update,
-        )
-        total_chunks = _chunk_count(item.duration, chunk_seconds)
-        transition_chunks = (
-            0
-            if current is None
-            else min(total_chunks, _transition_steps(item.transition_duration, chunk_seconds))
-        )
-
-        if transition_chunks > 0:
-            for config_item in _iter_transition_configs(current, target, transition_chunks):
-                current = config_item
-                yield await _render_chunk(config_item)
-        else:
-            current = target
-
-        match current:
-            case _MusicConfigInternal() as current_config:
+    try:
+        match chunk_seconds:
+            case (float() | int()) as value if value <= 0:
+                raise InvalidConfigError("chunk_seconds must be greater than 0")
+            case float() | int():
                 pass
-            case None:
-                raise InvalidConfigError("Stream exhausted without a current config")
             case _:
-                raise InvalidConfigError("Stream exhausted with an invalid config")
+                raise InvalidConfigError("chunk_seconds must be a number")
 
-        for _ in range(total_chunks - transition_chunks):
-            yield await _render_chunk(current_config)
+        current = coerce_internal_config(config) if config is not None else None
+        resolved = resolve_model(model)
+
+        async def _render_chunk(config_item: _MusicConfigInternal) -> FloatArray:
+            return await asyncio.to_thread(
+                lambda: ensure_audio_contract(
+                    assemble(_to_synth_config(config_item), chunk_seconds),
+                    sample_rate=SAMPLE_RATE,
+                )
+            )
+
+        async for item in _coerce_async_items(items):
+            target = await _resolve_target_async(
+                item.content,
+                current=current,
+                model=resolved,
+                update=update,
+            )
+            total_chunks = _chunk_count(item.duration, chunk_seconds)
+            transition_chunks = (
+                0
+                if current is None
+                else min(
+                    total_chunks,
+                    _transition_steps(item.transition_duration, chunk_seconds),
+                )
+            )
+
+            if transition_chunks > 0:
+                for config_item in _iter_transition_configs(current, target, transition_chunks):
+                    current = config_item
+                    yield await _render_chunk(config_item)
+            else:
+                current = target
+
+            match current:
+                case _MusicConfigInternal() as current_config:
+                    pass
+                case None:
+                    raise InvalidConfigError("Stream exhausted without a current config")
+                case _:
+                    raise InvalidConfigError("Stream exhausted with an invalid config")
+
+            for _ in range(total_chunks - transition_chunks):
+                yield await _render_chunk(current_config)
+    except Exception as exc:
+        _log_exception("astream", exc)
+        raise
