@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 import litellm
 import pytest
 
+from latentscore import MusicConfig
 from latentscore.errors import ConfigGenerateError
 from latentscore.models import build_expressive_prompt
 from latentscore.providers.litellm import LiteLLMAdapter, _safe_async_cleanup
@@ -31,7 +32,7 @@ async def test_litellm_adapter_enforces_json(
     adapter = LiteLLMAdapter(model="gemini/gemini-3-flash-preview")
     await adapter.generate("warm sunrise")
 
-    assert captured["response_format"] == {"type": "json_object"}
+    assert captured["response_format"] is MusicConfig
     messages = captured["messages"]
     assert isinstance(messages, list)
     assert messages[0]["role"] == "system"

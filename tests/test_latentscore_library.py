@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +11,8 @@ from latentscore import (
     MusicConfig,
     MusicConfigUpdate,
     Streamable,
+    StreamHooks,
+    astream,
     render,
     save_wav,
     stream,
@@ -85,3 +88,92 @@ def test_stream_texts_wraps_prompts() -> None:
         )
     )
     assert len(chunks) >= 1
+
+
+def test_streamable_accepts_fallback_and_preview() -> None:
+    item = Streamable(
+        content="warm sunrise",
+        duration=0.02,
+        transition_duration=0.0,
+        fallback="keep_last",
+        preview_policy="embedding",
+    )
+    assert item.fallback == "keep_last"
+    assert item.preview_policy == "embedding"
+
+
+class SlowModel:
+    def __init__(self) -> None:
+        self.ready = asyncio.Event()
+
+    async def generate(self, vibe: str) -> MusicConfig:
+        await self.ready.wait()
+        return MusicConfig(tempo="medium", brightness="bright")
+
+
+class FastModel:
+    async def generate(self, vibe: str) -> MusicConfig:
+        return MusicConfig(tempo="slow", brightness="dark")
+
+
+@pytest.mark.asyncio
+async def test_astream_preview_yields_before_llm_ready() -> None:
+    slow = SlowModel()
+    fast = FastModel()
+    items = [Streamable(content="warm sunrise", duration=0.04, transition_duration=0.0)]
+
+    async def first_chunk() -> np.ndarray:
+        async for chunk in astream(
+            items,
+            chunk_seconds=0.02,
+            model=slow,
+            preview_policy="embedding",
+            fallback_model=fast,
+        ):
+            return chunk
+        raise AssertionError("no chunks")
+
+    chunk = await asyncio.wait_for(first_chunk(), timeout=0.5)
+    assert isinstance(chunk, np.ndarray)
+    slow.ready.set()
+
+
+class ErrorModel:
+    async def generate(self, vibe: str) -> MusicConfig:
+        raise RuntimeError("boom")
+
+
+@pytest.mark.asyncio
+async def test_astream_fallback_on_error_keeps_streaming() -> None:
+    items = [Streamable(content="warm sunrise", duration=0.02, transition_duration=0.0)]
+    chunks = [
+        chunk
+        async for chunk in astream(
+            items,
+            chunk_seconds=0.02,
+            model=ErrorModel(),
+            fallback="embedding",
+            fallback_model=FastModel(),
+        )
+    ]
+    assert len(chunks) >= 1
+
+
+@pytest.mark.asyncio
+async def test_astream_hooks_fire() -> None:
+    events: list[str] = []
+    hooks = StreamHooks(on_event=lambda event: events.append(event.kind))
+    items = [Streamable(content=MusicConfig(), duration=0.02, transition_duration=0.0)]
+    chunks = [
+        chunk
+        async for chunk in astream(
+            items,
+            chunk_seconds=0.02,
+            model=DummyModel(),
+            hooks=hooks,
+        )
+    ]
+    assert len(chunks) >= 1
+    assert "stream_start" in events
+    assert "first_audio_chunk" in events
+    assert "stream_end" in events

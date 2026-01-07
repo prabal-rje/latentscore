@@ -9,6 +9,7 @@ from typing import Iterable
 from .audio import SAMPLE_RATE
 from .errors import ModelNotAvailableError
 from .main import render, save_wav
+from .spinner import Spinner
 
 _EXPRESSIVE_REPO = "mlx-community/gemma-3-1b-it-qat-8bit"
 _EXPRESSIVE_DIR = "gemma-3-1b-it-qat-8bit"
@@ -61,7 +62,8 @@ def main(argv: list[str] | None = None) -> int:
         args = parser.parse_args(argv)
 
         if args.command == "demo":
-            audio = render("warm sunrise", duration=args.duration)
+            with Spinner("Rendering demo audio"):
+                audio = render("warm sunrise", duration=args.duration)
             path = save_wav(args.output, audio)
             print(f"Wrote demo to {path} (sr={SAMPLE_RATE})")
             return 0
@@ -70,7 +72,10 @@ def main(argv: list[str] | None = None) -> int:
             model_base = _default_model_base()
             model_base.mkdir(parents=True, exist_ok=True)
             if args.model == "expressive":
-                target = _download_expressive(model_base)
+                target = model_base / _EXPRESSIVE_DIR
+                if not target.exists():
+                    with Spinner("Downloading expressive model"):
+                        _download_expressive(model_base)
                 print(f"Downloaded expressive model to {target}")
                 return 0
 
@@ -85,6 +90,7 @@ def main(argv: list[str] | None = None) -> int:
                 "Hints:",
                 "- Run `latentscore download expressive` to prefetch the LLM weights.",
                 "- Set LATENTSCORE_MODEL_DIR to point at a preseeded models directory.",
+                "- In production, run `latentscore doctor` and prefetch missing models to avoid runtime downloads.",
             ]
             _doctor_report(report)
             return 0

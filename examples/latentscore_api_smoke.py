@@ -8,13 +8,12 @@ import numpy as np
 from dotenv import load_dotenv
 
 from latentscore import (
-    SAMPLE_RATE,
+    FirstAudioSpinner,
     MusicConfig,
     Streamable,
     astream,
     render,
     save_wav,
-    MusicConfigUpdate,
     stream,
 )
 from latentscore.providers.litellm import LiteLLMAdapter
@@ -27,11 +26,12 @@ STREAM_SECONDS = 120.0
 STREAM_CHUNK_SECONDS = 1.0
 STREAM_TRANSITION_SECONDS = 1.0
 
-GEMINI_MODEL = "gemini/gemini-3-flash-preview" 
+GEMINI_MODEL = "gemini/gemini-3-flash-preview"
 GEMINI_API_ENV = "GEMINI_API_KEY"
-ANTHROPIC_MODEL = "claude-opus-4-5-20251101" #claude-sonnet-4-5-20250929
+ANTHROPIC_MODEL = "claude-opus-4-5-20251101"  # claude-sonnet-4-5-20250929
 ANTHROPIC_API_ENV = "ANTHROPIC_API_KEY"
 DOTENV_PATH = Path(__file__).resolve().parent / ".env"
+
 
 def _load_api_key(api_env: str) -> str:
     load_dotenv(DOTENV_PATH)
@@ -39,6 +39,7 @@ def _load_api_key(api_env: str) -> str:
     if not api_key:
         raise RuntimeError(f"Set {api_env} in {DOTENV_PATH}")
     return api_key
+
 
 def _assert_audio(audio: np.ndarray) -> None:
     assert audio.dtype == np.float32
@@ -79,6 +80,7 @@ def main() -> None:
     adapter = LiteLLMAdapter(model=ANTHROPIC_MODEL, api_key=api_key)
     output_dir = Path(__file__).resolve().parent / ".outputs"
     output_dir.mkdir(exist_ok=True)
+    spinner = FirstAudioSpinner(delay=0.35)
 
     try:
         audio = render("I AM INSANE", duration=RENDER_SECONDS, model=adapter)
@@ -116,6 +118,9 @@ def main() -> None:
                 stream_items,
                 chunk_seconds=STREAM_CHUNK_SECONDS,
                 model=adapter,
+                prefetch_depth=1,
+                preview_policy="embedding",
+                hooks=spinner.hooks(),
             ),
         )
     finally:

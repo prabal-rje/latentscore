@@ -1,20 +1,22 @@
 from __future__ import annotations
 
 import asyncio
-import logging
-from typing import Any, Callable, Coroutine
-from pydantic import BaseModel, ValidationError
 import json
+import logging
+from typing import Any, Callable, Coroutine, Literal
+
+from pydantic import BaseModel, ValidationError
 
 from ..config import MusicConfig
 from ..errors import ConfigGenerateError, LLMInferenceError, ModelNotAvailableError
 from ..models import build_expressive_prompt
 
 _DEFAULT_TEMPERATURE = 0.0
-# _JSON_RESPONSE_FORMAT: dict[str, str] = {"type": "json_object", "enforce_validations": "true", "strict": "true"}
 _atexit_guard_registered = False
 _safe_get_event_loop_installed = False
 _LOGGER = logging.getLogger("latentscore.providers.litellm")
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "default"]
+
 
 def _safe_async_cleanup(
     cleanup_coro: Callable[[], Coroutine[Any, Any, None]],
@@ -65,7 +67,7 @@ def _install_safe_get_event_loop() -> None:
     try:
         from litellm.llms.custom_httpx.async_client_cleanup import (
             close_litellm_async_clients,
-        ) 
+        )
     except Exception as exc:
         _LOGGER.info("LiteLLM cleanup import unavailable: %s", exc)
         return
@@ -101,9 +103,8 @@ class _LiteLLMRequest(BaseModel):
     model: str
     messages: list[dict[str, str]]
     temperature: float | None = None
-    response_format: BaseModel | type[BaseModel] | None = None
+    response_format: type[BaseModel] | None = None
     api_key: str | None = None
-    
 
 
 class LiteLLMAdapter:
@@ -116,16 +117,16 @@ class LiteLLMAdapter:
         api_key: str | None = None,
         temperature: float | None = None,
         system_prompt: str | None = None,
-        response_format: BaseModel | type[BaseModel] | None = MusicConfig,
-        reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "default"] | None = None,
+        response_format: type[BaseModel] | None = MusicConfig,
+        reasoning_effort: ReasoningEffort | None = None,
     ) -> None:
         self._model = model
         self._api_key = api_key
         self._temperature = temperature
         self._system_prompt = system_prompt
         self._base_prompt = build_expressive_prompt()
-        self._response_format = response_format
-        self._reasoning_effort = reasoning_effort
+        self._response_format: type[BaseModel] | None = response_format
+        self._reasoning_effort: ReasoningEffort | None = reasoning_effort
 
     def close(self) -> None:
         try:
@@ -183,10 +184,7 @@ class LiteLLMAdapter:
 
         try:
             # LiteLLM response typing is not exported; keep runtime checks below.
-            response: Any = await acompletion( 
-                **request,
-                reasoning_effort=self._reasoning_effort
-            )
+            response: Any = await acompletion(**request, reasoning_effort=self._reasoning_effort)
         except Exception as exc:  # pragma: no cover - provider errors
             _LOGGER.warning("LiteLLM request failed: %s", exc, exc_info=True)
             raise LLMInferenceError(str(exc)) from exc

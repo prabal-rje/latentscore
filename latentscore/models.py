@@ -171,7 +171,7 @@ _EXPRESSIVE_PROMPT = "\n".join(
         "- Return only JSON (no markdown, no explanations).",
         "- Use only the keys shown in the examples.",
         "",
-        "Source examples:",
+        "Few-shot examples:",
         FEW_SHOT_EXAMPLES.strip(),
     ]
 )
@@ -391,7 +391,7 @@ class FastEmbeddingModel:
 
     async def generate(self, vibe: str) -> MusicConfig:
         try:
-            return self._embed_and_select(vibe)
+            return await asyncio.to_thread(self._embed_and_select, vibe)
         except Exception as exc:  # pragma: no cover - runtime fallback
             _LOGGER.warning("Fast model fallback: %s", exc, exc_info=True)
             return _heuristic_config(vibe)
@@ -464,7 +464,14 @@ class ExpressiveMlxModel:
             model_dir.parent,
         )
         model_dir.mkdir(parents=True, exist_ok=True)
-        snapshot_download(_EXPRESSIVE_REPO, local_dir=str(model_dir))
+        from .spinner import Spinner
+
+        spinner = Spinner("Downloading expressive model (first run)")
+        spinner.start()
+        try:
+            snapshot_download(_EXPRESSIVE_REPO, local_dir=str(model_dir))
+        finally:
+            spinner.stop()
 
     @functools.lru_cache(maxsize=1)
     def _load_model(self) -> Any:

@@ -315,9 +315,11 @@ class MusicConfig(BaseModel):
     human: HumanFeelLabel = "robotic"
     grain: GrainStyle = "clean"
 
-    # extras: dict[str, Any] = Field(default_factory=dict)
+    model_config = ConfigDict(extra="allow")
 
-    # model_config = ConfigDict(extra="allow")
+    @property
+    def extras(self) -> dict[str, Any]:
+        return dict(self.model_extra or {})
 
     def to_internal(self) -> _MusicConfigInternal:
         return _MusicConfigInternal(
