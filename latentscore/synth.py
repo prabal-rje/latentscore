@@ -13,13 +13,29 @@ Architecture:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Dict, TypeAlias, cast
+from types import MappingProxyType
+from typing import Any, Callable, TypeAlias, cast
 
 import numpy as np
 import soundfile as sf  # type: ignore[import]
 from numpy.typing import NDArray
 from scipy.signal import butter, decimate, lfilter  # type: ignore[import]
+
+from .config import (
+    AccentStyle,
+    AttackStyle,
+    BassStyle,
+    DensityLevel,
+    GrainStyle,
+    MelodyStyle,
+    ModeName,
+    PadStyle,
+    RhythmStyle,
+    RootNote,
+    TextureStyle,
+)
 
 # =============================================================================
 # CONSTANTS
@@ -27,62 +43,73 @@ from scipy.signal import butter, decimate, lfilter  # type: ignore[import]
 
 SAMPLE_RATE = 44100
 
-# Root note frequencies (octave 4) - tuple for immutability
-NOTE_FREQS: dict[str, float] = {
-    "c": 261.63,
-    "c#": 277.18,
-    "d": 293.66,
-    "d#": 311.13,
-    "e": 329.63,
-    "f": 349.23,
-    "f#": 369.99,
-    "g": 392.00,
-    "g#": 415.30,
-    "a": 440.00,
-    "a#": 466.16,
-    "b": 493.88,
-}
+# Root note frequencies (octave 4) - mapping proxy for immutability
+NOTE_FREQS: Mapping[RootNote, float] = MappingProxyType(
+    {
+        "c": 261.63,
+        "c#": 277.18,
+        "d": 293.66,
+        "d#": 311.13,
+        "e": 329.63,
+        "f": 349.23,
+        "f#": 369.99,
+        "g": 392.00,
+        "g#": 415.30,
+        "a": 440.00,
+        "a#": 466.16,
+        "b": 493.88,
+    }
+)
 
 # Root to semitone offset
-ROOT_SEMITONES: dict[str, int] = {
-    "c": 0,
-    "c#": 1,
-    "d": 2,
-    "d#": 3,
-    "e": 4,
-    "f": 5,
-    "f#": 6,
-    "g": 7,
-    "g#": 8,
-    "a": 9,
-    "a#": 10,
-    "b": 11,
-}
+ROOT_SEMITONES: Mapping[RootNote, int] = MappingProxyType(
+    {
+        "c": 0,
+        "c#": 1,
+        "d": 2,
+        "d#": 3,
+        "e": 4,
+        "f": 5,
+        "f#": 6,
+        "g": 7,
+        "g#": 8,
+        "a": 9,
+        "a#": 10,
+        "b": 11,
+    }
+)
 
 # Mode intervals (semitones from root) - tuples for JIT
-MODE_INTERVALS: dict[str, tuple[int, ...]] = {
-    "major": (0, 2, 4, 5, 7, 9, 11),
-    "minor": (0, 2, 3, 5, 7, 8, 10),
-    "dorian": (0, 2, 3, 5, 7, 9, 10),
-    "mixolydian": (0, 2, 4, 5, 7, 9, 10),
-}
+MODE_INTERVALS: Mapping[ModeName, tuple[int, ...]] = MappingProxyType(
+    {
+        "major": (0, 2, 4, 5, 7, 9, 11),
+        "minor": (0, 2, 3, 5, 7, 8, 10),
+        "dorian": (0, 2, 3, 5, 7, 9, 10),
+        "mixolydian": (0, 2, 4, 5, 7, 9, 10),
+    }
+)
 
 # V2 parameter mappings
-ATTACK_MULT: dict[str, float] = {"soft": 2.5, "medium": 1.0, "sharp": 0.3}
-GRAIN_OSC: dict[str, str] = {"clean": "sine", "warm": "triangle", "gritty": "sawtooth"}
+ATTACK_MULT: Mapping[AttackStyle, float] = MappingProxyType(
+    {"soft": 2.5, "medium": 1.0, "sharp": 0.3}
+)
+GRAIN_OSC: Mapping[GrainStyle, str] = MappingProxyType(
+    {"clean": "sine", "warm": "triangle", "gritty": "sawtooth"}
+)
 
 # Density → active layers (tuples)
-DENSITY_LAYERS: dict[int, tuple[str, ...]] = {
-    2: ("bass", "pad"),
-    3: ("bass", "pad", "melody"),
-    4: ("bass", "pad", "melody", "rhythm"),
-    5: ("bass", "pad", "melody", "rhythm", "texture"),
-    6: ("bass", "pad", "melody", "rhythm", "texture", "accent"),
-}
+DENSITY_LAYERS: Mapping[DensityLevel, tuple[str, ...]] = MappingProxyType(
+    {
+        2: ("bass", "pad"),
+        3: ("bass", "pad", "melody"),
+        4: ("bass", "pad", "melody", "rhythm"),
+        5: ("bass", "pad", "melody", "rhythm", "texture"),
+        6: ("bass", "pad", "melody", "rhythm", "texture", "accent"),
+    }
+)
 
 FloatArray: TypeAlias = NDArray[np.float64]
 OscFn: TypeAlias = Callable[[float, float, int, float], FloatArray]
-FilterCoefficients: TypeAlias = tuple[FloatArray, FloatArray]
 
 
 # =============================================================================
@@ -90,12 +117,12 @@ FilterCoefficients: TypeAlias = tuple[FloatArray, FloatArray]
 # =============================================================================
 
 
-def freq_from_note(root: str, semitones: int = 0, octave: int = 4) -> float:
+def freq_from_note(root: RootNote, semitones: int = 0, octave: int = 4) -> float:
     """Get frequency for a note."""
-    root_lower = root.lower()
-    if root_lower not in NOTE_FREQS:
+    root_value: RootNote = root
+    if root_value not in NOTE_FREQS:
         raise ValueError(f"Unknown root note: {root}. Valid: {list(NOTE_FREQS.keys())}")
-    base_freq = NOTE_FREQS[root_lower]
+    base_freq = NOTE_FREQS[root_value]
     octave_shift = octave - 4
     return base_freq * (2**octave_shift) * (2 ** (semitones / 12))
 
@@ -161,7 +188,9 @@ def generate_sawtooth(
     elif len(signal) < num_samples:
         signal = np.pad(signal, (0, num_samples - len(signal)))
 
-    return cast(FloatArray, amp * signal)
+    output = amp * signal
+    assert isinstance(output, np.ndarray)
+    return cast(FloatArray, output)
 
 
 def generate_square(
@@ -202,11 +231,15 @@ def generate_square(
         corr[m4] += sign * (t4 * t4 * (2 * t4 + 3) + 1)
 
     # Rising edge at phase = 0
-    apply_4pt_blep(cast(FloatArray, t), correction, 1.0)
+    assert isinstance(t, np.ndarray)
+    t_array = cast(FloatArray, t)
+    apply_4pt_blep(t_array, correction, 1.0)
 
     # Falling edge at phase = 0.5
     t_shifted = (t + 0.5) % 1.0
-    apply_4pt_blep(cast(FloatArray, t_shifted), correction, -1.0)
+    assert isinstance(t_shifted, np.ndarray)
+    t_shifted_array = cast(FloatArray, t_shifted)
+    apply_4pt_blep(t_shifted_array, correction, -1.0)
 
     signal_high = naive + correction
     signal = decimate(signal_high, oversample, ftype="fir", zero_phase=True)
@@ -217,7 +250,9 @@ def generate_square(
     elif len(signal) < num_samples:
         signal = np.pad(signal, (0, num_samples - len(signal)))
 
-    return cast(FloatArray, amp * signal)
+    output = amp * signal
+    assert isinstance(output, np.ndarray)
+    return cast(FloatArray, output)
 
 
 def generate_noise(duration: float, sr: int = SAMPLE_RATE, amp: float = 0.1) -> FloatArray:
@@ -225,12 +260,14 @@ def generate_noise(duration: float, sr: int = SAMPLE_RATE, amp: float = 0.1) -> 
     return amp * np.random.randn(int(sr * duration))
 
 
-OSC_FUNCTIONS: dict[str, OscFn] = {
-    "sine": generate_sine,
-    "triangle": generate_triangle,
-    "sawtooth": generate_sawtooth,
-    "square": generate_square,
-}
+OSC_FUNCTIONS: Mapping[str, OscFn] = MappingProxyType(
+    {
+        "sine": generate_sine,
+        "triangle": generate_triangle,
+        "sawtooth": generate_sawtooth,
+        "square": generate_square,
+    }
+)
 
 
 def apply_adsr(
@@ -274,16 +311,34 @@ def apply_lowpass(signal: FloatArray, cutoff: float, sr: int = SAMPLE_RATE) -> F
     """Apply lowpass filter (causal, analog-style)."""
     nyquist = sr / 2
     normalized = min(max(cutoff / nyquist, 0.001), 0.99)
-    b, a = cast(FilterCoefficients, butter(2, normalized, btype="low", output="ba"))
-    return cast(FloatArray, lfilter(b, a, signal))
+    coeffs = butter(2, normalized, btype="low", output="ba")
+    assert isinstance(coeffs, tuple)
+    assert len(coeffs) == 2
+    b_raw, a_raw = coeffs
+    assert isinstance(b_raw, np.ndarray)
+    assert isinstance(a_raw, np.ndarray)
+    b = cast(FloatArray, b_raw)
+    a = cast(FloatArray, a_raw)
+    filtered = lfilter(b, a, signal)
+    assert isinstance(filtered, np.ndarray)
+    return cast(FloatArray, filtered)
 
 
 def apply_highpass(signal: FloatArray, cutoff: float, sr: int = SAMPLE_RATE) -> FloatArray:
     """Apply highpass filter (causal, analog-style)."""
     nyquist = sr / 2
     normalized = min(max(cutoff / nyquist, 0.001), 0.99)
-    b, a = cast(FilterCoefficients, butter(2, normalized, btype="high", output="ba"))
-    return cast(FloatArray, lfilter(b, a, signal))
+    coeffs = butter(2, normalized, btype="high", output="ba")
+    assert isinstance(coeffs, tuple)
+    assert len(coeffs) == 2
+    b_raw, a_raw = coeffs
+    assert isinstance(b_raw, np.ndarray)
+    assert isinstance(a_raw, np.ndarray)
+    b = cast(FloatArray, b_raw)
+    a = cast(FloatArray, a_raw)
+    filtered = lfilter(b, a, signal)
+    assert isinstance(filtered, np.ndarray)
+    return cast(FloatArray, filtered)
 
 
 def apply_delay(
@@ -369,8 +424,8 @@ def add_note(signal: FloatArray, note: FloatArray, start_index: int) -> None:
 class SynthParams:
     """Parameters passed to all synthesis functions."""
 
-    root: str = "c"
-    mode: str = "minor"
+    root: RootNote = "c"
+    mode: ModeName = "minor"
     brightness: float = 0.5
     space: float = 0.6
     duration: float = 16.0
@@ -378,12 +433,12 @@ class SynthParams:
 
     # V2 parameters
     motion: float = 0.5
-    attack: str = "medium"
+    attack: AttackStyle = "medium"
     stereo: float = 0.5
     depth: bool = False
     echo: float = 0.5
     human: float = 0.0
-    grain: str = "clean"
+    grain: GrainStyle = "clean"
 
     @property
     def attack_mult(self) -> float:
@@ -548,16 +603,18 @@ def bass_sub_pulse(params: SynthParams) -> FloatArray:
     return signal
 
 
-BASS_PATTERNS: dict[str, PatternFn] = {
-    "drone": bass_drone,
-    "sustained": bass_sustained,
-    "pulsing": bass_pulsing,
-    "walking": bass_walking,
-    "fifth_drone": bass_fifth_drone,
-    "sub_pulse": bass_sub_pulse,
-    "octave": bass_sustained,
-    "arp_bass": bass_pulsing,
-}
+BASS_PATTERNS: Mapping[BassStyle, PatternFn] = MappingProxyType(
+    {
+        "drone": bass_drone,
+        "sustained": bass_sustained,
+        "pulsing": bass_pulsing,
+        "walking": bass_walking,
+        "fifth_drone": bass_fifth_drone,
+        "sub_pulse": bass_sub_pulse,
+        "octave": bass_sustained,
+        "arp_bass": bass_pulsing,
+    }
+)
 
 
 # -----------------------------------------------------------------------------
@@ -719,15 +776,17 @@ def pad_stacked_fifths(params: SynthParams) -> FloatArray:
     return signal
 
 
-PAD_PATTERNS: dict[str, PatternFn] = {
-    "warm_slow": pad_warm_slow,
-    "dark_sustained": pad_dark_sustained,
-    "cinematic": pad_cinematic,
-    "thin_high": pad_thin_high,
-    "ambient_drift": pad_ambient_drift,
-    "stacked_fifths": pad_stacked_fifths,
-    "bright_open": pad_thin_high,
-}
+PAD_PATTERNS: Mapping[PadStyle, PatternFn] = MappingProxyType(
+    {
+        "warm_slow": pad_warm_slow,
+        "dark_sustained": pad_dark_sustained,
+        "cinematic": pad_cinematic,
+        "thin_high": pad_thin_high,
+        "ambient_drift": pad_ambient_drift,
+        "stacked_fifths": pad_stacked_fifths,
+        "bright_open": pad_thin_high,
+    }
+)
 
 
 # -----------------------------------------------------------------------------
@@ -929,17 +988,19 @@ def melody_arp(params: SynthParams) -> FloatArray:
     return signal
 
 
-MELODY_PATTERNS: dict[str, PatternFn] = {
-    "contemplative": melody_contemplative,
-    "contemplative_minor": melody_contemplative,
-    "rising": melody_rising,
-    "falling": melody_falling,
-    "minimal": melody_minimal,
-    "ornamental": melody_ornamental,
-    "arp_melody": melody_arp,
-    "call_response": melody_contemplative,
-    "heroic": melody_rising,
-}
+MELODY_PATTERNS: Mapping[MelodyStyle, PatternFn] = MappingProxyType(
+    {
+        "contemplative": melody_contemplative,
+        "contemplative_minor": melody_contemplative,
+        "rising": melody_rising,
+        "falling": melody_falling,
+        "minimal": melody_minimal,
+        "ornamental": melody_ornamental,
+        "arp_melody": melody_arp,
+        "call_response": melody_contemplative,
+        "heroic": melody_rising,
+    }
+)
 
 
 # -----------------------------------------------------------------------------
@@ -1092,19 +1153,21 @@ def rhythm_electronic(params: SynthParams) -> FloatArray:
     return signal
 
 
-RHYTHM_PATTERNS: dict[str, PatternFn] = {
-    "none": rhythm_none,
-    "minimal": rhythm_minimal,
-    "heartbeat": rhythm_heartbeat,
-    "soft_four": rhythm_soft_four,
-    "hats_only": rhythm_hats_only,
-    "electronic": rhythm_electronic,
-    "kit_light": rhythm_minimal,
-    "kit_medium": rhythm_soft_four,
-    "military": rhythm_soft_four,
-    "tabla_essence": rhythm_heartbeat,
-    "brush": rhythm_minimal,
-}
+RHYTHM_PATTERNS: Mapping[RhythmStyle, PatternFn] = MappingProxyType(
+    {
+        "none": rhythm_none,
+        "minimal": rhythm_minimal,
+        "heartbeat": rhythm_heartbeat,
+        "soft_four": rhythm_soft_four,
+        "hats_only": rhythm_hats_only,
+        "electronic": rhythm_electronic,
+        "kit_light": rhythm_minimal,
+        "kit_medium": rhythm_soft_four,
+        "military": rhythm_soft_four,
+        "tabla_essence": rhythm_heartbeat,
+        "brush": rhythm_minimal,
+    }
+)
 
 
 # -----------------------------------------------------------------------------
@@ -1247,18 +1310,20 @@ def texture_stars(params: SynthParams) -> FloatArray:
     return signal
 
 
-TEXTURE_PATTERNS: dict[str, PatternFn] = {
-    "none": texture_none,
-    "shimmer": texture_shimmer,
-    "shimmer_slow": texture_shimmer_slow,
-    "vinyl_crackle": texture_vinyl_crackle,
-    "breath": texture_breath,
-    "stars": texture_stars,
-    "glitch": texture_shimmer,
-    "noise_wash": texture_breath,
-    "crystal": texture_stars,
-    "pad_whisper": texture_breath,
-}
+TEXTURE_PATTERNS: Mapping[TextureStyle, PatternFn] = MappingProxyType(
+    {
+        "none": texture_none,
+        "shimmer": texture_shimmer,
+        "shimmer_slow": texture_shimmer_slow,
+        "vinyl_crackle": texture_vinyl_crackle,
+        "breath": texture_breath,
+        "stars": texture_stars,
+        "glitch": texture_shimmer,
+        "noise_wash": texture_breath,
+        "crystal": texture_stars,
+        "pad_whisper": texture_breath,
+    }
+)
 
 
 # -----------------------------------------------------------------------------
@@ -1367,19 +1432,21 @@ def accent_chime(params: SynthParams) -> FloatArray:
     return signal
 
 
-ACCENT_PATTERNS: dict[str, PatternFn] = {
-    "none": accent_none,
-    "bells": accent_bells,
-    "bells_dense": accent_bells,
-    "pluck": accent_pluck,
-    "chime": accent_chime,
-    "blip": accent_bells,
-    "blip_random": accent_chime,
-    "brass_hit": accent_bells,
-    "wind": accent_chime,
-    "arp_accent": accent_pluck,
-    "piano_note": accent_pluck,
-}
+ACCENT_PATTERNS: Mapping[AccentStyle, PatternFn] = MappingProxyType(
+    {
+        "none": accent_none,
+        "bells": accent_bells,
+        "bells_dense": accent_bells,
+        "pluck": accent_pluck,
+        "chime": accent_chime,
+        "blip": accent_bells,
+        "blip_random": accent_chime,
+        "brass_hit": accent_bells,
+        "wind": accent_chime,
+        "arp_accent": accent_pluck,
+        "piano_note": accent_pluck,
+    }
+)
 
 
 # =============================================================================
@@ -1392,42 +1459,44 @@ class MusicConfig:
     """Complete V1/V2 configuration."""
 
     tempo: float = 0.35
-    root: str = "c"
-    mode: str = "minor"
+    root: RootNote = "c"
+    mode: ModeName = "minor"
     brightness: float = 0.5
     space: float = 0.6
-    density: int = 5
+    density: DensityLevel = 5
 
     # Layer selections
-    bass: str = "drone"
-    pad: str = "warm_slow"
-    melody: str = "contemplative"
-    rhythm: str = "minimal"
-    texture: str = "shimmer"
-    accent: str = "bells"
+    bass: BassStyle = "drone"
+    pad: PadStyle = "warm_slow"
+    melody: MelodyStyle = "contemplative"
+    rhythm: RhythmStyle = "minimal"
+    texture: TextureStyle = "shimmer"
+    accent: AccentStyle = "bells"
 
     # V2 parameters
     motion: float = 0.5
-    attack: str = "medium"
+    attack: AttackStyle = "medium"
     stereo: float = 0.5
     depth: bool = False
     echo: float = 0.5
     human: float = 0.0
-    grain: str = "clean"
+    grain: GrainStyle = "clean"
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "MusicConfig":
+    def from_dict(cls, d: Mapping[str, Any]) -> "MusicConfig":
         """Create config from dict (e.g., from JSON)."""
         config = cls()
 
         for key, value in d.items():
-            if key == "layers" and isinstance(value, dict):
-                layers = cast(dict[str, Any], value)
-                for layer_key, layer_value in layers.items():
-                    if hasattr(config, layer_key):
-                        setattr(config, layer_key, layer_value)
-            elif hasattr(config, key):
-                setattr(config, key, value)
+            match (key, value):
+                case ("layers", Mapping() as layers):
+                    for layer_key, layer_value in layers.items():
+                        if hasattr(config, layer_key):
+                            setattr(config, layer_key, layer_value)
+                case (layer_key, _) if hasattr(config, layer_key):
+                    setattr(config, layer_key, value)
+                case _:
+                    pass
 
         return config
 
@@ -1521,17 +1590,22 @@ def config_to_audio(config: MusicConfig, output_path: str, duration: float = 16.
         Path to the saved file
     """
     audio = assemble(config, duration)
-    write_audio = cast(Callable[[str, FloatArray, int], None], sf.write)
-    write_audio(output_path, audio, SAMPLE_RATE)
+    assert callable(sf.write)
+    write_audio = sf.write
+    write_audio(output_path, audio, SAMPLE_RATE)  # type: ignore[reportUnknownMemberType]
     return output_path
 
 
-def dict_to_audio(config_dict: Dict[str, Any], output_path: str, duration: float = 16.0) -> str:
+def dict_to_audio(
+    config_dict: Mapping[str, Any],
+    output_path: str,
+    duration: float = 16.0,
+) -> str:
     """
     Convert a config dict (from JSON) directly to audio.
 
     Args:
-        config_dict: Dict with config values
+        config_dict: Mapping with config values
         output_path: Path to save the WAV file
         duration: Duration in seconds
 
@@ -1625,6 +1699,23 @@ def lerp(a: float, b: float, t: float) -> float:
     return a + (b - a) * t
 
 
+def _clamp_density(value: float) -> DensityLevel:
+    raw = int(round(value))
+    match raw:
+        case 2:
+            return 2
+        case 3:
+            return 3
+        case 4:
+            return 4
+        case 5:
+            return 5
+        case 6:
+            return 6
+        case _:
+            return 2 if raw < 2 else 6
+
+
 def interpolate_configs(config_a: MusicConfig, config_b: MusicConfig, t: float) -> MusicConfig:
     """
     Interpolate between two configs.
@@ -1637,7 +1728,7 @@ def interpolate_configs(config_a: MusicConfig, config_b: MusicConfig, t: float) 
         mode=config_a.mode if t < 0.5 else config_b.mode,
         brightness=lerp(config_a.brightness, config_b.brightness, t),
         space=lerp(config_a.space, config_b.space, t),
-        density=round(lerp(config_a.density, config_b.density, t)),
+        density=_clamp_density(lerp(config_a.density, config_b.density, t)),
         # Layer selections: staggered switching
         bass=config_a.bass if t < 0.4 else config_b.bass,
         pad=config_a.pad if t < 0.5 else config_b.pad,

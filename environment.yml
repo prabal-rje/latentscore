@@ -10,11 +10,12 @@ dependencies:
     # Audio
     - soundfile
     
-    # LLM - MLX
+    # LLM, MLX
     - mlx>=0.22
     - mlx-lm>=0.22
     - llm-structured-output  # MLX-native JSON schema
     - "outlines[mlxlm]"    
+    - litellm
     
     # Embeddings
     - sentence-transformers
@@ -40,3 +41,4 @@ dependencies:
     - pytest-asyncio>=0.23
     - pytest-cov>=4.1
     - ruff>=0.6
+  

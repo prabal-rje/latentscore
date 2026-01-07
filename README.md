@@ -2,9 +2,24 @@
 
 Minimal tracer-bullet slice for async Python using `uvloop` by default (when available) and `dependency_injector` wiring.
 
+## LatentScore Library
+
+```python
+from latentscore import MusicConfigUpdate, render, save_wav
+
+update = MusicConfigUpdate(tempo="medium")
+audio = render("warm sunrise over water", duration=8, model="fast", update=update)
+save_wav("output.wav", audio)
+```
+
+- Local-first by default (no API keys required).
+- `latentscore demo` renders a short clip to `demo.wav`.
+- `latentscore download expressive` prefetches local LLM weights (~1.2GB).
+- `docs/latentscore-dx.md` has the full API and audio contract.
+
 ## Quickstart
 - Apple Silicon recommended; use an arm64 Conda (e.g. Miniforge) when possible.
-- `conda create -n latentscore-3 python=3.10` and `conda activate latentscore-3`.
+- `conda create -n latentscore python=3.10` and `conda activate latentscore`.
 - `pip install -r requirements.txt`.
 - Run the demo: `PYTHONPATH=src python -m app` (or `pip install -e .` once).
 
@@ -90,7 +105,7 @@ cp patch5/textual_app.py src/app/textual_app.py
 ## Usage
 
 ```bash
-conda activate latentscore-3
+conda activate latentscore
 PYTHONPATH=src python -m app.menubar
 ```
 

@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 import json
-from typing import Literal, Dict, Any, Tuple, List
-import numpy as np
-from numpy.typing import NDArray
-import soundfile as sf
+from typing import Any, Callable, Dict, List, Literal, Tuple, cast
 
-import outlines
 import mlx_lm
+import numpy as np
+import outlines
+import soundfile as sf
+from numpy.typing import NDArray
 from pydantic import BaseModel, Field
-from .synth import MusicConfig, interpolate_configs, assemble
+
+from .synth import MusicConfig, assemble, interpolate_configs
 
 MODEL_PATH = "./models/gemma-3-1b-it-qat-8bit"
 
 # ---- Output schema for multiple configs + best_choice ----
+
 
 class VibeConfig(BaseModel):
     """A curated vibe-to-synth mapping with staged justifications."""
@@ -21,8 +23,7 @@ class VibeConfig(BaseModel):
     # Meta
     justification: str = Field(
         description="Ultimate reasoning tying all parameter choices together for this config and how it matches the requested vibe. Talk about the CORE, the LAYERS, and other details."
-    )    
-
+    )
 
     # # Core parameters and justification
     # core_justification: str = Field(
@@ -54,11 +55,11 @@ class VibeConfig(BaseModel):
     bass: Literal["drone", "sustained", "pulsing", "walking", "fifth_drone", "sub_pulse"] = Field(
         description="Bass character. drone=static, pulsing=rhythmic, walking=melodic movement"
     )
-    pad: Literal["warm_slow", "dark_sustained", "cinematic", "thin_high", "ambient_drift", "stacked_fifths"] = Field(
-        description="Pad texture. warm_slow=cozy, cinematic=epic, thin_high=ethereal"
-    )
-    melody: Literal["contemplative", "rising", "falling", "minimal", "ornamental", "arp_melody"] = Field(
-        description="Melodic contour. rising=hopeful, falling=melancholic, minimal=sparse"
+    pad: Literal[
+        "warm_slow", "dark_sustained", "cinematic", "thin_high", "ambient_drift", "stacked_fifths"
+    ] = Field(description="Pad texture. warm_slow=cozy, cinematic=epic, thin_high=ethereal")
+    melody: Literal["contemplative", "rising", "falling", "minimal", "ornamental", "arp_melody"] = (
+        Field(description="Melodic contour. rising=hopeful, falling=melancholic, minimal=sparse")
     )
     rhythm: Literal["none", "minimal", "heartbeat", "soft_four", "hats_only", "electronic"] = Field(
         description="Percussion style. none=ambient, heartbeat=organic pulse, electronic=synthetic"
@@ -69,7 +70,7 @@ class VibeConfig(BaseModel):
     accent: Literal["none", "bells", "pluck", "chime"] = Field(
         description="Sparse melodic accents. bells=crystalline, pluck=intimate, chime=mystical"
     )
-    
+
     # V2 Parameters and justification
     # v2_justification: str = Field(
     #     description="Reasoning for 'V2' parameters: motion, attack, stereo, depth, echo, human, grain."
@@ -94,14 +95,18 @@ class VibeConfig(BaseModel):
         description="Oscillator character. clean=digital, warm=analog, gritty=distorted"
     )
 
+
 # Scored config: a single VibeConfig with a quality score (for single-call generation)
 class ScoredVibeConfig(BaseModel):
     """A VibeConfig with a self-assessed quality score."""
+
     config: VibeConfig
     score: int = Field(
-        ge=0, le=100,
-        description="Self-assessed quality score from 0 to 100. Higher is better. Rate how well this config captures the requested vibe."
+        ge=0,
+        le=100,
+        description="Self-assessed quality score from 0 to 100. Higher is better. Rate how well this config captures the requested vibe.",
     )
+
 
 # Value mappings for synth
 TEMPO_MAP = {"very_slow": 0.15, "slow": 0.3, "medium": 0.5, "fast": 0.7, "very_fast": 0.9}
@@ -644,16 +649,22 @@ where config matches the structure in the examples, and score is your self-asses
 """
 
 print(f"Loading model from {MODEL_PATH}...")
-model = outlines.from_mlxlm(*mlx_lm.load(MODEL_PATH))
+loaded = mlx_lm.load(MODEL_PATH)
+model_obj, tokenizer_obj, *_ = loaded
+model = outlines.from_mlxlm(cast(Any, model_obj), cast(Any, tokenizer_obj))
 print("Model loaded.")
 
 
 def _generate_single_config(vibe: str, run_idx: int, max_retries: int = 3) -> ScoredVibeConfig:
     """Generate a single scored config with a unique seed. Retries on failure."""
+    rng = np.random.default_rng()
     for attempt in range(max_retries):
-        seed = np.random.randint(0, 1_000_000)
-        print(f"Run {run_idx}/3 - SEED: {seed}" + (f" (attempt {attempt + 1})" if attempt > 0 else ""))
-        
+        # numpy Generator typing is incomplete for integers().
+        seed = int(rng.integers(0, 1_000_000))  # type: ignore[reportUnknownMemberType]
+        print(
+            f"Run {run_idx}/3 - SEED: {seed}" + (f" (attempt {attempt + 1})" if attempt > 0 else "")
+        )
+
         prompt = f"""{SYSTEM_PROMPT}
 
 <input description="The vibe/mood description to generate configs for">
@@ -668,15 +679,15 @@ Seed: {seed}
 """
 
         result = model(prompt, output_type=ScoredVibeConfig, max_tokens=3_000)
-        
+
         try:
             return ScoredVibeConfig.model_validate_json(result)
         except Exception as e:
             print(f"  Validation failed: {e}")
             if attempt == max_retries - 1:
                 raise
-            print(f"  Retrying...")
-    
+            print("  Retrying...")
+
     raise RuntimeError("Should not reach here")
 
 
@@ -685,10 +696,12 @@ def vibe_to_scored_configs(vibe: str, num_runs: int = 3) -> List[ScoredVibeConfi
     return [_generate_single_config(vibe, i + 1) for i in range(num_runs)]
 
 
-def vibe_to_multiconfig_with_reasoning(vibe: str, num_runs: int = 3) -> Tuple[Dict[str, Any], int, str]:
+def vibe_to_multiconfig_with_reasoning(
+    vibe: str, num_runs: int = 3
+) -> Tuple[Dict[str, Any], int, str]:
     """Generate configs via separate LLM calls, return all configs, best choice (1-indexed), and formatted output."""
     scored_configs = vibe_to_scored_configs(vibe, num_runs)
-    
+
     configs: List[Tuple[Dict[str, Any], str]] = []
     scores: List[int] = []
     for sc in scored_configs:
@@ -716,10 +729,10 @@ def vibe_to_multiconfig_with_reasoning(vibe: str, num_runs: int = 3) -> Tuple[Di
         }
         configs.append((cfg, c.justification))
         scores.append(sc.score)
-    
+
     # Select the config with the highest score (1-indexed for compatibility)
     best_choice = scores.index(max(scores)) + 1
-    
+
     # Format output with all configs, scores, and justifications
     def _format_config_output(cfg: Dict[str, Any], score: int, justification: str, idx: int) -> str:
         return (
@@ -732,8 +745,8 @@ def vibe_to_multiconfig_with_reasoning(vibe: str, num_runs: int = 3) -> Tuple[Di
         _format_config_output(configs[i][0], scores[i], configs[i][1], i + 1)
         for i in range(len(configs))
     )
-    
-    config_dict = {f"config_{i+1}": configs[i][0] for i in range(len(configs))}
+
+    config_dict = {f"config_{i + 1}": configs[i][0] for i in range(len(configs))}
     return (config_dict, best_choice, justifications)
 
 
@@ -744,117 +757,117 @@ if __name__ == "__main__":
 
     # Mario the Game: Bouncy 8-bit, bright, playful, iconic video game energy
     mario_config: Dict[str, Any] = {
-        "tempo": 0.72,           # Fast, energetic
-        "root": "c",             # Classic bright key
-        "mode": "major",         # Happy, playful
-        "brightness": 0.85,      # Crisp 8-bit highs
-        "space": 0.15,           # Dry, punchy (no reverb in NES)
-        "density": 4,            # Multiple layers but not overwhelming
-        "bass": "pulsing",       # Bouncy bass line
-        "pad": "thin_high",      # Chiptune leads are thin/bright
+        "tempo": 0.72,  # Fast, energetic
+        "root": "c",  # Classic bright key
+        "mode": "major",  # Happy, playful
+        "brightness": 0.85,  # Crisp 8-bit highs
+        "space": 0.15,  # Dry, punchy (no reverb in NES)
+        "density": 4,  # Multiple layers but not overwhelming
+        "bass": "pulsing",  # Bouncy bass line
+        "pad": "thin_high",  # Chiptune leads are thin/bright
         "melody": "arp_melody",  # Arpeggiated video game patterns
         "rhythm": "electronic",  # Precise electronic drums
-        "texture": "none",       # Clean digital sound
-        "accent": "bells",       # Coin/power-up chimes
-        "motion": 0.65,          # Active modulation
-        "attack": "sharp",       # Punchy 8-bit transients
-        "stereo": 0.35,          # Narrower (mono NES feel)
-        "depth": False,          # No sub-bass in 8-bit
-        "echo": 0.12,            # Minimal delay
-        "human": 0.0,            # Robotic machine precision
-        "grain": "gritty",       # Bit-crushed digital character
+        "texture": "none",  # Clean digital sound
+        "accent": "bells",  # Coin/power-up chimes
+        "motion": 0.65,  # Active modulation
+        "attack": "sharp",  # Punchy 8-bit transients
+        "stereo": 0.35,  # Narrower (mono NES feel)
+        "depth": False,  # No sub-bass in 8-bit
+        "echo": 0.12,  # Minimal delay
+        "human": 0.0,  # Robotic machine precision
+        "grain": "gritty",  # Bit-crushed digital character
     }
 
     # Bubble Gum: Sweet, pink, pop, sparkly, light and airy
     bubble_gum_config: Dict[str, Any] = {
-        "tempo": 0.58,           # Upbeat but not frantic
-        "root": "f",             # Warm, sweet key
-        "mode": "major",         # Happy, carefree
-        "brightness": 0.78,      # Bright and sparkly
-        "space": 0.45,           # Light room reverb
-        "density": 5,            # Full pop production
-        "bass": "sustained",     # Smooth supportive bass
-        "pad": "warm_slow",      # Cotton candy softness
-        "melody": "rising",      # Optimistic upward motion
-        "rhythm": "soft_four",   # Pop beat
-        "texture": "shimmer",    # Sparkly sweetness
-        "accent": "bells",       # Crystalline accents
-        "motion": 0.55,          # Gentle movement
-        "attack": "medium",      # Balanced transients
-        "stereo": 0.72,          # Wide pop mix
-        "depth": False,          # Light, not heavy
-        "echo": 0.35,            # Subtle delay
-        "human": 0.25,           # Slight natural feel
-        "grain": "clean",        # Polished pop sheen
+        "tempo": 0.58,  # Upbeat but not frantic
+        "root": "f",  # Warm, sweet key
+        "mode": "major",  # Happy, carefree
+        "brightness": 0.78,  # Bright and sparkly
+        "space": 0.45,  # Light room reverb
+        "density": 5,  # Full pop production
+        "bass": "sustained",  # Smooth supportive bass
+        "pad": "warm_slow",  # Cotton candy softness
+        "melody": "rising",  # Optimistic upward motion
+        "rhythm": "soft_four",  # Pop beat
+        "texture": "shimmer",  # Sparkly sweetness
+        "accent": "bells",  # Crystalline accents
+        "motion": 0.55,  # Gentle movement
+        "attack": "medium",  # Balanced transients
+        "stereo": 0.72,  # Wide pop mix
+        "depth": False,  # Light, not heavy
+        "echo": 0.35,  # Subtle delay
+        "human": 0.25,  # Slight natural feel
+        "grain": "clean",  # Polished pop sheen
     }
 
     # Depression: Slow, heavy, dark, despondent, weight of existence
     depression_config: Dict[str, Any] = {
-        "tempo": 0.18,           # Glacially slow, no energy
-        "root": "c#",            # Dark, uncomfortable key
-        "mode": "minor",         # Sadness, despair
-        "brightness": 0.12,      # Muffled, grey, no light
-        "space": 0.92,           # Vast empty void
-        "density": 2,            # Sparse, isolated
-        "bass": "drone",         # Oppressive weight
-        "pad": "dark_sustained", # Heavy grey clouds
-        "melody": "falling",     # Descending into darkness
-        "rhythm": "none",        # No motivation to move
-        "texture": "breath",     # Sighs, heaviness
-        "accent": "none",        # No bright spots
-        "motion": 0.08,          # Nearly static, frozen
-        "attack": "soft",        # No sharp edges, numb
-        "stereo": 0.88,          # Disorienting vastness
-        "depth": True,           # Heavy sub-bass weight
-        "echo": 0.82,            # Thoughts echoing endlessly
-        "human": 0.62,           # Unsteady, struggling
-        "grain": "warm",         # Muted, not harsh
+        "tempo": 0.18,  # Glacially slow, no energy
+        "root": "c#",  # Dark, uncomfortable key
+        "mode": "minor",  # Sadness, despair
+        "brightness": 0.12,  # Muffled, grey, no light
+        "space": 0.92,  # Vast empty void
+        "density": 2,  # Sparse, isolated
+        "bass": "drone",  # Oppressive weight
+        "pad": "dark_sustained",  # Heavy grey clouds
+        "melody": "falling",  # Descending into darkness
+        "rhythm": "none",  # No motivation to move
+        "texture": "breath",  # Sighs, heaviness
+        "accent": "none",  # No bright spots
+        "motion": 0.08,  # Nearly static, frozen
+        "attack": "soft",  # No sharp edges, numb
+        "stereo": 0.88,  # Disorienting vastness
+        "depth": True,  # Heavy sub-bass weight
+        "echo": 0.82,  # Thoughts echoing endlessly
+        "human": 0.62,  # Unsteady, struggling
+        "grain": "warm",  # Muted, not harsh
     }
 
     # Pineapple: Tropical, sunny, Caribbean, fresh, island vibes
     pineapple_config: Dict[str, Any] = {
-        "tempo": 0.52,           # Relaxed tropical groove
-        "root": "g",             # Bright, sunny key
-        "mode": "major",         # Happy island vibes
-        "brightness": 0.68,      # Sunny but not harsh
-        "space": 0.55,           # Open air, beach
-        "density": 4,            # Layered but breezy
-        "bass": "walking",       # Reggae/calypso bass movement
-        "pad": "warm_slow",      # Warm tropical air
+        "tempo": 0.52,  # Relaxed tropical groove
+        "root": "g",  # Bright, sunny key
+        "mode": "major",  # Happy island vibes
+        "brightness": 0.68,  # Sunny but not harsh
+        "space": 0.55,  # Open air, beach
+        "density": 4,  # Layered but breezy
+        "bass": "walking",  # Reggae/calypso bass movement
+        "pad": "warm_slow",  # Warm tropical air
         "melody": "ornamental",  # Steel drum melodic flourishes
-        "rhythm": "minimal",     # Island groove
-        "texture": "shimmer",    # Sun on water sparkle
-        "accent": "pluck",       # Guitar/ukulele plucks
-        "motion": 0.48,          # Gentle swaying
-        "attack": "medium",      # Relaxed transients
-        "stereo": 0.65,          # Wide beach soundscape
-        "depth": False,          # Light and breezy
-        "echo": 0.42,            # Beach reverb
-        "human": 0.38,           # Natural island feel
-        "grain": "warm",         # Sunny warmth
+        "rhythm": "minimal",  # Island groove
+        "texture": "shimmer",  # Sun on water sparkle
+        "accent": "pluck",  # Guitar/ukulele plucks
+        "motion": 0.48,  # Gentle swaying
+        "attack": "medium",  # Relaxed transients
+        "stereo": 0.65,  # Wide beach soundscape
+        "depth": False,  # Light and breezy
+        "echo": 0.42,  # Beach reverb
+        "human": 0.38,  # Natural island feel
+        "grain": "warm",  # Sunny warmth
     }
 
     # Police: Urgent, tense, siren-like, pursuit, high alert
     police_config: Dict[str, Any] = {
-        "tempo": 0.82,           # Fast, urgent pursuit
-        "root": "a",             # Tense, alert key
-        "mode": "minor",         # Tension, danger
-        "brightness": 0.72,      # Sirens cut through
-        "space": 0.28,           # Urban, close
-        "density": 5,            # High intensity layers
-        "bass": "pulsing",       # Heartbeat tension
-        "pad": "cinematic",      # Dramatic urgency
+        "tempo": 0.82,  # Fast, urgent pursuit
+        "root": "a",  # Tense, alert key
+        "mode": "minor",  # Tension, danger
+        "brightness": 0.72,  # Sirens cut through
+        "space": 0.28,  # Urban, close
+        "density": 5,  # High intensity layers
+        "bass": "pulsing",  # Heartbeat tension
+        "pad": "cinematic",  # Dramatic urgency
         "melody": "arp_melody",  # Siren-like oscillation
         "rhythm": "electronic",  # Mechanical precision
-        "texture": "none",       # Clean alert sound
-        "accent": "bells",       # Alarm tones
-        "motion": 0.78,          # Rapid modulation (siren wobble)
-        "attack": "sharp",       # Urgent transients
-        "stereo": 0.58,          # Focused but spatial
-        "depth": True,           # Sub-bass impact
-        "echo": 0.22,            # Short urban reflections
-        "human": 0.0,            # Robotic, mechanical
-        "grain": "gritty",       # Harsh, alerting
+        "texture": "none",  # Clean alert sound
+        "accent": "bells",  # Alarm tones
+        "motion": 0.78,  # Rapid modulation (siren wobble)
+        "attack": "sharp",  # Urgent transients
+        "stereo": 0.58,  # Focused but spatial
+        "depth": True,  # Sub-bass impact
+        "echo": 0.22,  # Short urban reflections
+        "human": 0.0,  # Robotic, mechanical
+        "grain": "gritty",  # Harsh, alerting
     }
 
     # Build configs list
@@ -878,9 +891,9 @@ if __name__ == "__main__":
 
     # Print configs for sanity
     for name, cfg_dict in zip(config_names, config_dicts):
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print(f"CONFIG: {name}")
-        print('='*70)
+        print("=" * 70)
         print(json.dumps(cfg_dict, indent=2))
 
     # 4. Interpolate between the configs with tweening, concatenate output
@@ -908,5 +921,6 @@ if __name__ == "__main__":
 
     full_audio: NDArray[np.float64] = np.concatenate(all_outputs)
     # Save output to "test.wav"
-    sf.write("test.wav", full_audio, sr)
-    print(f"\nConcatenated tweened audio saved to test.wav")
+    write_audio = cast(Callable[[str, NDArray[np.float64], int], None], sf.write)  # type: ignore[reportUnknownMemberType]
+    write_audio("test.wav", full_audio, sr)  # type: ignore[reportUnknownMemberType]
+    print("\nConcatenated tweened audio saved to test.wav")

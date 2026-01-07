@@ -1,3 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "latentscore"
+version = "0.1.0"
+description = "LatentScore audio synthesis library."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "soundfile",
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+fast = ["sentence-transformers", "torch", "scikit-learn"]
+expressive = ["mlx>=0.22", "mlx-lm>=0.22", "llm-structured-output", "outlines[mlxlm]"]
+model = ["huggingface_hub>=0.20"]
+litellm = ["litellm>=1.0", "python-dotenv"]
+
+[project.scripts]
+latentscore = "latentscore.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["latentscore", "latentscore.*"]
+
 [tool.ruff]
 target-version = "py310"
 line-length = 100
