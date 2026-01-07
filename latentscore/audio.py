@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, Callable, TypeGuard
 
 import numpy as np
 import soundfile as sf  # type: ignore[import]
@@ -20,16 +20,18 @@ def ensure_audio_contract(
     audio: AudioNumbers,
     *,
     sample_rate: int = SAMPLE_RATE,
+    check_peak: bool = True,
 ) -> FloatArray:
-    """Normalize dtype/range/shape to the audio contract."""
+    """Normalize dtype/range/shape to the audio contract (optionally skip peak checks)."""
 
     _ = sample_rate
     mono: FloatArray = np.asarray(audio, dtype=np.float32).reshape(-1)
     if mono.size == 0:
         return mono
-    peak = float(np.max(np.abs(mono)))
-    if peak > 1.0:
-        mono = mono / peak
+    if check_peak:
+        peak = float(np.max(np.abs(mono)))
+        if peak > 1.0:
+            mono = mono / peak
     return mono
 
 
@@ -38,6 +40,36 @@ def iter_chunks(chunks: Iterable[AudioNumbers]) -> Iterator[FloatArray]:
 
     for chunk in chunks:
         yield ensure_audio_contract(chunk)
+
+
+def _is_audio_numbers(value: object) -> TypeGuard[AudioNumbers]:
+    if isinstance(value, np.ndarray):
+        return True
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return True
+    return False
+
+
+def _coerce_write_audio(
+    write_fn: object,
+) -> Callable[[Path | str, AudioNumbers, int], None]:
+    if not callable(write_fn):
+        raise InvalidConfigError("soundfile.write is unavailable")
+
+    def _write_audio(path: Path | str, audio: AudioNumbers, sample_rate: int) -> None:
+        write_fn(path, audio, sample_rate)
+
+    return _write_audio
+
+
+def _coerce_write_chunk(write_fn: object) -> Callable[[FloatArray], None]:
+    if not callable(write_fn):
+        raise InvalidConfigError("soundfile write handle is unavailable")
+
+    def _write_chunk(chunk: FloatArray) -> None:
+        write_fn(chunk)
+
+    return _write_chunk
 
 
 def _looks_like_samples(sequence: Sequence[object]) -> bool:
@@ -63,17 +95,15 @@ def write_wav(
     match audio_obj:
         case np.ndarray():
             write_fn = getattr(sf, "write", None)
-            assert callable(write_fn)
-            write_audio = cast(Callable[[Path | str, AudioNumbers, int], None], write_fn)
+            write_audio = _coerce_write_audio(write_fn)
             array_float: NDArray[np.float32] = np.asarray(audio_obj, dtype=np.float32)
             normalized = ensure_audio_contract(array_float, sample_rate=sample_rate)
-            # soundfile stubs are incomplete; cast is intentional for type safety.
+            # soundfile stubs are incomplete; keep runtime checks explicit.
             write_audio(target, normalized, sample_rate)  # type: ignore[reportUnknownMemberType]
             return target
         case Sequence() as sequence if _looks_like_samples(sequence):
             write_fn = getattr(sf, "write", None)
-            assert callable(write_fn)
-            write_audio = cast(Callable[[Path | str, AudioNumbers, int], None], write_fn)
+            write_audio = _coerce_write_audio(write_fn)
             assert _looks_like_samples(sequence)
             sequence_array: NDArray[np.float32] = np.asarray(sequence, dtype=np.float32)
             normalized = ensure_audio_contract(sequence_array, sample_rate=sample_rate)
@@ -100,11 +130,11 @@ def write_wav(
         subtype="FLOAT",
     ) as handle:
         write_fn = getattr(handle, "write", None)
-        assert callable(write_fn)
-        write_chunk = cast(Callable[[FloatArray], None], write_fn)  # type: ignore[reportUnknownMemberType]
+        write_chunk = _coerce_write_chunk(write_fn)  # type: ignore[reportUnknownMemberType]
         assert isinstance(chunks, Iterable)
-        chunks_iter = cast(Iterable[AudioNumbers], chunks)
-        for chunk in iter_chunks(chunks_iter):
-            write_chunk(chunk)  # type: ignore[reportUnknownMemberType]
+        for chunk in chunks:
+            if not _is_audio_numbers(chunk):
+                raise InvalidConfigError("audio_or_chunks must be audio samples or chunk iterables")
+            write_chunk(ensure_audio_contract(chunk, sample_rate=sample_rate))
 
     return target

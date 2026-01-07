@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import AsyncIterator
 
 import numpy as np
 from dotenv import load_dotenv
@@ -10,8 +9,9 @@ from dotenv import load_dotenv
 from latentscore import (
     FirstAudioSpinner,
     MusicConfig,
-    Streamable,
-    astream,
+    MusicConfigUpdate,
+    Playlist,
+    Track,
     render,
     save_wav,
     stream,
@@ -26,50 +26,51 @@ STREAM_SECONDS = 120.0
 STREAM_CHUNK_SECONDS = 1.0
 STREAM_TRANSITION_SECONDS = 1.0
 
-GEMINI_MODEL = "gemini/gemini-3-flash-preview"
+GEMINI_MODEL = "external:gemini/gemini-3-flash-preview"
 GEMINI_API_ENV = "GEMINI_API_KEY"
-ANTHROPIC_MODEL = "claude-opus-4-5-20251101"  # claude-sonnet-4-5-20250929
+ANTHROPIC_MODEL = "external:claude-opus-4-5-20251101"  # claude-sonnet-4-5-20250929
 ANTHROPIC_API_ENV = "ANTHROPIC_API_KEY"
 DOTENV_PATH = Path(__file__).resolve().parent / ".env"
 
 
-def _load_api_key(api_env: str) -> str:
+def _load_api_key(api_env: str) -> str | None:
     load_dotenv(DOTENV_PATH)
     api_key = os.getenv(api_env, "").strip()
-    if not api_key:
-        raise RuntimeError(f"Set {api_env} in {DOTENV_PATH}")
-    return api_key
+    return api_key or None
 
 
 def _assert_audio(audio: np.ndarray) -> None:
-    assert audio.dtype == np.float32
-    assert audio.ndim == 1
-    assert float(np.max(np.abs(audio))) <= 1.0
+    array = np.asarray(audio)
+    assert array.dtype == np.float32
+    assert array.ndim == 1
+    assert float(np.max(np.abs(array))) <= 1.0
 
 
 async def _write_astream(path: Path, model: LiteLLMAdapter) -> None:
-    configs = [
-        MusicConfig(tempo="slow", brightness="dark", root="d"),
-        MusicConfig(tempo="medium", brightness="medium", root="f"),
-        MusicConfig(tempo="fast", brightness="bright", root="c"),
+    segment_seconds = ASTREAM_SECONDS / 3
+    tracks = [
+        Track(
+            content=MusicConfig(tempo="slow", brightness="dark", root="d"),
+            duration=segment_seconds,
+            transition=ASTREAM_TRANSITION_SECONDS,
+        ),
+        Track(
+            content=MusicConfig(tempo="medium", brightness="medium", root="f"),
+            duration=segment_seconds,
+            transition=ASTREAM_TRANSITION_SECONDS,
+        ),
+        Track(
+            content=MusicConfig(tempo="fast", brightness="bright", root="c"),
+            duration=segment_seconds,
+            transition=ASTREAM_TRANSITION_SECONDS,
+        ),
     ]
-    segment_seconds = ASTREAM_SECONDS / len(configs)
-
-    async def inputs() -> AsyncIterator[Streamable]:
-        for config in configs:
-            yield Streamable(
-                content=config,
-                duration=segment_seconds,
-                transition_duration=ASTREAM_TRANSITION_SECONDS,
-            )
-
+    playlist = Playlist(tracks=tracks)
     chunks = [
         chunk
-        async for chunk in astream(
-            inputs(),
+        async for chunk in playlist.stream(
             chunk_seconds=ASTREAM_CHUNK_SECONDS,
             model=model,
-            config=configs[0],
         )
     ]
     save_wav(str(path), chunks)
@@ -77,52 +78,43 @@ async def _write_astream(path: Path, model: LiteLLMAdapter) -> None:
 
 def main() -> None:
     api_key = _load_api_key(ANTHROPIC_API_ENV)
-    adapter = LiteLLMAdapter(model=ANTHROPIC_MODEL, api_key=api_key)
+    adapter = LiteLLMAdapter(
+        model=ANTHROPIC_MODEL,
+        api_key=api_key,
+        litellm_kwargs={"timeout": 60},
+    )
     output_dir = Path(__file__).resolve().parent / ".outputs"
     output_dir.mkdir(exist_ok=True)
     spinner = FirstAudioSpinner(delay=0.35)
 
     try:
-        # audio = render("I AM INSANE", duration=RENDER_SECONDS, model=adapter)
-        # _assert_audio(audio)
-        # render_path = output_dir / "render.wav"
-        # save_wav(str(render_path), audio)
+        if True:
+            audio = render("I AM INSANE", duration=RENDER_SECONDS, model=adapter)
+            _assert_audio(np.asarray(audio))
+            render_path = output_dir / "render.wav"
+            audio.save(render_path)
 
-        segment_seconds = STREAM_SECONDS / 3
-        stream_items = [
-            Streamable(
-                content="mario the video game",
-                duration=segment_seconds,
-                transition_duration=STREAM_TRANSITION_SECONDS,
-            ),
-            # Streamable(
-            #     content=MusicConfig(tempo="fast", brightness="bright", root="c"),
-            #     duration=segment_seconds,
-            #     transition_duration=STREAM_TRANSITION_SECONDS,
-            # ),
-            # Streamable(
-            #     content=MusicConfigUpdate(tempo="slow", brightness="dark"),
-            #     duration=segment_seconds,
-            #     transition_duration=STREAM_TRANSITION_SECONDS,
-            # ),
-            # Streamable(
-            #     content=MusicConfig(tempo="fast", brightness="bright", root="c"),
-            #     duration=segment_seconds,
-            #     transition_duration=STREAM_TRANSITION_SECONDS,
-            # ),
-        ]
+        if False:
+            gemini_key = _load_api_key(GEMINI_API_ENV)
+            _ = LiteLLMAdapter(
+                model=GEMINI_MODEL,
+                api_key=gemini_key,
+                litellm_kwargs={"timeout": 60},
+            )
+
         stream_path = output_dir / "stream_transition.wav"
-        save_wav(
-            str(stream_path),
-            stream(
-                stream_items,
-                chunk_seconds=STREAM_CHUNK_SECONDS,
-                model=adapter,
-                prefetch_depth=1,
-                preview_policy="embedding",
-                hooks=spinner.hooks(),
-            ),
-        )
+        stream(
+            "mario the video game",
+            "warm sunrise",
+            MusicConfigUpdate(tempo="slow", brightness="dark"),
+            duration=STREAM_SECONDS,
+            transition=STREAM_TRANSITION_SECONDS,
+            chunk_seconds=STREAM_CHUNK_SECONDS,
+            model=adapter,
+            prefetch_depth=1,
+            preview_policy="embedding",
+            hooks=spinner.hooks(),
+        ).save(stream_path)
     finally:
         # Ensure LiteLLM async clients close before the loop is torn down.
         adapter.close()

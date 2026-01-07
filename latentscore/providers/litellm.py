@@ -3,19 +3,28 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Mapping
 from typing import Any, Callable, Coroutine, Literal
 
 from pydantic import BaseModel, ValidationError
 
 from ..config import MusicConfig
 from ..errors import ConfigGenerateError, LLMInferenceError, ModelNotAvailableError
-from ..models import build_expressive_prompt
+from ..models import EXTERNAL_PREFIX, build_expressive_prompt
 
 _DEFAULT_TEMPERATURE = 0.0
 _atexit_guard_registered = False
 _safe_get_event_loop_installed = False
 _LOGGER = logging.getLogger("latentscore.providers.litellm")
+_RESERVED_LITELLM_KWARGS = frozenset(
+    {"model", "messages", "response_format", "api_key", "reasoning_effort"}
+)
 ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "default"]
+
+try:
+    from json_repair import repair_json  # type: ignore[import]  # Optional dependency.
+except ImportError:  # pragma: no cover - optional dependency
+    repair_json: Callable[[str], str] | None = None
 
 
 def _safe_async_cleanup(
@@ -115,18 +124,31 @@ class LiteLLMAdapter:
         model: str,
         *,
         api_key: str | None = None,
+        litellm_kwargs: Mapping[str, Any] | None = None,
         temperature: float | None = None,
         system_prompt: str | None = None,
         response_format: type[BaseModel] | None = MusicConfig,
         reasoning_effort: ReasoningEffort | None = None,
     ) -> None:
+        if model.startswith(EXTERNAL_PREFIX):
+            model = model.removeprefix(EXTERNAL_PREFIX)
         self._model = model
         self._api_key = api_key
+        self._litellm_kwargs = dict(litellm_kwargs or {})
         self._temperature = temperature
         self._system_prompt = system_prompt
         self._base_prompt = build_expressive_prompt()
         self._response_format: type[BaseModel] | None = response_format
         self._reasoning_effort: ReasoningEffort | None = reasoning_effort
+        self._schema_str = ""
+        if self._response_format:
+            self._schema_str = f"<schema>{json.dumps(self._response_format.model_json_schema(), separators=(',', ':'))}</schema>"
+        if self._api_key is None:
+            _LOGGER.warning("No API key provided; letting LiteLLM read from env vars.")
+        invalid_keys = _RESERVED_LITELLM_KWARGS.intersection(self._litellm_kwargs)
+        if invalid_keys:
+            keys = ", ".join(sorted(invalid_keys))
+            raise ConfigGenerateError(f"litellm_kwargs cannot override: {keys}")
 
     def close(self) -> None:
         try:
@@ -164,13 +186,10 @@ class LiteLLMAdapter:
         if self._system_prompt:
             messages.append({"role": "system", "content": self._system_prompt})
 
-        schema_str: str = ""
-        if self._response_format:
-            schema_str = f"<schema>{json.dumps(self._response_format.model_json_schema(), indent=2)}</schema>"
         messages.append(
             {
                 "role": "user",
-                "content": f"{schema_str}\n<vibe>{vibe}</vibe>\n<output>",
+                "content": f"{self._schema_str}\n<vibe>{vibe}</vibe>\n<output>",
             }
         )
 
@@ -181,6 +200,7 @@ class LiteLLMAdapter:
             response_format=self._response_format,
             api_key=self._api_key or None,
         ).model_dump(exclude_none=True)
+        request.update(self._litellm_kwargs)
 
         try:
             # LiteLLM response typing is not exported; keep runtime checks below.
@@ -208,6 +228,12 @@ class LiteLLMAdapter:
                     _LOGGER.warning(
                         "LiteLLM returned invalid JSON after extraction.", exc_info=True
                     )
+            if repair_json is not None:
+                repaired = repair_json(content)
+                try:
+                    return MusicConfig.model_validate_json(repaired)
+                except ValidationError:
+                    _LOGGER.warning("LiteLLM returned invalid JSON after repair.", exc_info=True)
             snippet = _content_snippet(content) or "<empty>"
             _LOGGER.warning("LiteLLM returned invalid JSON: %s", snippet)
             raise ConfigGenerateError(f"LiteLLM returned non-JSON content: {snippet}") from exc

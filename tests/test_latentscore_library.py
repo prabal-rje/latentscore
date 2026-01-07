@@ -10,12 +10,13 @@ from latentscore import (
     SAMPLE_RATE,
     MusicConfig,
     MusicConfigUpdate,
+    RenderHooks,
     Streamable,
     StreamHooks,
-    astream,
-    render,
+    astream_raw,
+    render_raw,
     save_wav,
-    stream,
+    stream_raw,
     stream_texts,
 )
 from latentscore.errors import InvalidConfigError
@@ -26,14 +27,20 @@ class DummyModel:
         return MusicConfig(tempo="medium", brightness="bright")
 
 
+def test_raw_functions_still_exposed() -> None:
+    assert callable(render_raw)
+    assert callable(stream_raw)
+    assert callable(astream_raw)
+
+
 def test_stream_rejects_raw_string() -> None:
     with pytest.raises(InvalidConfigError):
-        list(stream("warm sunrise", model=DummyModel()))
+        list(stream_raw("warm sunrise", model=DummyModel()))
 
 
 def test_stream_streamable_items() -> None:
     chunks = list(
-        stream(
+        stream_raw(
             [Streamable(content="warm sunrise", duration=0.04, transition_duration=0.0)],
             chunk_seconds=0.02,
             model=DummyModel(),
@@ -44,7 +51,7 @@ def test_stream_streamable_items() -> None:
 
 
 def test_render_audio_contract() -> None:
-    audio = render(
+    audio = render_raw(
         "warm sunrise",
         duration=0.02,
         model=DummyModel(),
@@ -54,9 +61,24 @@ def test_render_audio_contract() -> None:
     assert float(np.max(np.abs(audio))) <= 1.0
 
 
+def test_render_hooks_fire() -> None:
+    events: list[str] = []
+    hooks = RenderHooks(
+        on_start=lambda: events.append("start"),
+        on_end=lambda: events.append("end"),
+    )
+    _ = render_raw(
+        "warm sunrise",
+        duration=0.02,
+        model=DummyModel(),
+        hooks=hooks,
+    )
+    assert events == ["start", "end"]
+
+
 def test_stream_chunk_length_matches_sample_rate() -> None:
     chunk_seconds = 0.02
-    chunks = stream(
+    chunks = stream_raw(
         [Streamable(content=MusicConfigUpdate(tempo="slow"), duration=0.02)],
         chunk_seconds=chunk_seconds,
         model=DummyModel(),
@@ -67,7 +89,7 @@ def test_stream_chunk_length_matches_sample_rate() -> None:
 
 
 def test_save_wav_writes_file(tmp_path: Path) -> None:
-    audio = render("gentle", duration=0.02, model=DummyModel())
+    audio = render_raw("gentle", duration=0.02, model=DummyModel())
     target = tmp_path / "out.wav"
     save_wav(str(target), audio)
     assert target.exists()
@@ -75,7 +97,7 @@ def test_save_wav_writes_file(tmp_path: Path) -> None:
 
 def test_render_requires_config_models() -> None:
     with pytest.raises(TypeError):
-        render("vibe", tempo=0.4)  # type: ignore[call-arg]
+        render_raw("vibe", tempo=0.4)  # type: ignore[call-arg]
 
 
 def test_stream_texts_wraps_prompts() -> None:
@@ -123,7 +145,7 @@ async def test_astream_preview_yields_before_llm_ready() -> None:
     items = [Streamable(content="warm sunrise", duration=0.04, transition_duration=0.0)]
 
     async def first_chunk() -> np.ndarray:
-        async for chunk in astream(
+        async for chunk in astream_raw(
             items,
             chunk_seconds=0.02,
             model=slow,
@@ -148,7 +170,7 @@ async def test_astream_fallback_on_error_keeps_streaming() -> None:
     items = [Streamable(content="warm sunrise", duration=0.02, transition_duration=0.0)]
     chunks = [
         chunk
-        async for chunk in astream(
+        async for chunk in astream_raw(
             items,
             chunk_seconds=0.02,
             model=ErrorModel(),
@@ -166,7 +188,7 @@ async def test_astream_hooks_fire() -> None:
     items = [Streamable(content=MusicConfig(), duration=0.02, transition_duration=0.0)]
     chunks = [
         chunk
-        async for chunk in astream(
+        async for chunk in astream_raw(
             items,
             chunk_seconds=0.02,
             model=DummyModel(),

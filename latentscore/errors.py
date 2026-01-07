@@ -19,3 +19,7 @@ class ConfigGenerateError(LatentScoreError):
 
 class ModelNotAvailableError(LatentScoreError):
     """Raised when required model weights or dependencies are missing."""
+
+
+class PlaybackError(LatentScoreError):
+    """Raised when audio playback is unavailable or fails."""

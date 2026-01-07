@@ -4,12 +4,24 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
-from typing import IO, Iterator
+from typing import IO, TYPE_CHECKING, Any, Iterator
+
+if TYPE_CHECKING:
+    from rich.console import Console as RichConsole
+    from rich.status import Status as RichStatus
+else:
+    RichConsole = Any
+    RichStatus = Any
+
+try:
+    from rich.console import Console
+    from rich.status import Status
+except ImportError:  # pragma: no cover - optional dependency
+    Console = None
+    Status = None
 
 
-class Spinner:
-    """Minimal ASCII spinner for CLI/TUI feedback."""
-
+class _AsciiSpinner:
     def __init__(
         self,
         message: str,
@@ -74,6 +86,83 @@ class Spinner:
             return
         self._stream.write("\r" + (" " * self._last_len) + "\r")
         self._stream.flush()
+
+
+class _RichSpinner:
+    def __init__(
+        self,
+        message: str,
+        *,
+        stream: IO[str] | None = None,
+    ) -> None:
+        self._message = message
+        self._stream = stream or sys.stderr
+        self._console: RichConsole | None = Console(file=self._stream) if Console else None
+        self._status: RichStatus | None = None
+
+    def start(self) -> None:
+        if self._console is None or Status is None:
+            return
+        if self._status is not None:
+            return
+        self._status = self._console.status(self._message)
+        self._status.start()
+
+    def update(self, message: str) -> None:
+        self._message = message
+        if self._status is not None:
+            self._status.update(message)
+
+    def stop(self) -> None:
+        if self._status is None:
+            return
+        self._status.stop()
+        self._status = None
+
+
+class Spinner:
+    """Spinner helper with Rich status fallback."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        interval: float = 0.1,
+        stream: IO[str] | None = None,
+        enabled: bool | None = None,
+    ) -> None:
+        self._message = message
+        self._interval = interval
+        self._stream = stream or sys.stderr
+        self._enabled = self._stream.isatty() if enabled is None else enabled
+        self._backend: _AsciiSpinner | _RichSpinner | None = None
+        if not self._enabled:
+            return
+        if Console and Status:
+            self._backend = _RichSpinner(self._message, stream=self._stream)
+        else:
+            self._backend = _AsciiSpinner(
+                self._message,
+                interval=self._interval,
+                stream=self._stream,
+                enabled=self._enabled,
+            )
+
+    def start(self) -> None:
+        if self._backend is None:
+            return
+        self._backend.start()
+
+    def update(self, message: str) -> None:
+        self._message = message
+        if self._backend is None:
+            return
+        self._backend.update(message)
+
+    def stop(self) -> None:
+        if self._backend is None:
+            return
+        self._backend.stop()
 
     def __enter__(self) -> "Spinner":
         self.start()

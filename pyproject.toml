@@ -13,13 +13,15 @@ dependencies = [
     "scipy",
     "soundfile",
     "pydantic>=2",
+    "rich",
 ]
 
 [project.optional-dependencies]
 fast = ["sentence-transformers", "torch", "scikit-learn"]
 expressive = ["mlx>=0.22", "mlx-lm>=0.22", "llm-structured-output", "outlines[mlxlm]"]
 model = ["huggingface_hub>=0.20"]
-litellm = ["litellm>=1.0", "python-dotenv"]
+litellm = ["litellm>=1.0", "python-dotenv", "json-repair"]
+play = ["sounddevice", "simpleaudio", "ipython"]
 
 [project.scripts]
 latentscore = "latentscore.cli:main"
@@ -31,6 +33,8 @@ include = ["latentscore", "latentscore.*"]
 [tool.ruff]
 target-version = "py310"
 line-length = 100
+
+[tool.ruff.lint]
 extend-select = ["I"]
 
 [tool.ruff.format]

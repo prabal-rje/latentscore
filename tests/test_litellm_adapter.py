@@ -40,6 +40,30 @@ async def test_litellm_adapter_enforces_json(
 
 
 @pytest.mark.asyncio
+async def test_litellm_kwargs_forwarded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_acompletion(**kwargs: object) -> object:
+        captured.update(kwargs)
+        message = SimpleNamespace(content="{}")
+        choice = SimpleNamespace(message=message)
+        return SimpleNamespace(choices=[choice])
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+    adapter = LiteLLMAdapter(
+        model="external:gemini/gemini-3-flash-preview",
+        litellm_kwargs={"timeout": 42, "temperature": 0.2},
+    )
+    await adapter.generate("warm sunrise")
+
+    assert captured["timeout"] == 42
+    assert captured["temperature"] == 0.2
+
+
+@pytest.mark.asyncio
 async def test_litellm_adapter_non_json_error_includes_snippet(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -56,6 +80,31 @@ async def test_litellm_adapter_non_json_error_includes_snippet(
         await adapter.generate("warm sunrise")
 
     assert "not json output" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_litellm_adapter_repairs_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_acompletion(**kwargs: object) -> object:
+        message = SimpleNamespace(content='{"tempo":"slow",}')
+        choice = SimpleNamespace(message=message)
+        return SimpleNamespace(choices=[choice])
+
+    def fake_repair_json(content: str) -> str:
+        _ = content
+        return '{"tempo":"slow"}'
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+    monkeypatch.setattr(
+        "latentscore.providers.litellm.repair_json",
+        fake_repair_json,
+    )
+
+    adapter = LiteLLMAdapter(model="external:gemini/gemini-3-flash-preview")
+    config = await adapter.generate("warm sunrise")
+
+    assert config.tempo == "slow"
 
 
 def test_litellm_adapter_aclose_awaits_litellm(

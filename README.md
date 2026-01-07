@@ -5,18 +5,19 @@ Minimal tracer-bullet slice for async Python using `uvloop` by default (when ava
 ## LatentScore Library
 
 ```python
-from latentscore import MusicConfigUpdate, render, save_wav
+import latentscore as ls
 
-update = MusicConfigUpdate(tempo="medium")
-audio = render("warm sunrise over water", duration=8, model="fast", update=update)
-save_wav("output.wav", audio)
+audio = ls.render("warm sunrise over water")
+audio.play()
+audio.save("output.wav")
 ```
 
 - Local-first by default (no API keys required).
 - `latentscore demo` renders a short clip to `demo.wav`.
 - `latentscore download expressive` prefetches local LLM weights (~1.2GB).
-- `docs/latentscore-dx.md` has the full API and audio contract.
+- `docs/latentscore-dx.md` has the tiered API, model selection, and audio contract.
 - Streaming supports prefetching, preview playback while configs load, and fallback policies; see `docs/latentscore-dx.md`.
+- Install `latentscore[play]` for optional playback dependencies.
 - First-time expressive downloads show a spinner; run `latentscore doctor` and prefetch missing models in production to avoid runtime downloads.
 
 ## Quickstart

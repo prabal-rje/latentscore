@@ -6,14 +6,17 @@ import os
 from pathlib import Path
 from typing import Iterable
 
+from rich.console import Console
+
 from .audio import SAMPLE_RATE
+from .dx import render
 from .errors import ModelNotAvailableError
-from .main import render, save_wav
 from .spinner import Spinner
 
 _EXPRESSIVE_REPO = "mlx-community/gemma-3-1b-it-qat-8bit"
 _EXPRESSIVE_DIR = "gemma-3-1b-it-qat-8bit"
 _LOGGER = logging.getLogger("latentscore.cli")
+_CONSOLE = Console()
 
 
 def _default_model_base() -> Path:
@@ -38,7 +41,7 @@ def _download_expressive(model_base: Path) -> Path:
 
 def _doctor_report(lines: Iterable[str]) -> None:
     for line in lines:
-        print(line)
+        _CONSOLE.print(line)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -64,8 +67,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "demo":
             with Spinner("Rendering demo audio"):
                 audio = render("warm sunrise", duration=args.duration)
-            path = save_wav(args.output, audio)
-            print(f"Wrote demo to {path} (sr={SAMPLE_RATE})")
+            path = audio.save(args.output)
+            _CONSOLE.print(f"Wrote demo to {path} (sr={SAMPLE_RATE})")
             return 0
 
         if args.command == "download":
@@ -76,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
                 if not target.exists():
                     with Spinner("Downloading expressive model"):
                         _download_expressive(model_base)
-                print(f"Downloaded expressive model to {target}")
+                _CONSOLE.print(f"Downloaded expressive model to {target}")
                 return 0
 
         if args.command == "doctor":

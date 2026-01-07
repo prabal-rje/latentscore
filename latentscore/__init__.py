@@ -23,23 +23,32 @@ from .config import (
     TempoLabel,
     TextureStyle,
 )
+from .dx import Audio, AudioStream, Playlist, Track, render, stream
 from .main import (
     FallbackInput,
     FirstAudioSpinner,
     ModelLoadRole,
     PreviewPolicy,
+    RenderHooks,
     Streamable,
     StreamEvent,
     StreamHooks,
     astream,
-    render,
     save_wav,
-    stream,
     stream_configs,
     stream_texts,
     stream_updates,
 )
-from .models import ModelForGeneratingMusicConfig, ModelSpec
+from .main import (
+    astream as astream_raw,
+)
+from .main import (
+    render as render_raw,
+)
+from .main import (
+    stream as stream_raw,
+)
+from .models import ExternalModelSpec, ModelForGeneratingMusicConfig, ModelSpec
 
 __all__ = [
     "SAMPLE_RATE",
@@ -58,6 +67,7 @@ __all__ = [
     "MusicConfigUpdate",
     "ModelSpec",
     "ModelForGeneratingMusicConfig",
+    "ExternalModelSpec",
     "PadStyle",
     "RhythmStyle",
     "RootNote",
@@ -72,10 +82,18 @@ __all__ = [
     "FirstAudioSpinner",
     "ModelLoadRole",
     "PreviewPolicy",
+    "RenderHooks",
+    "Audio",
+    "AudioStream",
+    "Playlist",
+    "Track",
     "astream",
+    "astream_raw",
     "render",
+    "render_raw",
     "save_wav",
     "stream",
+    "stream_raw",
     "stream_configs",
     "stream_texts",
     "stream_updates",

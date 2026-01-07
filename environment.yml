@@ -16,6 +16,7 @@ dependencies:
     - llm-structured-output  # MLX-native JSON schema
     - "outlines[mlxlm]"    
     - litellm
+    - json-repair
     
     # Embeddings
     - sentence-transformers

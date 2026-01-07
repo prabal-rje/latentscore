@@ -1,78 +1,148 @@
 # LatentScore Library DX
 
-## Quickstart
+## Tier 0: I just want sound
 
 ```python
-from latentscore import MusicConfigUpdate, render, save_wav
+import latentscore as ls
 
-update = MusicConfigUpdate(tempo="medium")
-audio = render("warm sunrise over water", duration=8, model="fast", update=update)
-save_wav("output.wav", audio)
+audio = ls.render("underwater cave")
+audio.play()
+audio.save("cave.wav")
 ```
 
-- Default models run locally (no API keys required).
-- First expressive-model run may download weights (~1.2GB) and cache them at `~/.cache/latentscore/models`.
+- `render(...)` returns an `Audio` object (not a raw numpy array).
+- `Audio` supports `.play()`, `.save()`, and `np.asarray(audio)`.
 
-## Streaming
+## Tier 1: I want a stream of chunks
 
 ```python
-from latentscore import (
-    FirstAudioSpinner,
-    StreamHooks,
-    Streamable,
-    MusicConfigUpdate,
-    stream,
-    stream_texts,
-    astream,
+import latentscore as ls
+
+for chunk in ls.stream("dark ambient", "sunrise"):
+    speaker.write(chunk)
+```
+
+- `stream(...)` yields `np.float32` mono chunks.
+- `duration` is total duration across all items (split evenly).
+- `AudioStream` also supports `.save()` and `.play()`.
+
+## Tier 2: Same stream, but with knobs
+
+```python
+import latentscore as ls
+
+async for chunk in ls.stream(
+    "dark ambient",
+    "sunrise",
+    duration=120,
+    transition=5,
+    chunk_seconds=1.0,
+    model="fast",
+):
+    await speaker.write(chunk)
+```
+
+- `stream(...)` supports both `for` and `async for`.
+- `chunk_seconds` controls chunk sizing.
+
+## Tier 3: Composition primitives
+
+```python
+import latentscore as ls
+
+playlist = ls.Playlist(
+    tracks=[
+        ls.Track(content="dark ambient", duration=60),
+        ls.Track(content="sunrise", duration=120, transition=10),
+        ls.Track(content=ls.MusicConfig(tempo="fast", mode="minor"), duration=60),
+        ls.Track(content=ls.MusicConfigUpdate(tempo="slow", brightness="dark"), duration=60),
+    ]
+)
+playlist.stream().play()
+```
+
+- `Track` accepts `str`, `MusicConfig`, or `MusicConfigUpdate`.
+- `Playlist.stream()` returns the same dual sync/async `AudioStream`.
+
+## Model selection
+
+- `"fast"`: local embedding model (default).
+- `"expressive"` or `"local"`: local MLX LLM.
+- `"external:<model-name>"`: shorthand for `LiteLLMAdapter`.
+
+```python
+import latentscore as ls
+
+audio = ls.render("late night neon", model="external:gemini/gemini-3-flash-preview")
+```
+
+For advanced LiteLLM control (timeouts, API keys, etc.), instantiate the adapter:
+
+```python
+import os
+import latentscore as ls
+from latentscore.providers.litellm import LiteLLMAdapter
+
+adapter = LiteLLMAdapter(
+    model="external:gemini/gemini-3-flash-preview",
+    api_key=os.getenv("GEMINI_API_KEY"),
+    litellm_kwargs={"timeout": 60},
 )
 
-hooks = StreamHooks(on_event=lambda event: print(event.kind))
-spinner = FirstAudioSpinner(delay=0.35)
-
-for chunk in stream_texts(
-    ["warm sunrise", "darker, slower"],
-    duration=60.0,
-    transition_duration=1.0,
-    chunk_seconds=0.5,
-    model="fast",
-    prefetch_depth=1,
-    hooks=hooks,
-):
-    ...
-
-items = [
-    Streamable(content="warm sunrise", duration=30.0),
-    Streamable(content=MusicConfigUpdate(tempo="slow"), duration=30.0),
-]
-
-for chunk in stream(
-    items,
-    chunk_seconds=0.5,
-    model="fast",
-    prefetch_depth=1,
-    preview_policy="embedding",
-    fallback="keep_last",
-    hooks=spinner.hooks(),
-):
-    ...
-
-async for chunk in astream(
-    items,
-    chunk_seconds=0.5,
-    model="fast",
-    prefetch_depth=1,
-    preview_policy="embedding",
-    fallback="keep_last",
-    hooks=spinner.hooks(),
-):
-    ...
+audio = ls.render("late night neon", model=adapter)
 ```
 
-- `prefetch_depth` resolves future vibe strings in the background to reduce transition stalls.
-- `preview_policy="embedding"` plays a fast preview config while waiting on slow LLMs.
-- `fallback="keep_last"` keeps the current config if an LLM fails (other options: `embedding`, `none`, or a fixed config/update).
-- `StreamHooks` emits lifecycle events like `first_config_ready` and `first_audio_chunk`.
-- `FirstAudioSpinner` shows a delayed spinner while the first audio chunk is preparing; when preview mode is active, it explains that speculative preview is running and how to disable it (`preview_policy="none"`).
+You can also pass a typed external spec instead of instantiating the adapter:
+
+```python
+import latentscore as ls
+
+spec = ls.ExternalModelSpec(
+    model="gemini/gemini-3-flash-preview",
+    api_key=None,
+    litellm_kwargs={"timeout": 60},
+)
+audio = ls.render("late night neon", model=spec)
+```
+
+## Playback extras
+
+Install optional playback dependencies:
+
+```bash
+pip install "latentscore[play]"
+```
+
+If playback is unavailable, `.play()` raises a friendly error that suggests using `.save()`.
+
+## Advanced: raw API
+
+Core functions remain available for advanced use:
+
+```python
+from latentscore import render_raw, stream_raw, astream_raw, Streamable
+```
+
+- `stream_raw(...)` expects an iterable of `Streamable`.
+- `astream_raw(...)` yields chunks asynchronously without the `AudioStream` wrapper.
+
+## Render hooks
+
+Render hooks help surface progress during blocking renders:
+
+```python
+import latentscore as ls
+
+events: list[str] = []
+hooks = ls.RenderHooks(
+    on_start=lambda: events.append("start"),
+    on_model_start=lambda model: events.append(f"model:{model}"),
+    on_synth_start=lambda: events.append("synth_start"),
+    on_end=lambda: events.append("end"),
+)
+
+audio = ls.render("underwater cave", hooks=hooks)
+```
 
 ## Audio Contract
 
@@ -80,21 +150,3 @@ async for chunk in astream(
 - range: `[-1, 1]`
 - sample rate: `44100`
 - shape: `(n,)` (mono)
-
-## Advanced
-
-- `latentscore demo` renders a short clip to `demo.wav`.
-- `latentscore download expressive` prefetches the expressive model weights.
-- `latentscore doctor` prints cache paths and availability hints.
-- First-time expressive-model downloads show a spinner; run `latentscore doctor` and prefetch missing models in production to avoid runtime downloads.
-- For numeric control, use `MusicConfigInternal` or `MusicConfigUpdateInternal` instead of the string-literal configs.
-
-### Bring Your Own LLM
-
-```python
-from latentscore import render
-from latentscore.providers import LiteLLMAdapter
-
-adapter = LiteLLMAdapter(model="gpt-4o-mini")
-audio = render("late night neon", model=adapter)
-```

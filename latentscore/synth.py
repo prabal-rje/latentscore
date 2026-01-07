@@ -14,6 +14,7 @@ Architecture:
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import lru_cache
 from types import MappingProxyType
 from typing import Any, Callable, TypeAlias, cast
 
@@ -307,38 +308,39 @@ def apply_adsr(
     return signal * envelope
 
 
-def apply_lowpass(signal: FloatArray, cutoff: float, sr: int = SAMPLE_RATE) -> FloatArray:
-    """Apply lowpass filter (causal, analog-style)."""
-    nyquist = sr / 2
-    normalized = min(max(cutoff / nyquist, 0.001), 0.99)
-    coeffs = butter(2, normalized, btype="low", output="ba")
+def _quantize(value: float, step: float = 0.001) -> float:
+    return round(value / step) * step
+
+
+@lru_cache(maxsize=512)
+def _butter_cached(
+    kind: str, normalized_cutoff: float
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    coeffs = butter(2, normalized_cutoff, btype=kind, output="ba")
     assert isinstance(coeffs, tuple)
     assert len(coeffs) == 2
     b_raw, a_raw = coeffs
     assert isinstance(b_raw, np.ndarray)
     assert isinstance(a_raw, np.ndarray)
-    b = cast(FloatArray, b_raw)
-    a = cast(FloatArray, a_raw)
+    return b_raw, a_raw
+
+
+def apply_lowpass(signal: FloatArray, cutoff: float, sr: int = SAMPLE_RATE) -> FloatArray:
+    """Apply lowpass filter (causal, analog-style)."""
+    nyquist = sr / 2
+    normalized = min(max(cutoff / nyquist, 0.001), 0.99)
+    b, a = _butter_cached("low", _quantize(normalized))
     filtered = lfilter(b, a, signal)
-    assert isinstance(filtered, np.ndarray)
-    return cast(FloatArray, filtered)
+    return np.asarray(filtered, dtype=np.float64)
 
 
 def apply_highpass(signal: FloatArray, cutoff: float, sr: int = SAMPLE_RATE) -> FloatArray:
     """Apply highpass filter (causal, analog-style)."""
     nyquist = sr / 2
     normalized = min(max(cutoff / nyquist, 0.001), 0.99)
-    coeffs = butter(2, normalized, btype="high", output="ba")
-    assert isinstance(coeffs, tuple)
-    assert len(coeffs) == 2
-    b_raw, a_raw = coeffs
-    assert isinstance(b_raw, np.ndarray)
-    assert isinstance(a_raw, np.ndarray)
-    b = cast(FloatArray, b_raw)
-    a = cast(FloatArray, a_raw)
+    b, a = _butter_cached("high", _quantize(normalized))
     filtered = lfilter(b, a, signal)
-    assert isinstance(filtered, np.ndarray)
-    return cast(FloatArray, filtered)
+    return np.asarray(filtered, dtype=np.float64)
 
 
 def apply_delay(
@@ -350,10 +352,8 @@ def apply_delay(
 
     for i in range(1, 5):  # 5 delay taps
         offset = delay_samples * i
-        if offset < len(signal):
-            delayed = np.zeros_like(signal)
-            delayed[offset:] = signal[:-offset] * (feedback**i) * wet
-            output += delayed
+        if 0 < offset < len(signal):
+            output[offset:] += signal[:-offset] * (feedback**i) * wet
 
     return output
 
@@ -367,10 +367,8 @@ def apply_reverb(signal: FloatArray, room: float, size: float, sr: int = SAMPLE_
 
     for i, delay in enumerate(delays):
         delay_samples = int(delay * size * sr)
-        if delay_samples < len(signal) and delay_samples > 0:
-            reverb = np.zeros_like(signal)
-            reverb[delay_samples:] = signal[:-delay_samples] * room * (0.7**i)
-            output += reverb
+        if 0 < delay_samples < len(signal):
+            output[delay_samples:] += signal[:-delay_samples] * room * (0.7**i)
 
     return output
 

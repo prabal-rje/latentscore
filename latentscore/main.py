@@ -7,12 +7,12 @@ import logging
 from collections import deque
 from collections.abc import AsyncIterable, AsyncIterator, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from queue import Queue
 from threading import Thread, Timer
-from typing import Any, Callable, Coroutine, Literal, TypeVar, cast
+from typing import Any, Callable, Coroutine, Literal, TypeGuard, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+import numpy as np
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .audio import SAMPLE_RATE, AudioNumbers, FloatArray, ensure_audio_contract, write_wav
 from .config import (
@@ -28,7 +28,7 @@ from .config import (
     merge_internal_config,
 )
 from .errors import InvalidConfigError
-from .models import ModelForGeneratingMusicConfig, ModelSpec, resolve_model
+from .models import ExternalModelSpec, ModelForGeneratingMusicConfig, ModelSpec, resolve_model
 from .spinner import Spinner
 from .synth import MusicConfig as SynthConfig
 from .synth import assemble, interpolate_configs
@@ -40,8 +40,7 @@ FallbackInput = FallbackPolicy | ConfigInput | UpdateInput
 ModelLoadRole = Literal["primary", "fallback"]
 
 
-@dataclass(frozen=True)
-class StreamEvent:
+class StreamEvent(BaseModel):
     kind: Literal[
         "model_load_start",
         "model_load_end",
@@ -55,7 +54,7 @@ class StreamEvent:
         "stream_end",
         "fallback_used",
     ]
-    model: ModelSpec | None = None
+    model: object | None = None
     model_role: ModelLoadRole | None = None
     index: int | None = None
     item: Streamable | None = None
@@ -63,9 +62,27 @@ class StreamEvent:
     fallback: FallbackInput | None = None
     preview_policy: PreviewPolicy | None = None
 
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        arbitrary_types_allowed=True,
+    )
 
-@dataclass(frozen=True)
-class StreamHooks:
+    @field_validator("model")
+    @classmethod
+    def _validate_model(cls, value: object | None) -> object | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        if isinstance(value, ExternalModelSpec):
+            return value
+        if hasattr(value, "generate"):
+            return value
+        raise InvalidConfigError("model must be a ModelSpec-compatible value")
+
+
+class StreamHooks(BaseModel):
     on_event: Callable[[StreamEvent], None] | None = None
     on_model_load_start: Callable[[ModelSpec, ModelLoadRole], None] | None = None
     on_model_load_end: Callable[[ModelSpec, ModelLoadRole], None] | None = None
@@ -79,6 +96,28 @@ class StreamHooks:
     on_first_config_ready: Callable[[int, Streamable], None] | None = None
     on_first_audio_chunk: Callable[[], None] | None = None
     on_stream_end: Callable[[], None] | None = None
+
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        arbitrary_types_allowed=True,
+    )
+
+
+class RenderHooks(BaseModel):
+    on_start: Callable[[], None] | None = None
+    on_model_start: Callable[[ModelSpec], None] | None = None
+    on_model_end: Callable[[ModelSpec], None] | None = None
+    on_synth_start: Callable[[], None] | None = None
+    on_synth_end: Callable[[], None] | None = None
+    on_end: Callable[[], None] | None = None
+    on_error: Callable[[Exception], None] | None = None
+
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        arbitrary_types_allowed=True,
+    )
 
 
 class FirstAudioSpinner:
@@ -175,6 +214,7 @@ class FirstAudioSpinner:
 
 _MIN_CHUNK_SECONDS = 1e-6
 _LOGGER = logging.getLogger("latentscore.main")
+_EXECUTOR = ThreadPoolExecutor(max_workers=1)
 
 
 class Streamable(BaseModel):
@@ -199,12 +239,19 @@ def _run_async(coro: Coroutine[Any, Any, T]) -> T:
         _LOGGER.info("No running event loop; running coroutine directly.")
         return asyncio.run(coro)
 
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        return executor.submit(lambda: asyncio.run(coro)).result()
+    return _EXECUTOR.submit(lambda: asyncio.run(coro)).result()
 
 
 def _log_exception(context: str, exc: Exception) -> None:
     _LOGGER.warning("%s failed: %s", context, exc, exc_info=True)
+
+
+def _is_model_spec(value: object) -> TypeGuard[ModelSpec]:
+    if isinstance(value, str):
+        return True
+    if isinstance(value, ExternalModelSpec):
+        return True
+    return hasattr(value, "generate")
 
 
 def _emit_event(hooks: StreamHooks | None, event: StreamEvent) -> None:
@@ -220,14 +267,16 @@ def _emit_event(hooks: StreamHooks | None, event: StreamEvent) -> None:
                     and event.model is not None
                     and event.model_role is not None
                 ):
-                    hooks.on_model_load_start(event.model, event.model_role)
+                    if _is_model_spec(event.model):
+                        hooks.on_model_load_start(event.model, event.model_role)
             case "model_load_end":
                 if (
                     hooks.on_model_load_end is not None
                     and event.model is not None
                     and event.model_role is not None
                 ):
-                    hooks.on_model_load_end(event.model, event.model_role)
+                    if _is_model_spec(event.model):
+                        hooks.on_model_load_end(event.model, event.model_role)
             case "stream_start":
                 if hooks.on_stream_start is not None:
                     hooks.on_stream_start()
@@ -291,19 +340,80 @@ def _emit_event(hooks: StreamHooks | None, event: StreamEvent) -> None:
         _LOGGER.warning("Stream hook failed: %s", exc, exc_info=True)
 
 
-@dataclass(slots=True)
-class _PrefetchedItem:
+def _emit_render(
+    hooks: RenderHooks | None,
+    *,
+    kind: Literal[
+        "start",
+        "model_start",
+        "model_end",
+        "synth_start",
+        "synth_end",
+        "end",
+        "error",
+    ],
+    model: ModelSpec | None = None,
+    error: Exception | None = None,
+) -> None:
+    if hooks is None:
+        return
+    try:
+        match kind:
+            case "start":
+                if hooks.on_start is not None:
+                    hooks.on_start()
+            case "model_start":
+                if hooks.on_model_start is not None and model is not None:
+                    hooks.on_model_start(model)
+            case "model_end":
+                if hooks.on_model_end is not None and model is not None:
+                    hooks.on_model_end(model)
+            case "synth_start":
+                if hooks.on_synth_start is not None:
+                    hooks.on_synth_start()
+            case "synth_end":
+                if hooks.on_synth_end is not None:
+                    hooks.on_synth_end()
+            case "end":
+                if hooks.on_end is not None:
+                    hooks.on_end()
+            case "error":
+                if hooks.on_error is not None and error is not None:
+                    hooks.on_error(error)
+            case _:
+                raise InvalidConfigError(f"Unknown render hook kind: {kind}")
+    except Exception as exc:
+        _LOGGER.warning("Render hook failed: %s", exc, exc_info=True)
+
+
+class _PrefetchedItem(BaseModel):
     index: int
     item: Streamable
     task: asyncio.Task[_MusicConfigInternal] | None
 
+    model_config = ConfigDict(
+        extra="forbid",
+        arbitrary_types_allowed=True,
+    )
 
-@dataclass(slots=True)
-class _ModelLoadState:
-    model: ModelForGeneratingMusicConfig
+
+class _ModelLoadState(BaseModel):
+    model: Any
     role: ModelLoadRole
     hooks: StreamHooks | None
     loaded: bool = False
+
+    model_config = ConfigDict(
+        extra="forbid",
+        arbitrary_types_allowed=True,
+    )
+
+    @field_validator("model")
+    @classmethod
+    def _validate_model(cls, value: object) -> object:
+        if not hasattr(value, "generate"):
+            raise InvalidConfigError("model must implement generate()")
+        return value
 
     async def ensure_loaded(self) -> None:
         if self.loaded:
@@ -425,19 +535,29 @@ def render(
     model: ModelSpec = "fast",
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
+    hooks: RenderHooks | None = None,
 ) -> FloatArray:
+    _emit_render(hooks, kind="start")
     try:
-        resolved = resolve_model(model)
-        match config:
-            case None:
+        if config is None:
+            resolved = resolve_model(model)
+            _emit_render(hooks, kind="model_start", model=model)
+            try:
                 base = _run_async(resolved.generate(vibe)).to_internal()
-            case _:
-                base = coerce_internal_config(config)
+            finally:
+                _emit_render(hooks, kind="model_end", model=model)
+        else:
+            base = coerce_internal_config(config)
         target = _apply_update(base, update)
 
+        _emit_render(hooks, kind="synth_start")
         audio = assemble(_to_synth_config(target), duration)
-        return ensure_audio_contract(audio, sample_rate=SAMPLE_RATE)
+        normalized = ensure_audio_contract(audio, sample_rate=SAMPLE_RATE)
+        _emit_render(hooks, kind="synth_end")
+        _emit_render(hooks, kind="end")
+        return normalized
     except Exception as exc:
+        _emit_render(hooks, kind="error", error=exc)
         _log_exception("render", exc)
         raise
 
@@ -470,7 +590,9 @@ def _bridge_async_stream(
             break
         if isinstance(item, BaseException):
             raise item
-        yield cast(FloatArray, item)
+        if not isinstance(item, np.ndarray):
+            raise InvalidConfigError("Async stream emitted non-audio chunk")
+        yield item
     thread.join(timeout=0)
 
 
@@ -750,6 +872,7 @@ async def _render_chunk(
         lambda: ensure_audio_contract(
             assemble(_to_synth_config(config_item), chunk_seconds),
             sample_rate=SAMPLE_RATE,
+            check_peak=False,
         )
     )
 
@@ -835,10 +958,14 @@ async def astream(
         resolved = resolve_model(model)
         fallback_resolved = resolve_model(fallback_model)
         primary_load = (
-            _ModelLoadState(resolved, "primary", hooks) if hooks is not None else None
+            _ModelLoadState(model=resolved, role="primary", hooks=hooks)
+            if hooks is not None
+            else None
         )
         fallback_load = (
-            _ModelLoadState(fallback_resolved, "fallback", hooks) if hooks is not None else None
+            _ModelLoadState(model=fallback_resolved, role="fallback", hooks=hooks)
+            if hooks is not None
+            else None
         )
 
         _emit_event(hooks, StreamEvent(kind="stream_start"))

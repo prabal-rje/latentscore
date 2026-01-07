@@ -4,17 +4,20 @@ import asyncio
 import functools
 import logging
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal, Protocol, Sequence, TypeGuard
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .config import MusicConfig
 from .errors import ConfigGenerateError, LLMInferenceError, ModelNotAvailableError
 
-ModelChoice = Literal["fast", "expressive"]
+ModelChoice = Literal["fast", "expressive", "local"]
+MODEL_CHOICES: tuple[ModelChoice, ...] = ("fast", "expressive", "local")
+EXTERNAL_PREFIX = "external:"
 
 _EXPRESSIVE_REPO = "mlx-community/gemma-3-1b-it-qat-8bit"
 _EXPRESSIVE_DIR = "gemma-3-1b-it-qat-8bit"
@@ -29,7 +32,15 @@ class ModelForGeneratingMusicConfig(Protocol):
     async def generate(self, vibe: str) -> MusicConfig: ...
 
 
-ModelSpec = ModelChoice | ModelForGeneratingMusicConfig
+class ExternalModelSpec(BaseModel):
+    model: str
+    api_key: str | None = None
+    litellm_kwargs: Mapping[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+ModelSpec = ModelChoice | ExternalModelSpec | ModelForGeneratingMusicConfig
 
 
 def _is_model(obj: object) -> TypeGuard[ModelForGeneratingMusicConfig]:
@@ -533,16 +544,57 @@ class ExpressiveMlxModel:
         raise LLMInferenceError(message) from last_error
 
 
-def resolve_model(
-    model: ModelSpec,
-) -> ModelForGeneratingMusicConfig:
-    model_obj: object = model
-    match model_obj:
+@functools.lru_cache(maxsize=len(MODEL_CHOICES))
+def _resolve_builtin_model(choice: ModelChoice) -> ModelForGeneratingMusicConfig:
+    match choice:
         case "expressive":
+            return ExpressiveMlxModel()
+        case "local":
             return ExpressiveMlxModel()
         case "fast":
             return FastEmbeddingModel()
-        case _ if _is_model(model):
-            return model
         case _:
-            raise ConfigGenerateError(f"Unknown model choice: {model!r}")
+            raise ConfigGenerateError(f"Unknown model choice: {choice!r}")
+
+
+def _build_external_adapter(
+    model: str,
+    *,
+    api_key: str | None = None,
+    litellm_kwargs: Mapping[str, Any] | None = None,
+) -> ModelForGeneratingMusicConfig:
+    from .providers.litellm import LiteLLMAdapter
+
+    return LiteLLMAdapter(
+        model=model,
+        api_key=api_key,
+        litellm_kwargs=litellm_kwargs,
+    )
+
+
+def resolve_model(
+    model: ModelSpec,
+) -> ModelForGeneratingMusicConfig:
+    if isinstance(model, ExternalModelSpec):
+        target = model.model
+        if target.startswith(EXTERNAL_PREFIX):
+            target = target.removeprefix(EXTERNAL_PREFIX)
+        return _build_external_adapter(
+            target,
+            api_key=model.api_key,
+            litellm_kwargs=model.litellm_kwargs,
+        )
+
+    if isinstance(model, str):
+        if model.startswith(EXTERNAL_PREFIX):
+            return _build_external_adapter(model.removeprefix(EXTERNAL_PREFIX))
+        match model:
+            case "expressive" | "local" | "fast":
+                return _resolve_builtin_model(model)
+            case _:
+                raise ConfigGenerateError(f"Unknown model choice: {model!r}")
+
+    if _is_model(model):
+        return model
+
+    raise ConfigGenerateError(f"Unknown model choice: {model!r}")
