@@ -37,11 +37,14 @@ StreamContent = str | ConfigInput | UpdateInput
 PreviewPolicy = Literal["none", "embedding"]
 FallbackPolicy = Literal["none", "keep_last", "embedding"]
 FallbackInput = FallbackPolicy | ConfigInput | UpdateInput
+ModelLoadRole = Literal["primary", "fallback"]
 
 
 @dataclass(frozen=True)
 class StreamEvent:
     kind: Literal[
+        "model_load_start",
+        "model_load_end",
         "stream_start",
         "item_resolve_start",
         "item_resolve_success",
@@ -52,6 +55,8 @@ class StreamEvent:
         "stream_end",
         "fallback_used",
     ]
+    model: ModelSpec | None = None
+    model_role: ModelLoadRole | None = None
     index: int | None = None
     item: Streamable | None = None
     error: Exception | None = None
@@ -62,6 +67,8 @@ class StreamEvent:
 @dataclass(frozen=True)
 class StreamHooks:
     on_event: Callable[[StreamEvent], None] | None = None
+    on_model_load_start: Callable[[ModelSpec, ModelLoadRole], None] | None = None
+    on_model_load_end: Callable[[ModelSpec, ModelLoadRole], None] | None = None
     on_stream_start: Callable[[], None] | None = None
     on_item_resolve_start: Callable[[int, Streamable], None] | None = None
     on_item_resolve_success: Callable[[int, Streamable], None] | None = None
@@ -91,11 +98,30 @@ class FirstAudioSpinner:
 
     def hooks(self) -> StreamHooks:
         return StreamHooks(
+            on_model_load_start=self._on_model_load_start,
+            on_model_load_end=self._on_model_load_end,
             on_stream_start=self._on_stream_start,
             on_item_preview_start=self._on_preview_start,
             on_first_audio_chunk=self._on_first_audio_chunk,
             on_stream_end=self._on_stream_end,
         )
+
+    def _on_model_load_start(self, model: ModelSpec, role: ModelLoadRole) -> None:
+        _ = model
+        if role != "primary":
+            return
+        if self._stopped:
+            return
+        self._spinner.update("Loading model")
+        self._start_immediately()
+
+    def _on_model_load_end(self, model: ModelSpec, role: ModelLoadRole) -> None:
+        _ = model
+        if role != "primary":
+            return
+        if self._stopped:
+            return
+        self._spinner.update("Generating first audio")
 
     def _on_stream_start(self) -> None:
         if self._stopped or self._started or self._timer is not None:
@@ -128,6 +154,14 @@ class FirstAudioSpinner:
             return
         self._started = True
         self._spinner.start()
+
+    def _start_immediately(self) -> None:
+        if self._stopped or self._started:
+            return
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+        self._start()
 
     def _stop(self) -> None:
         if self._stopped:
@@ -180,6 +214,20 @@ def _emit_event(hooks: StreamHooks | None, event: StreamEvent) -> None:
         if hooks.on_event is not None:
             hooks.on_event(event)
         match event.kind:
+            case "model_load_start":
+                if (
+                    hooks.on_model_load_start is not None
+                    and event.model is not None
+                    and event.model_role is not None
+                ):
+                    hooks.on_model_load_start(event.model, event.model_role)
+            case "model_load_end":
+                if (
+                    hooks.on_model_load_end is not None
+                    and event.model is not None
+                    and event.model_role is not None
+                ):
+                    hooks.on_model_load_end(event.model, event.model_role)
             case "stream_start":
                 if hooks.on_stream_start is not None:
                     hooks.on_stream_start()
@@ -248,6 +296,42 @@ class _PrefetchedItem:
     index: int
     item: Streamable
     task: asyncio.Task[_MusicConfigInternal] | None
+
+
+@dataclass(slots=True)
+class _ModelLoadState:
+    model: ModelForGeneratingMusicConfig
+    role: ModelLoadRole
+    hooks: StreamHooks | None
+    loaded: bool = False
+
+    async def ensure_loaded(self) -> None:
+        if self.loaded:
+            return
+        self.loaded = True
+        if self.hooks is None:
+            return
+        _emit_event(
+            self.hooks,
+            StreamEvent(
+                kind="model_load_start",
+                model=self.model,
+                model_role=self.role,
+            ),
+        )
+        try:
+            warmup = getattr(self.model, "warmup", None)
+            if callable(warmup):
+                await asyncio.to_thread(warmup)
+        finally:
+            _emit_event(
+                self.hooks,
+                StreamEvent(
+                    kind="model_load_end",
+                    model=self.model,
+                    model_role=self.role,
+                ),
+            )
 
 
 def _to_synth_config(config: _MusicConfigInternal) -> SynthConfig:
@@ -615,9 +699,12 @@ async def _resolve_preview(
     preview_policy: PreviewPolicy,
     fallback_model: ModelForGeneratingMusicConfig,
     update: UpdateInput | None,
+    fallback_load: _ModelLoadState | None = None,
 ) -> _MusicConfigInternal | None:
     if preview_policy != "embedding" or not isinstance(item.content, str):
         return None
+    if fallback_load is not None:
+        await fallback_load.ensure_loaded()
     preview = await fallback_model.generate(item.content)
     return _apply_update(preview.to_internal(), update)
 
@@ -629,6 +716,7 @@ async def _resolve_fallback(
     fallback: FallbackInput | None,
     fallback_model: ModelForGeneratingMusicConfig,
     update: UpdateInput | None,
+    fallback_load: _ModelLoadState | None = None,
 ) -> _MusicConfigInternal | None:
     if fallback is None or fallback == "keep_last":
         base = current or _MusicConfigInternal()
@@ -639,8 +727,12 @@ async def _resolve_fallback(
         if not isinstance(item.content, str):
             base = current or _MusicConfigInternal()
             return _apply_update(base, update)
+        if fallback_load is not None:
+            await fallback_load.ensure_loaded()
         target = await fallback_model.generate(item.content)
         return _apply_update(target.to_internal(), update)
+    if fallback_load is not None and isinstance(fallback, str):
+        await fallback_load.ensure_loaded()
     return await _resolve_target_async(
         fallback,
         current=current,
@@ -668,9 +760,12 @@ async def _prefetch_item(
     model: ModelForGeneratingMusicConfig,
     hooks: StreamHooks | None,
     index: int,
+    load_state: _ModelLoadState | None = None,
 ) -> _PrefetchedItem:
     task: asyncio.Task[_MusicConfigInternal] | None = None
     if isinstance(item.content, str):
+        if load_state is not None:
+            await load_state.ensure_loaded()
         _emit_event(hooks, StreamEvent(kind="item_resolve_start", index=index, item=item))
         task = asyncio.create_task(_generate_internal(item.content, model))
     return _PrefetchedItem(index=index, item=item, task=task)
@@ -739,6 +834,12 @@ async def astream(
         current = coerce_internal_config(config) if config is not None else None
         resolved = resolve_model(model)
         fallback_resolved = resolve_model(fallback_model)
+        primary_load = (
+            _ModelLoadState(resolved, "primary", hooks) if hooks is not None else None
+        )
+        fallback_load = (
+            _ModelLoadState(fallback_resolved, "fallback", hooks) if hooks is not None else None
+        )
 
         _emit_event(hooks, StreamEvent(kind="stream_start"))
 
@@ -768,6 +869,7 @@ async def astream(
                         model=resolved,
                         hooks=hooks,
                         index=next_index,
+                        load_state=primary_load,
                     )
                 )
                 next_index += 1
@@ -819,6 +921,7 @@ async def astream(
                             fallback=item_fallback,
                             fallback_model=fallback_resolved,
                             update=update,
+                            fallback_load=fallback_load,
                         )
                         if target is None:
                             raise
@@ -837,6 +940,7 @@ async def astream(
                         preview_policy=item_preview,
                         fallback_model=fallback_resolved,
                         update=update,
+                        fallback_load=fallback_load,
                     )
                     if preview is not None:
                         target = preview
@@ -878,6 +982,7 @@ async def astream(
                                 fallback=item_fallback,
                                 fallback_model=fallback_resolved,
                                 update=update,
+                                fallback_load=fallback_load,
                             )
                             if target is None:
                                 raise
@@ -954,6 +1059,7 @@ async def astream(
                             fallback=item_fallback,
                             fallback_model=fallback_resolved,
                             update=update,
+                            fallback_load=fallback_load,
                         )
                         if real_target is None:
                             raise

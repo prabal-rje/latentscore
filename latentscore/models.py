@@ -389,6 +389,9 @@ class FastEmbeddingModel:
     def __init__(self, model_dir: Path | None = None) -> None:
         self._model_dir = model_dir
 
+    def warmup(self) -> None:
+        _ = self._example_matrix()
+
     async def generate(self, vibe: str) -> MusicConfig:
         try:
             return await asyncio.to_thread(self._embed_and_select, vibe)
@@ -440,6 +443,9 @@ class ExpressiveMlxModel:
         self._model_dir = model_dir
         self._max_retries = max_retries
         self._allow_download = allow_download
+
+    def warmup(self) -> None:
+        _ = self._load_model()
 
     async def generate(self, vibe: str) -> MusicConfig:
         return await asyncio.to_thread(self._generate_sync, vibe)

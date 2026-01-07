@@ -27,6 +27,7 @@ models/
 assets/*.sf2
 assets/*.wav
 assets/*.mp3
+**/*.wav
 
 # 3. Build/Distribution Artifacts (PyInstaller output)
 build/

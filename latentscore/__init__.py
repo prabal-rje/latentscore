@@ -26,6 +26,7 @@ from .config import (
 from .main import (
     FallbackInput,
     FirstAudioSpinner,
+    ModelLoadRole,
     PreviewPolicy,
     Streamable,
     StreamEvent,
@@ -69,6 +70,7 @@ __all__ = [
     "TempoLabel",
     "FallbackInput",
     "FirstAudioSpinner",
+    "ModelLoadRole",
     "PreviewPolicy",
     "astream",
     "render",

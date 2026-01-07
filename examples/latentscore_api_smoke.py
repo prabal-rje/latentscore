@@ -83,10 +83,10 @@ def main() -> None:
     spinner = FirstAudioSpinner(delay=0.35)
 
     try:
-        audio = render("I AM INSANE", duration=RENDER_SECONDS, model=adapter)
-        _assert_audio(audio)
-        render_path = output_dir / "render.wav"
-        save_wav(str(render_path), audio)
+        # audio = render("I AM INSANE", duration=RENDER_SECONDS, model=adapter)
+        # _assert_audio(audio)
+        # render_path = output_dir / "render.wav"
+        # save_wav(str(render_path), audio)
 
         segment_seconds = STREAM_SECONDS / 3
         stream_items = [

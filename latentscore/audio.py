@@ -13,7 +13,7 @@ from .errors import InvalidConfigError
 FloatArray = NDArray[np.float32]
 AudioNumbers = NDArray[np.floating[Any]] | Sequence[float] | FloatArray
 
-SAMPLE_RATE = 44100
+SAMPLE_RATE = 44_100
 
 
 def ensure_audio_contract(
