@@ -11,7 +11,7 @@ from rich.console import Console
 from .audio import SAMPLE_RATE
 from .dx import render
 from .errors import ModelNotAvailableError
-from .logging_utils import log_exception
+from .logging_utils import configure_logging, log_exception
 from .spinner import Spinner, render_error
 
 _EXPRESSIVE_REPO = "mlx-community/gemma-3-1b-it-qat-8bit"
@@ -61,6 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_logging()
     try:
         parser = build_parser()
         args = parser.parse_args(argv)

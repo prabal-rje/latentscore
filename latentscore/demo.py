@@ -37,6 +37,7 @@ def _live_playlist_generator() -> Iterable[ls.Streamable]:
         transition_duration=TRANSITION_DURATION,
     )
 
+
 def _demo_live_from_generator() -> None:
     live_chunks = ls.stream_raw(
         _live_playlist_generator(),

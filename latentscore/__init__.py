@@ -24,6 +24,7 @@ from .config import (
     TextureStyle,
 )
 from .dx import Audio, AudioStream, Playlist, Track, render, stream
+from .logging_utils import configure_logging as _configure_logging
 from .main import (
     FallbackInput,
     FirstAudioSpinner,
@@ -100,3 +101,6 @@ __all__ = [
 ]
 
 __version__ = "0.1.0"
+
+_configure_logging()
+del _configure_logging

@@ -6,7 +6,7 @@ import logging
 import os
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal, Protocol, Sequence, TypeGuard
+from typing import Any, Literal, Protocol, Sequence, TypeGuard, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -41,13 +41,13 @@ def _disable_transformers_progress() -> None:
         return
 
 
-_TORCH_PARAM_PATCHED = False
+_torch_param_patched = False
 
 
 def _patch_torch_parameter_for_hf() -> None:
     """Ignore newer HF-specific kwargs when using older torch versions."""
-    global _TORCH_PARAM_PATCHED
-    if _TORCH_PARAM_PATCHED:
+    global _torch_param_patched
+    if _torch_param_patched:
         return
     try:
         import torch
@@ -56,19 +56,26 @@ def _patch_torch_parameter_for_hf() -> None:
     try:
         from inspect import signature
 
-        if "_is_hf_initialized" in signature(torch.nn.Parameter.__new__).parameters:
-            _TORCH_PARAM_PATCHED = True
+        param_new = cast(
+            Any,
+            torch.nn.Parameter.__new__,  # type: ignore[reportUnknownMemberType]
+        )
+        if "_is_hf_initialized" in signature(param_new).parameters:
+            _torch_param_patched = True
             return
     except (TypeError, ValueError):
         pass
 
-    orig_new = torch.nn.Parameter.__new__
+    orig_new = cast(
+        Any,
+        torch.nn.Parameter.__new__,  # type: ignore[reportUnknownMemberType]
+    )
 
-    def _patched_new(cls, data=None, requires_grad: bool = True, **_kwargs):
+    def _patched_new(cls: Any, data: Any = None, requires_grad: bool = True, **_kwargs: Any) -> Any:
         return orig_new(cls, data, requires_grad)
 
     torch.nn.Parameter.__new__ = staticmethod(_patched_new)  # type: ignore[assignment]
-    _TORCH_PARAM_PATCHED = True
+    _torch_param_patched = True
 
 
 class ModelForGeneratingMusicConfig(Protocol):
