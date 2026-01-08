@@ -8,7 +8,7 @@ This package wraps the core LatentScore API with a small DX layer for audio-firs
 import latentscore as ls
 
 audio = ls.render("warm sunrise over water")
-audio.play()  # optional: requires latentscore[play]
+audio.play()  # uses sounddevice/simpleaudio; install ipython for notebooks
 audio.save(".examples/quickstart.wav")
 ```
 
@@ -49,11 +49,9 @@ playlist.render().save(".examples/playlist.wav")
 - `"expressive"` / `"local"`: local MLX LLM
 - `"external:<model-name>"`: LiteLLM adapter shorthand
 
-## Playback extras
+## Playback notes
 
-```bash
-pip install "latentscore[play]"
-```
+Install `ipython` if you want inline notebook playback. CLI playback uses sounddevice/simpleaudio.
 
 ## Demo
 
@@ -64,6 +62,16 @@ python -m latentscore.demo
 ```
 
 Outputs land in `.examples/` at the project root.
+
+## Doctor
+
+Run a quick environment check before demos or production:
+
+```bash
+latentscore doctor
+```
+
+It reports cache locations, whether the local models are present, and hints for prefetching.
 
 ## More details
 

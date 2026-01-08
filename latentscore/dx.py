@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import AsyncIterable, AsyncIterator, Callable, Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import Any, Literal
@@ -20,6 +21,7 @@ from .config import (
     merge_internal_config,
 )
 from .errors import InvalidConfigError, ModelNotAvailableError, PlaybackError
+from .indicators import RichIndicator
 from .main import (
     FallbackInput,
     PreviewPolicy,
@@ -37,6 +39,7 @@ from .main import (
     stream as stream_raw,
 )
 from .models import EXTERNAL_PREFIX, ModelSpec
+from .spinner import render_error
 from .synth import MusicConfig as SynthConfig
 from .synth import assemble
 
@@ -73,7 +76,11 @@ class Audio(BaseModel):
     def play(self) -> None:
         from .playback import play_audio
 
-        play_audio(self.samples, sample_rate=self.sample_rate)
+        try:
+            play_audio(self.samples, sample_rate=self.sample_rate)
+        except PlaybackError as exc:
+            render_error("playback", exc)
+            raise
 
 
 class AudioStream:
@@ -199,6 +206,10 @@ def render(
     if sample_rate != SAMPLE_RATE:
         raise InvalidConfigError(f"sample_rate must be {SAMPLE_RATE}")
 
+    resolved_hooks = hooks
+    if hooks is None:
+        resolved_hooks = RichIndicator().render_hooks()
+
     if isinstance(vibe_or_config, str):
         resolved_model = _coerce_model(model)
         audio = render_raw(
@@ -207,7 +218,7 @@ def render(
             model=resolved_model,
             config=config,
             update=update,
-            hooks=hooks,
+            hooks=resolved_hooks,
         )
         return Audio(samples=audio, sample_rate=sample_rate)
 
@@ -226,18 +237,21 @@ def render(
     if update is not None:
         target = merge_internal_config(target, coerce_internal_update(update))
 
-    _emit_render_hooks(hooks, kind="start")
+    _emit_render_hooks(resolved_hooks, kind="start")
     try:
         synth_config = SynthConfig.model_validate(target.model_dump())
-        _emit_render_hooks(hooks, kind="synth_start")
+        _emit_render_hooks(resolved_hooks, kind="synth_start")
         audio = assemble(synth_config, duration=duration)
         normalized = ensure_audio_contract(audio, sample_rate=sample_rate)
-        _emit_render_hooks(hooks, kind="synth_end")
-        _emit_render_hooks(hooks, kind="end")
+        _emit_render_hooks(resolved_hooks, kind="synth_end")
+        _emit_render_hooks(resolved_hooks, kind="end")
         return Audio(samples=normalized, sample_rate=sample_rate)
     except Exception as exc:
-        _emit_render_hooks(hooks, kind="error", error=exc)
-        _LOGGER.warning("render failed: %s", exc, exc_info=True)
+        _emit_render_hooks(resolved_hooks, kind="error", error=exc)
+        debug = bool(os.environ.get("LATENTSCORE_DEBUG"))
+        _LOGGER.warning("render failed: %s", exc, exc_info=debug)
+        if hooks is not None and hooks.on_error is None:
+            render_error("render", exc)
         raise
 
 
@@ -340,7 +354,8 @@ def _emit_render_hooks(
             case _:
                 raise InvalidConfigError(f"Unknown render hook kind: {kind}")
     except Exception as exc:
-        _LOGGER.warning("Render hook failed: %s", exc, exc_info=True)
+        debug = bool(os.environ.get("LATENTSCORE_DEBUG"))
+        _LOGGER.warning("Render hook failed: %s", exc, exc_info=debug)
 
 
 def _stream_from_tracks(
@@ -359,8 +374,14 @@ def _stream_from_tracks(
 ) -> AudioStream:
     resolved_model = _coerce_model(model)
     resolved_fallback = _coerce_model(fallback_model)
+    resolved_hooks = hooks
+    indicator = None
+    if hooks is None:
+        indicator = RichIndicator()
+        resolved_hooks = indicator.stream_hooks()
 
     def sync_factory() -> Iterable[FloatArray]:
+        _ = indicator
         return stream_raw(
             _streamables_for_tracks(tracks),
             chunk_seconds=chunk_seconds,
@@ -371,11 +392,12 @@ def _stream_from_tracks(
             preview_policy=preview_policy,
             fallback=fallback,
             fallback_model=resolved_fallback,
-            hooks=hooks,
+            hooks=resolved_hooks,
             queue_maxsize=queue_maxsize,
         )
 
     def async_factory() -> AsyncIterable[FloatArray]:
+        _ = indicator
         return astream_raw(
             _streamables_for_tracks(tracks),
             chunk_seconds=chunk_seconds,
@@ -386,7 +408,7 @@ def _stream_from_tracks(
             preview_policy=preview_policy,
             fallback=fallback,
             fallback_model=resolved_fallback,
-            hooks=hooks,
+            hooks=resolved_hooks,
         )
 
     return AudioStream(sync_factory, async_factory, sample_rate=SAMPLE_RATE)

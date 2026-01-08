@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Mapping
+from threading import Event, Lock, Thread
 from typing import Any, Callable, Coroutine, Literal
 
 from pydantic import BaseModel, ValidationError
@@ -20,6 +21,11 @@ _RESERVED_LITELLM_KWARGS = frozenset(
     {"model", "messages", "response_format", "api_key", "reasoning_effort"}
 )
 ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "default"]
+_litellm_loop: asyncio.AbstractEventLoop | None = None
+_litellm_thread: Thread | None = None
+_litellm_ready = Event()
+_litellm_lock = Lock()
+_litellm_shutdown_registered = False
 
 try:
     from json_repair import repair_json  # type: ignore[import]  # Optional dependency.
@@ -91,6 +97,79 @@ def _register_safe_get_event_loop_atexit() -> None:
     import atexit
 
     atexit.register(_install_safe_get_event_loop)
+
+
+def _shutdown_litellm_loop() -> None:
+    loop = _litellm_loop
+    thread = _litellm_thread
+    if loop is None or thread is None:
+        return
+    if loop.is_closed():
+        return
+    try:
+        loop.call_soon_threadsafe(loop.stop)
+    except Exception as exc:
+        _LOGGER.info("LiteLLM loop stop failed: %s", exc, exc_info=True)
+    thread.join(timeout=1.0)
+
+
+def _register_litellm_loop_atexit() -> None:
+    global _litellm_shutdown_registered
+    if _litellm_shutdown_registered:
+        return
+    _litellm_shutdown_registered = True
+    import atexit
+
+    atexit.register(_shutdown_litellm_loop)
+
+
+def _ensure_litellm_loop() -> asyncio.AbstractEventLoop:
+    global _litellm_loop, _litellm_thread
+    with _litellm_lock:
+        if _litellm_loop is not None and not _litellm_loop.is_closed():
+            return _litellm_loop
+        _litellm_ready.clear()
+
+        def _runner() -> None:
+            global _litellm_loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            _litellm_loop = loop
+            _litellm_ready.set()
+            loop.run_forever()
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            except Exception as exc:
+                _LOGGER.info("LiteLLM loop shutdown failed: %s", exc, exc_info=True)
+            loop.close()
+
+        _litellm_thread = Thread(
+            target=_runner,
+            name="latentscore-litellm-loop",
+            daemon=True,
+        )
+        _litellm_thread.start()
+    _litellm_ready.wait()
+    if _litellm_loop is None:
+        raise RuntimeError("LiteLLM loop failed to start")
+    _register_litellm_loop_atexit()
+    return _litellm_loop
+
+
+async def _run_on_litellm_loop(coro: Coroutine[Any, Any, Any]) -> Any:
+    loop = _ensure_litellm_loop()
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if running is loop:
+        return await coro
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    try:
+        return await asyncio.wrap_future(future)
+    except asyncio.CancelledError:
+        future.cancel()
+        raise
 
 
 def _extract_json_payload(content: str) -> str | None:
@@ -166,13 +245,19 @@ class LiteLLMAdapter:
             _LOGGER.info("LiteLLM not installed; skipping async close: %s", exc)
             return
 
-        _register_safe_get_event_loop_atexit()
-        close_fn: Any = getattr(litellm, "aclose", None)
-        if close_fn is None:
-            close_fn = getattr(litellm, "close_litellm_async_clients", None)
-        if close_fn is None:
-            return
-        await close_fn()
+        async def _close() -> None:
+            _register_safe_get_event_loop_atexit()
+            close_fn: Any = getattr(litellm, "aclose", None)
+            if close_fn is None:
+                close_fn = getattr(litellm, "close_litellm_async_clients", None)
+            if close_fn is None:
+                return
+            await close_fn()
+
+        try:
+            await _run_on_litellm_loop(_close())
+        except Exception as exc:
+            _LOGGER.warning("LiteLLM close failed: %s", exc, exc_info=True)
 
     async def generate(self, vibe: str) -> MusicConfig:
         try:
@@ -203,8 +288,9 @@ class LiteLLMAdapter:
         request.update(self._litellm_kwargs)
 
         try:
-            # LiteLLM response typing is not exported; keep runtime checks below.
-            response: Any = await acompletion(**request, reasoning_effort=self._reasoning_effort)
+            response: Any = await _run_on_litellm_loop(
+                acompletion(**request, reasoning_effort=self._reasoning_effort)
+            )
         except Exception as exc:  # pragma: no cover - provider errors
             _LOGGER.warning("LiteLLM request failed: %s", exc, exc_info=True)
             raise LLMInferenceError(str(exc)) from exc

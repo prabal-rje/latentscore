@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from collections.abc import Iterable
 from typing import Any, Callable
 
@@ -10,8 +12,10 @@ from pydantic import BaseModel, ConfigDict
 
 from .audio import FloatArray, ensure_audio_contract
 from .errors import PlaybackError
+from .spinner import ProgressBar, Spinner
 
 _LOGGER = logging.getLogger("latentscore.playback")
+_MUSIC_FRAMES = "\u266a\u266b\u266c\u2669"
 
 
 class PlaybackBackend(BaseModel):
@@ -34,20 +38,79 @@ def _resolve_backend() -> PlaybackBackend:
     backend = _load_backend()
     if backend is None:
         raise PlaybackError(
-            "Playback requires `pip install latentscore[play]` (sounddevice) "
-            "or use .save() instead."
+            "Playback requires sounddevice or simpleaudio. "
+            "Install one of them (or use .save()); for notebook playback install ipython."
         )
     return backend
 
 
 def play_audio(samples: FloatArray, *, sample_rate: int) -> None:
     backend = _resolve_backend()
-    backend.play_audio(samples, sample_rate)
+    duration = len(samples) / sample_rate if sample_rate > 0 else 0.0
+
+    def _run() -> None:
+        backend.play_audio(samples, sample_rate)
+
+    _play_with_progress(_run, duration=duration, message="Playing audio")
 
 
 def play_stream(chunks: Iterable[FloatArray], *, sample_rate: int) -> None:
     backend = _resolve_backend()
-    backend.play_stream(chunks, sample_rate)
+
+    def _run() -> None:
+        backend.play_stream(chunks, sample_rate)
+
+    _play_with_spinner(_run, message="Playing stream", frames=_MUSIC_FRAMES)
+
+
+def _play_with_progress(
+    play_fn: Callable[[], None],
+    *,
+    duration: float,
+    message: str,
+) -> None:
+    progress = ProgressBar(message, total=max(duration, 0.0))
+    error: list[BaseException] = []
+
+    def _runner() -> None:
+        try:
+            play_fn()
+        except BaseException as exc:
+            error.append(exc)
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    start = time.monotonic()
+    progress.start()
+    try:
+        while thread.is_alive():
+            elapsed = time.monotonic() - start
+            progress.update(elapsed)
+            time.sleep(0.1)
+    finally:
+        thread.join(timeout=0.2)
+        progress.update(duration)
+        progress.stop()
+    if error:
+        raise error[0]
+
+
+def _play_with_spinner(
+    play_fn: Callable[[], None],
+    *,
+    message: str,
+    frames: str,
+) -> None:
+    spinner = Spinner(
+        f"{message} {_MUSIC_FRAMES[0]}",
+        frames=frames,
+        spinner="dots",
+    )
+    spinner.start()
+    try:
+        play_fn()
+    finally:
+        spinner.stop()
 
 
 def _load_sounddevice() -> PlaybackBackend | None:
@@ -112,6 +175,14 @@ def _load_simpleaudio() -> PlaybackBackend | None:
 
 
 def _load_ipython() -> PlaybackBackend | None:
+    try:
+        from IPython import get_ipython  # type: ignore[import]
+    except ImportError as exc:
+        _LOGGER.info("IPython not available: %s", exc, exc_info=True)
+        return None
+    if get_ipython() is None:
+        _LOGGER.info("IPython shell not active; skipping IPython playback backend.")
+        return None
     try:
         import IPython.display as ipy_display  # type: ignore[import]
     except ImportError as exc:

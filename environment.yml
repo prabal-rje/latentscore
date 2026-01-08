@@ -9,6 +9,8 @@ dependencies:
   - pip:
     # Audio
     - soundfile
+    - sounddevice
+    - simpleaudio
     
     # LLM, MLX
     - mlx>=0.22

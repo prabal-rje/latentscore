@@ -17,8 +17,16 @@ audio.save("output.wav")
 - `latentscore download expressive` prefetches local LLM weights (~1.2GB).
 - `docs/latentscore-dx.md` has the tiered API, model selection, and audio contract.
 - Streaming supports prefetching, preview playback while configs load, and fallback policies; see `docs/latentscore-dx.md`.
-- Install `latentscore[play]` for optional playback dependencies.
+- Playback uses sounddevice/simpleaudio by default; install `ipython` only if you want inline notebook audio.
 - First-time expressive downloads show a spinner; run `latentscore doctor` and prefetch missing models in production to avoid runtime downloads.
+
+### Doctor CLI
+
+Use `latentscore doctor` to sanity-check local assets before running:
+
+- Prints the model cache base path.
+- Confirms whether the expressive LLM and embeddings assets are present.
+- Reminds you to prefetch missing models with `latentscore download expressive`.
 
 ## Quickstart
 - Apple Silicon recommended; use an arm64 Conda (e.g. Miniforge) when possible.

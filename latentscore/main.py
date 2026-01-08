@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
+import os
 from collections import deque
 from collections.abc import AsyncIterable, AsyncIterator, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -28,8 +30,14 @@ from .config import (
     merge_internal_config,
 )
 from .errors import InvalidConfigError
-from .models import ExternalModelSpec, ModelForGeneratingMusicConfig, ModelSpec, resolve_model
-from .spinner import Spinner
+from .models import (
+    EXTERNAL_PREFIX,
+    ExternalModelSpec,
+    ModelForGeneratingMusicConfig,
+    ModelSpec,
+    resolve_model,
+)
+from .spinner import Spinner, render_error
 from .synth import MusicConfig as SynthConfig
 from .synth import assemble, interpolate_configs
 
@@ -53,6 +61,7 @@ class StreamEvent(BaseModel):
         "first_audio_chunk",
         "stream_end",
         "fallback_used",
+        "error",
     ]
     model: object | None = None
     model_role: ModelLoadRole | None = None
@@ -96,6 +105,7 @@ class StreamHooks(BaseModel):
     on_first_config_ready: Callable[[int, Streamable], None] | None = None
     on_first_audio_chunk: Callable[[], None] | None = None
     on_stream_end: Callable[[], None] | None = None
+    on_error: Callable[[Exception], None] | None = None
 
     model_config = ConfigDict(
         frozen=True,
@@ -242,8 +252,40 @@ def _run_async(coro: Coroutine[Any, Any, T]) -> T:
     return _EXECUTOR.submit(lambda: asyncio.run(coro)).result()
 
 
-def _log_exception(context: str, exc: Exception) -> None:
-    _LOGGER.warning("%s failed: %s", context, exc, exc_info=True)
+async def _maybe_close_model(model: ModelForGeneratingMusicConfig | None) -> None:
+    if model is None:
+        return
+    aclose = getattr(model, "aclose", None)
+    if callable(aclose):
+        try:
+            result = aclose()
+            if inspect.isawaitable(result):
+                await result
+            return
+        except Exception as exc:
+            _LOGGER.warning("Model async close failed: %s", exc, exc_info=True)
+            return
+    close = getattr(model, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception as exc:
+            _LOGGER.warning("Model close failed: %s", exc, exc_info=True)
+
+
+def _should_auto_close_model(model: ModelSpec) -> bool:
+    if isinstance(model, ExternalModelSpec):
+        return True
+    if isinstance(model, str):
+        return model.startswith(EXTERNAL_PREFIX)
+    return False
+
+
+def _log_exception(context: str, exc: Exception, *, show_console: bool = True) -> None:
+    debug = bool(os.environ.get("LATENTSCORE_DEBUG"))
+    _LOGGER.warning("%s failed: %s", context, exc, exc_info=debug)
+    if show_console:
+        render_error(context, exc)
 
 
 def _is_model_spec(value: object) -> TypeGuard[ModelSpec]:
@@ -332,12 +374,16 @@ def _emit_event(hooks: StreamHooks | None, event: StreamEvent) -> None:
             case "stream_end":
                 if hooks.on_stream_end is not None:
                     hooks.on_stream_end()
+            case "error":
+                if hooks.on_error is not None and event.error is not None:
+                    hooks.on_error(event.error)
             case "fallback_used":
                 pass
             case _:
                 pass
     except Exception as exc:
-        _LOGGER.warning("Stream hook failed: %s", exc, exc_info=True)
+        debug = bool(os.environ.get("LATENTSCORE_DEBUG"))
+        _LOGGER.warning("Stream hook failed: %s", exc, exc_info=debug)
 
 
 def _emit_render(
@@ -383,7 +429,8 @@ def _emit_render(
             case _:
                 raise InvalidConfigError(f"Unknown render hook kind: {kind}")
     except Exception as exc:
-        _LOGGER.warning("Render hook failed: %s", exc, exc_info=True)
+        debug = bool(os.environ.get("LATENTSCORE_DEBUG"))
+        _LOGGER.warning("Render hook failed: %s", exc, exc_info=debug)
 
 
 class _PrefetchedItem(BaseModel):
@@ -541,9 +588,18 @@ def render(
     try:
         if config is None:
             resolved = resolve_model(model)
+            should_close = _should_auto_close_model(model)
             _emit_render(hooks, kind="model_start", model=model)
+
+            async def _generate_with_cleanup() -> MusicConfig:
+                try:
+                    return await resolved.generate(vibe)
+                finally:
+                    if should_close:
+                        await _maybe_close_model(resolved)
+
             try:
-                base = _run_async(resolved.generate(vibe)).to_internal()
+                base = _run_async(_generate_with_cleanup()).to_internal()
             finally:
                 _emit_render(hooks, kind="model_end", model=model)
         else:
@@ -558,7 +614,8 @@ def render(
         return normalized
     except Exception as exc:
         _emit_render(hooks, kind="error", error=exc)
-        _log_exception("render", exc)
+        show_console = hooks is None or hooks.on_error is None
+        _log_exception("render", exc, show_console=show_console)
         raise
 
 
@@ -638,7 +695,8 @@ def stream(
         for chunk in _bridge_async_stream(async_iter, queue_maxsize=queue_maxsize):
             yield chunk
     except Exception as exc:
-        _log_exception("stream", exc)
+        show_console = hooks is None or hooks.on_error is None
+        _log_exception("stream", exc, show_console=show_console)
         raise
 
 
@@ -682,7 +740,8 @@ def stream_texts(
             hooks=hooks,
         )
     except Exception as exc:
-        _log_exception("stream_texts", exc)
+        show_console = hooks is None or hooks.on_error is None
+        _log_exception("stream_texts", exc, show_console=show_console)
         raise
 
 
@@ -727,7 +786,8 @@ def stream_configs(
             hooks=hooks,
         )
     except Exception as exc:
-        _log_exception("stream_configs", exc)
+        show_console = hooks is None or hooks.on_error is None
+        _log_exception("stream_configs", exc, show_console=show_console)
         raise
 
 
@@ -772,7 +832,8 @@ def stream_updates(
             hooks=hooks,
         )
     except Exception as exc:
-        _log_exception("stream_updates", exc)
+        show_console = hooks is None or hooks.on_error is None
+        _log_exception("stream_updates", exc, show_console=show_console)
         raise
 
 
@@ -781,7 +842,7 @@ def save_wav(path: str, audio_or_chunks: AudioNumbers | Iterable[AudioNumbers]) 
         written = write_wav(path, audio_or_chunks, sample_rate=SAMPLE_RATE)
         return str(written)
     except Exception as exc:
-        _log_exception("save_wav", exc)
+        _log_exception("save_wav", exc, show_console=True)
         raise
 
 
@@ -942,6 +1003,10 @@ async def astream(
     fallback_model: ModelSpec = "fast",
     hooks: StreamHooks | None = None,
 ) -> AsyncIterable[FloatArray]:
+    resolved: ModelForGeneratingMusicConfig | None = None
+    fallback_resolved: ModelForGeneratingMusicConfig | None = None
+    should_close = False
+    fallback_should_close = False
     try:
         match chunk_seconds:
             case (float() | int()) as value if value <= 0:
@@ -957,6 +1022,8 @@ async def astream(
         current = coerce_internal_config(config) if config is not None else None
         resolved = resolve_model(model)
         fallback_resolved = resolve_model(fallback_model)
+        should_close = _should_auto_close_model(model)
+        fallback_should_close = _should_auto_close_model(fallback_model)
         primary_load = (
             _ModelLoadState(model=resolved, role="primary", hooks=hooks)
             if hooks is not None
@@ -1234,5 +1301,16 @@ async def astream(
 
         _emit_event(hooks, StreamEvent(kind="stream_end"))
     except Exception as exc:
-        _log_exception("astream", exc)
+        _emit_event(hooks, StreamEvent(kind="error", error=exc))
+        show_console = hooks is None or hooks.on_error is None
+        _log_exception("astream", exc, show_console=show_console)
         raise
+    finally:
+        if should_close:
+            await _maybe_close_model(resolved)
+        if (
+            fallback_should_close
+            and fallback_resolved is not None
+            and fallback_resolved is not resolved
+        ):
+            await _maybe_close_model(fallback_resolved)

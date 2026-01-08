@@ -26,6 +26,21 @@ for chunk in ls.stream("dark ambient", "sunrise"):
 - `duration` is total duration across all items (split evenly).
 - `AudioStream` also supports `.save()` and `.play()`.
 
+## Live generator stream (dynamic playlist)
+
+```python
+import latentscore as ls
+from collections.abc import Iterable
+from latentscore.playback import play_stream
+
+def live_items() -> Iterable[ls.Streamable]:
+    for vibe in ["misty harbor", "neon rain", "quiet orchard"]:
+        yield ls.Streamable(content=vibe, duration=6.0, transition_duration=1.5)
+
+chunks = ls.stream_raw(live_items(), chunk_seconds=1.0, model="fast")
+play_stream(chunks, sample_rate=ls.SAMPLE_RATE)
+```
+
 ## Tier 2: Same stream, but with knobs
 
 ```python
@@ -105,15 +120,15 @@ spec = ls.ExternalModelSpec(
 audio = ls.render("late night neon", model=spec)
 ```
 
-## Playback extras
+## Playback notes
 
-Install optional playback dependencies:
+CLI playback uses sounddevice/simpleaudio by default. Install `ipython` if you want inline notebook playback. If playback is unavailable, `.play()` raises a friendly error that suggests using `.save()`.
 
-```bash
-pip install "latentscore[play]"
-```
+## Progress indicators
 
-If playback is unavailable, `.play()` raises a friendly error that suggests using `.save()`.
+- `render(...)` and `stream(...)` show Rich spinners in TTYs (model load, LLM config, audio generation).
+- `.play()` shows a progress bar for buffered audio and a music-note spinner for streams.
+- To silence indicators, pass empty hooks: `hooks=ls.RenderHooks()` or `hooks=ls.StreamHooks()`.
 
 ## Advanced: raw API
 

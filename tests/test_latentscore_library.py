@@ -27,6 +27,28 @@ class DummyModel:
         return MusicConfig(tempo="medium", brightness="bright")
 
 
+class ClosableModel:
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def generate(self, vibe: str) -> MusicConfig:
+        return MusicConfig(tempo="medium", brightness="bright")
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class SyncClosableModel:
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def generate(self, vibe: str) -> MusicConfig:
+        return MusicConfig(tempo="medium", brightness="bright")
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def test_raw_functions_still_exposed() -> None:
     assert callable(render_raw)
     assert callable(stream_raw)
@@ -59,6 +81,35 @@ def test_render_audio_contract() -> None:
     assert audio.dtype == np.float32
     assert audio.ndim == 1
     assert float(np.max(np.abs(audio))) <= 1.0
+
+
+def test_render_does_not_close_user_model() -> None:
+    model = ClosableModel()
+    _ = render_raw("warm sunrise", duration=0.02, model=model)
+    assert model.closed is False
+
+
+def test_render_does_not_close_user_sync_model() -> None:
+    model = SyncClosableModel()
+    _ = render_raw("warm sunrise", duration=0.02, model=model)
+    assert model.closed is False
+
+
+def test_render_closes_external_model_spec(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = ClosableModel()
+
+    def fake_build_external_adapter(*_: object, **__: object) -> ClosableModel:
+        return model
+
+    monkeypatch.setattr(
+        "latentscore.models._build_external_adapter",
+        fake_build_external_adapter,
+    )
+
+    _ = render_raw("warm sunrise", duration=0.02, model="external:fake-model")
+    assert model.closed is True
 
 
 def test_render_hooks_fire() -> None:
@@ -158,6 +209,21 @@ async def test_astream_preview_yields_before_llm_ready() -> None:
     chunk = await asyncio.wait_for(first_chunk(), timeout=0.5)
     assert isinstance(chunk, np.ndarray)
     slow.ready.set()
+
+
+@pytest.mark.asyncio
+async def test_astream_does_not_close_user_model() -> None:
+    model = ClosableModel()
+    items = [Streamable(content="warm sunrise", duration=0.04, transition_duration=0.0)]
+    _ = [
+        chunk
+        async for chunk in astream_raw(
+            items,
+            chunk_seconds=0.02,
+            model=model,
+        )
+    ]
+    assert model.closed is False
 
 
 class ErrorModel:

@@ -63,6 +63,28 @@ async def test_litellm_kwargs_forwarded(
     assert captured["temperature"] == 0.2
 
 
+def test_litellm_adapter_reuses_loop_across_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loop_refs: list[asyncio.AbstractEventLoop] = []
+
+    async def fake_acompletion(**kwargs: object) -> object:
+        _ = kwargs
+        loop_refs.append(asyncio.get_running_loop())
+        message = SimpleNamespace(content="{}")
+        choice = SimpleNamespace(message=message)
+        return SimpleNamespace(choices=[choice])
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+    adapter = LiteLLMAdapter(model="gemini/gemini-3-flash-preview")
+    asyncio.run(adapter.generate("warm sunrise"))
+    asyncio.run(adapter.generate("late night neon"))
+
+    assert len(loop_refs) == 2
+    assert loop_refs[0] is loop_refs[1]
+
+
 @pytest.mark.asyncio
 async def test_litellm_adapter_non_json_error_includes_snippet(
     monkeypatch: pytest.MonkeyPatch,
