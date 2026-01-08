@@ -390,10 +390,20 @@ def render_error(
 ) -> None:
     target = stream or sys.stderr
     debug = os.environ.get("LATENTSCORE_DEBUG")
+    log_path = None
+    try:
+        from .logging_utils import get_log_path
+
+        log_path = get_log_path()
+    except Exception:
+        log_path = None
     if Console and Panel and Text and Traceback and target.isatty():
         console = Console(file=target)
         headline = Text(f"{type(exc).__name__}", style="bold red")
         summary = Text(str(exc))
+        log_line = ""
+        if log_path is not None:
+            log_line = f"\nLogs: {log_path}"
         body = Text.assemble(
             ("LatentScore error while ", "bold"),
             (context, "bold"),
@@ -401,12 +411,14 @@ def render_error(
             headline,
             (": ", "bold"),
             summary,
-            ("\n\nSet LATENTSCORE_DEBUG=1 for full trace.", "dim"),
+            (log_line, "dim"),
+            ("\n\nSet LATENTSCORE_DEBUG=1 for console trace.", "dim"),
         )
         console.print(Panel(body, title="Error", border_style="red"))
         if debug:
             console.print(Traceback.from_exception(type(exc), exc, exc.__traceback__))
     else:
-        target.write(f"{context} failed: {type(exc).__name__}: {exc}\n")
+        suffix = f" (logs: {log_path})" if log_path is not None else ""
+        target.write(f"{context} failed: {type(exc).__name__}: {exc}{suffix}\n")
         if debug:
             traceback.print_exception(type(exc), exc, exc.__traceback__, file=target)

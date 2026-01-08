@@ -11,6 +11,7 @@ from rich.console import Console
 from .audio import SAMPLE_RATE
 from .dx import render
 from .errors import ModelNotAvailableError
+from .logging_utils import log_exception
 from .spinner import Spinner, render_error
 
 _EXPRESSIVE_REPO = "mlx-community/gemma-3-1b-it-qat-8bit"
@@ -103,6 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         debug = bool(os.environ.get("LATENTSCORE_DEBUG"))
         _LOGGER.warning("latentscore CLI failed: %s", exc, exc_info=debug)
+        log_exception("latentscore CLI", exc)
         render_error("latentscore CLI", exc)
         return 1
 

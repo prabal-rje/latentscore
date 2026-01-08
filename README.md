@@ -28,6 +28,13 @@ Use `latentscore doctor` to sanity-check local assets before running:
 - Confirms whether the expressive LLM and embeddings assets are present.
 - Reminds you to prefetch missing models with `latentscore download expressive`.
 
+### Demo flags + API keys
+
+- Live generator stream: `python -m latentscore.demo --live`
+- External LLM demo: `python -m latentscore.demo --external --api-key "$GEMINI_API_KEY"`
+- Env fallback demo (for LiteLLM): `export GEMINI_API_KEY="..."` then `python -m latentscore.demo --external`
+- Debug traces: `LATENTSCORE_DEBUG=1 python -m latentscore.demo` (full logs always written to `~/.cache/latentscore/logs/latentscore.log`).
+
 ## Quickstart
 - Apple Silicon recommended; use an arm64 Conda (e.g. Miniforge) when possible.
 - `conda create -n latentscore python=3.10` and `conda activate latentscore`.

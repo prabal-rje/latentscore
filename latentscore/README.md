@@ -63,6 +63,30 @@ python -m latentscore.demo
 
 Outputs land in `.examples/` at the project root.
 
+Flags:
+
+```bash
+python -m latentscore.demo --live
+python -m latentscore.demo --external --api-key "$GEMINI_API_KEY"
+```
+
+You can also set the API key via env var:
+
+```bash
+export GEMINI_API_KEY="..."
+python -m latentscore.demo --external
+```
+
+## Debugging
+
+LatentScore writes full traces to `~/.cache/latentscore/logs/latentscore.log` by default (override with `LATENTSCORE_LOG_DIR`).
+
+To echo stack traces in the terminal:
+
+```bash
+LATENTSCORE_DEBUG=1 python -m latentscore.demo
+```
+
 ## Doctor
 
 Run a quick environment check before demos or production:

@@ -51,7 +51,7 @@ def play_audio(samples: FloatArray, *, sample_rate: int) -> None:
     def _run() -> None:
         backend.play_audio(samples, sample_rate)
 
-    _play_with_progress(_run, duration=duration, message="Playing audio")
+    _play_with_progress(_run, duration=duration, message="♪ Playing audio ... ")
 
 
 def play_stream(chunks: Iterable[FloatArray], *, sample_rate: int) -> None:

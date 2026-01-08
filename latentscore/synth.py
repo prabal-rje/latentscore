@@ -1413,7 +1413,11 @@ def accent_chime(params: SynthParams) -> FloatArray:
     chime_degrees = (0, 2, 4, 5, 6)
 
     for _ in range(num_chimes):
-        pos = np.random.randint(0, len(signal) - sr)
+        max_start = len(signal) - sr
+        if max_start <= 0:
+            pos = 0
+        else:
+            pos = np.random.randint(0, max_start)
 
         degree = np.random.choice(chime_degrees)
         freq = params.get_scale_freq(degree, 5)

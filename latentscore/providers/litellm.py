@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import warnings
 from collections.abc import Mapping
 from threading import Event, Lock, Thread
 from typing import Any, Callable, Coroutine, Literal
@@ -26,6 +27,7 @@ _litellm_thread: Thread | None = None
 _litellm_ready = Event()
 _litellm_lock = Lock()
 _litellm_shutdown_registered = False
+_litellm_logging_configured = False
 
 try:
     from json_repair import repair_json  # type: ignore[import]  # Optional dependency.
@@ -121,6 +123,20 @@ def _register_litellm_loop_atexit() -> None:
     import atexit
 
     atexit.register(_shutdown_litellm_loop)
+
+
+def _configure_litellm_logging(litellm_module: Any) -> None:
+    global _litellm_logging_configured
+    if _litellm_logging_configured:
+        return
+    _litellm_logging_configured = True
+    try:
+        litellm_module.turn_off_message_logging = True
+        litellm_module.disable_streaming_logging = True
+        litellm_module.logging = False
+    except Exception as exc:
+        _LOGGER.info("LiteLLM logging config failed: %s", exc, exc_info=True)
+    warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
 
 
 def _ensure_litellm_loop() -> asyncio.AbstractEventLoop:
@@ -261,12 +277,14 @@ class LiteLLMAdapter:
 
     async def generate(self, vibe: str) -> MusicConfig:
         try:
+            import litellm  # type: ignore[import]
             from litellm import acompletion  # type: ignore[import]
         except ImportError as exc:
             _LOGGER.warning("LiteLLM not installed: %s", exc)
             raise ModelNotAvailableError("litellm is not installed") from exc
 
         _register_safe_get_event_loop_atexit()
+        _configure_litellm_logging(litellm)
         messages: list[dict[str, str]] = [{"role": "system", "content": self._base_prompt}]
         if self._system_prompt:
             messages.append({"role": "system", "content": self._system_prompt})

@@ -129,4 +129,12 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    from latentscore.logging_utils import log_exception
+    from latentscore.spinner import render_error
+
+    try:
+        main()
+    except Exception as exc:
+        log_exception("smoke example", exc)
+        render_error("smoke example", exc)
+        raise SystemExit(1) from exc

@@ -28,6 +28,49 @@ _LOCAL_EMBEDDING_DIR = Path("models") / _EMBEDDING_MODEL_NAME
 _LOGGER = logging.getLogger("latentscore.models")
 
 
+def _disable_transformers_progress() -> None:
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    try:
+        from transformers.utils import logging as hf_logging  # type: ignore[import]
+    except Exception:
+        return
+    try:
+        hf_logging.disable_progress_bar()
+        hf_logging.set_verbosity_error()
+    except Exception:
+        return
+
+
+_TORCH_PARAM_PATCHED = False
+
+
+def _patch_torch_parameter_for_hf() -> None:
+    """Ignore newer HF-specific kwargs when using older torch versions."""
+    global _TORCH_PARAM_PATCHED
+    if _TORCH_PARAM_PATCHED:
+        return
+    try:
+        import torch
+    except Exception:
+        return
+    try:
+        from inspect import signature
+
+        if "_is_hf_initialized" in signature(torch.nn.Parameter.__new__).parameters:
+            _TORCH_PARAM_PATCHED = True
+            return
+    except (TypeError, ValueError):
+        pass
+
+    orig_new = torch.nn.Parameter.__new__
+
+    def _patched_new(cls, data=None, requires_grad: bool = True, **_kwargs):
+        return orig_new(cls, data, requires_grad)
+
+    torch.nn.Parameter.__new__ = staticmethod(_patched_new)  # type: ignore[assignment]
+    _TORCH_PARAM_PATCHED = True
+
+
 class ModelForGeneratingMusicConfig(Protocol):
     async def generate(self, vibe: str) -> MusicConfig: ...
 
@@ -418,6 +461,8 @@ class FastEmbeddingModel:
             _LOGGER.warning("sentence-transformers not installed: %s", exc, exc_info=True)
             raise ModelNotAvailableError("sentence-transformers is not installed") from exc
 
+        _disable_transformers_progress()
+        _patch_torch_parameter_for_hf()
         model_dir = self._model_dir
         if model_dir is None:
             model_dir = _LOCAL_EMBEDDING_DIR if _LOCAL_EMBEDDING_DIR.exists() else None

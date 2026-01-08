@@ -30,6 +30,7 @@ from .config import (
     merge_internal_config,
 )
 from .errors import InvalidConfigError
+from .logging_utils import log_exception
 from .models import (
     EXTERNAL_PREFIX,
     ExternalModelSpec,
@@ -284,6 +285,7 @@ def _should_auto_close_model(model: ModelSpec) -> bool:
 def _log_exception(context: str, exc: Exception, *, show_console: bool = True) -> None:
     debug = bool(os.environ.get("LATENTSCORE_DEBUG"))
     _LOGGER.warning("%s failed: %s", context, exc, exc_info=debug)
+    log_exception(context, exc)
     if show_console:
         render_error(context, exc)
 
