@@ -169,3 +169,18 @@ def test_safe_async_cleanup_logs_failures(caplog: pytest.LogCaptureFixture) -> N
     _safe_async_cleanup(cleanup)
 
     assert any("boom" in record.getMessage() for record in caplog.records)
+
+
+def test_cleanup_message_not_emitted_at_info(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def cleanup() -> None:
+        return None
+
+    caplog.set_level(logging.INFO, logger="latentscore.providers.litellm")
+    _safe_async_cleanup(cleanup)
+
+    assert all(
+        "LiteLLM cleanup running outside an event loop." not in record.getMessage()
+        for record in caplog.records
+    )

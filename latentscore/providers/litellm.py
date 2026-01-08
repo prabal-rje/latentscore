@@ -41,7 +41,7 @@ def _safe_async_cleanup(
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        _LOGGER.info("LiteLLM cleanup running outside an event loop.")
+        _LOGGER.debug("LiteLLM cleanup running outside an event loop.")
         loop = None
 
     if loop is not None:
@@ -69,12 +69,12 @@ def _install_safe_get_event_loop() -> None:
         try:
             loop = original_get_event_loop()
         except RuntimeError:
-            _LOGGER.info("LiteLLM cleanup creating a new event loop.")
+            _LOGGER.debug("LiteLLM cleanup creating a new event loop.")
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             return loop
         if loop.is_closed():
-            _LOGGER.info("LiteLLM cleanup replacing a closed event loop.")
+            _LOGGER.debug("LiteLLM cleanup replacing a closed event loop.")
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
         return loop
@@ -86,7 +86,7 @@ def _install_safe_get_event_loop() -> None:
             close_litellm_async_clients,
         )
     except Exception as exc:
-        _LOGGER.info("LiteLLM cleanup import unavailable: %s", exc)
+        _LOGGER.debug("LiteLLM cleanup import unavailable: %s", exc)
         return
     _safe_async_cleanup(close_litellm_async_clients)
 
@@ -239,7 +239,7 @@ class LiteLLMAdapter:
         if self._response_format:
             self._schema_str = f"<schema>{json.dumps(self._response_format.model_json_schema(), separators=(',', ':'))}</schema>"
         if self._api_key is None:
-            _LOGGER.warning("No API key provided; letting LiteLLM read from env vars.")
+            _LOGGER.debug("No API key provided; letting LiteLLM read from env vars.")
         invalid_keys = _RESERVED_LITELLM_KWARGS.intersection(self._litellm_kwargs)
         if invalid_keys:
             keys = ", ".join(sorted(invalid_keys))

@@ -21,7 +21,7 @@ from typing import Any, Callable, TypeAlias, cast
 import numpy as np
 import soundfile as sf  # type: ignore[import]
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict
 from scipy.signal import butter, decimate, lfilter  # type: ignore[import]
 
 from .config import (
@@ -36,6 +36,9 @@ from .config import (
     RhythmStyle,
     RootNote,
     TextureStyle,
+)
+from .config import (
+    SynthConfig as MusicConfig,
 )
 
 # =============================================================================
@@ -1455,53 +1458,6 @@ ACCENT_PATTERNS: Mapping[AccentStyle, PatternFn] = MappingProxyType(
 # =============================================================================
 # PART 3: ASSEMBLER - CONFIG → AUDIO
 # =============================================================================
-
-
-class MusicConfig(BaseModel):
-    """Complete V1/V2 configuration."""
-
-    tempo: float = 0.35
-    root: RootNote = "c"
-    mode: ModeName = "minor"
-    brightness: float = 0.5
-    space: float = 0.6
-    density: DensityLevel = 5
-
-    # Layer selections
-    bass: BassStyle = "drone"
-    pad: PadStyle = "warm_slow"
-    melody: MelodyStyle = "contemplative"
-    rhythm: RhythmStyle = "minimal"
-    texture: TextureStyle = "shimmer"
-    accent: AccentStyle = "bells"
-
-    # V2 parameters
-    motion: float = 0.5
-    attack: AttackStyle = "medium"
-    stereo: float = 0.5
-    depth: bool = False
-    echo: float = 0.5
-    human: float = 0.0
-    grain: GrainStyle = "clean"
-
-    model_config = ConfigDict(extra="ignore")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _flatten_layers(cls, data: object) -> object:
-        if not isinstance(data, Mapping):
-            return data
-        merged = dict(data)
-        layers = merged.pop("layers", None)
-        if isinstance(layers, Mapping):
-            for key, value in layers.items():
-                merged.setdefault(key, value)
-        return merged
-
-    @classmethod
-    def from_dict(cls, d: Mapping[str, Any]) -> "MusicConfig":
-        """Create config from dict (e.g., from JSON)."""
-        return cls.model_validate(d)
 
 
 def assemble(config: MusicConfig, duration: float = 16.0, normalize: bool = True) -> FloatArray:

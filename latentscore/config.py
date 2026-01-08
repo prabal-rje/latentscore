@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Literal, Mapping, Optional, TypeVar
+from typing import Any, Callable, Literal, Mapping, Optional, TypeVar, cast
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     ValidationError,
+    model_validator,
 )
 
 from .errors import InvalidConfigError
@@ -263,12 +264,11 @@ def human_to_float(value: HumanFeelLabel) -> float:
 class _MusicConfigInternal(BaseModel):
     """Internal config with numeric values used by the synth engine."""
 
-    schema_version: Literal[1] = 1
-    tempo: float = 0.5
-    brightness: float = 0.5
+    tempo: float = 0.35
     root: RootNote = "c"
     mode: ModeName = "minor"
-    space: float = 0.5
+    brightness: float = 0.5
+    space: float = 0.6
     density: DensityLevel = 5
 
     bass: BassStyle = "drone"
@@ -286,7 +286,24 @@ class _MusicConfigInternal(BaseModel):
     human: float = 0.0
     grain: GrainStyle = "clean"
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _flatten_layers(cls, data: object) -> object:
+        if not isinstance(data, Mapping):
+            return data
+        merged: dict[str, Any] = dict(cast(Mapping[str, Any], data))
+        layers = merged.pop("layers", None)
+        if isinstance(layers, Mapping):
+            for key, value in cast(Mapping[str, Any], layers).items():
+                merged.setdefault(key, value)
+        return merged
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "_MusicConfigInternal":
+        """Create config from dict (e.g., from JSON)."""
+        return cls.model_validate(data)
 
 
 class MusicConfig(BaseModel):
@@ -294,9 +311,9 @@ class MusicConfig(BaseModel):
 
     schema_version: Literal[1] = 1
     tempo: TempoLabel = "medium"
-    brightness: BrightnessLabel = "medium"
     root: RootNote = "c"
     mode: ModeName = "minor"
+    brightness: BrightnessLabel = "medium"
     space: SpaceLabel = "medium"
     density: DensityLevel = 5
 
@@ -343,6 +360,9 @@ class MusicConfig(BaseModel):
             human=human_to_float(self.human),
             grain=self.grain,
         )
+
+
+SynthConfig = _MusicConfigInternal
 
 
 class _MusicConfigUpdateInternal(BaseModel):

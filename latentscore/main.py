@@ -247,7 +247,7 @@ def _run_async(coro: Coroutine[Any, Any, T]) -> T:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        _LOGGER.info("No running event loop; running coroutine directly.")
+        _LOGGER.debug("No running event loop; running coroutine directly.")
         return asyncio.run(coro)
 
     return _EXECUTOR.submit(lambda: asyncio.run(coro)).result()
@@ -519,6 +519,10 @@ def _to_synth_config(config: _MusicConfigInternal) -> SynthConfig:
 
 def _from_synth_config(config: SynthConfig) -> _MusicConfigInternal:
     return _MusicConfigInternal(**config.model_dump())
+
+
+def _default_internal_config() -> _MusicConfigInternal:
+    return MusicConfig().to_internal()
 
 
 def _apply_update(
@@ -904,13 +908,13 @@ async def _resolve_fallback(
     fallback_load: _ModelLoadState | None = None,
 ) -> _MusicConfigInternal | None:
     if fallback is None or fallback == "keep_last":
-        base = current or _MusicConfigInternal()
+        base = current or _default_internal_config()
         return _apply_update(base, update)
     if fallback == "none":
         return None
     if fallback == "embedding":
         if not isinstance(item.content, str):
-            base = current or _MusicConfigInternal()
+            base = current or _default_internal_config()
             return _apply_update(base, update)
         if fallback_load is not None:
             await fallback_load.ensure_loaded()
@@ -970,14 +974,14 @@ async def _resolve_target_async(
         case MusicConfig():
             target = item.to_internal()
         case _MusicConfigUpdateInternal():
-            base = current or _MusicConfigInternal()
+            base = current or _default_internal_config()
             target = (
                 base
                 if current is None and is_empty_update(item)
                 else merge_internal_config(base, item)
             )
         case MusicConfigUpdate():
-            base = current or _MusicConfigInternal()
+            base = current or _default_internal_config()
             internal_update = item.to_internal()
             target = (
                 base

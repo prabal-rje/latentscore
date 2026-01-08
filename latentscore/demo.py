@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / ".examples"
 EXTERNAL_MODEL = "external:gemini/gemini-3-flash-preview"
 EXTERNAL_API_ENV = "GEMINI_API_KEY"
+# EXTERNAL_MODEL = "external:openrouter/mistralai/voxtral-small-24b-2507"
+# EXTERNAL_API_ENV = "OPENROUTER_API_KEY"
 
 
 def _live_playlist_generator() -> Iterable[ls.Streamable]:
@@ -156,7 +158,9 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.external:
         ran = False
-        api_key = args.api_key.strip() if args.api_key else ""
+        api_key = (
+            args.api_key.strip() if args.api_key else os.environ.get(args.api_env, "").strip() or ""
+        )
         if api_key:
             _demo_external_with_key(args.external_model, api_key, save=args.save)
             ran = True
