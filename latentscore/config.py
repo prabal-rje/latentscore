@@ -3,12 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Literal, Mapping, Optional, TypeVar, cast
 
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    ValidationError,
-    model_validator,
-)
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .errors import InvalidConfigError
 
@@ -44,6 +39,7 @@ PadStyle = Literal[
     "bright_open",
 ]
 MelodyStyle = Literal[
+    "procedural",
     "contemplative",
     "rising",
     "falling",
@@ -305,7 +301,6 @@ class _MusicConfigInternal(BaseModel):
     harmony_style: HarmonyStyle = "auto"
     chord_change_bars: int = 1
     chord_extensions: ChordExtensions = "triads"
-    seed: int = 0
 
     model_config = ConfigDict(extra="ignore")
 
@@ -368,7 +363,6 @@ class MusicConfig(BaseModel):
     harmony_style: HarmonyStyle = "auto"
     chord_change_bars: int = 1
     chord_extensions: ChordExtensions = "triads"
-    seed: int = 0
 
     model_config = ConfigDict(extra="allow")
 
@@ -412,11 +406,173 @@ class MusicConfig(BaseModel):
             harmony_style=self.harmony_style,
             chord_change_bars=self.chord_change_bars,
             chord_extensions=self.chord_extensions,
-            seed=self.seed,
         )
 
 
 SynthConfig = _MusicConfigInternal
+
+
+_PROMPT_DESC: dict[str, str] = {
+    "justification": (
+        "Explain the sonic reasoning for the choices. Mention vibe decomposition, sonic "
+        "translation, coherence check, and which examples guided the selection."
+    ),
+    "config": "Music configuration that matches the requested vibe.",
+    "tempo": "Tempo label controlling overall speed and energy.",
+    "root": "Root note of the scale.",
+    "mode": "Scale mode that shapes the emotional color.",
+    "brightness": "Filter brightness / spectral tilt label.",
+    "space": "Reverb/room size label.",
+    "density": "Layer count indicating overall thickness.",
+    "bass": "Bass style or movement pattern.",
+    "pad": "Pad texture and harmonic bed style.",
+    "melody": "Melody style or contour.",
+    "rhythm": "Percussion pattern style (or none).",
+    "texture": "Background texture or noise layer.",
+    "accent": "Sparse accent sound type.",
+    "motion": "Modulation/LFO rate label.",
+    "attack": "Transient sharpness label.",
+    "stereo": "Stereo width label.",
+    "depth": "Whether to add sub-bass depth.",
+    "echo": "Delay amount label.",
+    "human": "Timing/pitch looseness label.",
+    "grain": "Oscillator character (clean/warm/gritty).",
+    "melody_engine": "Melody generation mode (procedural or pattern).",
+    "phrase_len_bars": "Phrase length in bars for procedural melody.",
+    "melody_density": "Melody note density from 0.0 (sparse) to 1.0 (busy).",
+    "syncopation": "Offbeat preference from 0.0 (straight) to 1.0 (heavy).",
+    "swing": "Swing amount from 0.0 (none) to 1.0 (heavy).",
+    "motif_repeat_prob": "Probability of motif repetition (0.0 to 1.0).",
+    "step_bias": "Preference for stepwise motion (0.0 leapy to 1.0 stepwise).",
+    "chromatic_prob": "Chance of chromatic tones (0.0 to 1.0).",
+    "cadence_strength": "Cadence emphasis from 0.0 (weak) to 1.0 (strong).",
+    "register_min_oct": "Lowest melody octave (integer).",
+    "register_max_oct": "Highest melody octave (integer).",
+    "tension_curve": "Tension shape across the phrase.",
+    "harmony_style": "Harmony progression style.",
+    "chord_change_bars": "Bars per chord change.",
+    "chord_extensions": "Chord color/extension level.",
+}
+
+_PROMPT_UNIT_MIN = 0.0
+_PROMPT_UNIT_MAX = 1.0
+_PROMPT_PHRASE_MIN = 1
+_PROMPT_PHRASE_MAX = 16
+_PROMPT_REGISTER_MIN = 1
+_PROMPT_REGISTER_MAX = 8
+_PROMPT_CHORD_CHANGE_MIN = 1
+_PROMPT_CHORD_CHANGE_MAX = 16
+
+
+class MusicConfigPrompt(BaseModel):
+    """Prompt-only schema matching MusicConfig without defaults."""
+
+    tempo: TempoLabel = Field(description=_PROMPT_DESC["tempo"])
+    root: RootNote = Field(description=_PROMPT_DESC["root"])
+    mode: ModeName = Field(description=_PROMPT_DESC["mode"])
+    brightness: BrightnessLabel = Field(description=_PROMPT_DESC["brightness"])
+    space: SpaceLabel = Field(description=_PROMPT_DESC["space"])
+    density: DensityLevel = Field(ge=2, le=6, description=_PROMPT_DESC["density"])
+
+    bass: BassStyle = Field(description=_PROMPT_DESC["bass"])
+    pad: PadStyle = Field(description=_PROMPT_DESC["pad"])
+    melody: MelodyStyle = Field(description=_PROMPT_DESC["melody"])
+    rhythm: RhythmStyle = Field(description=_PROMPT_DESC["rhythm"])
+    texture: TextureStyle = Field(description=_PROMPT_DESC["texture"])
+    accent: AccentStyle = Field(description=_PROMPT_DESC["accent"])
+
+    motion: MotionLabel = Field(description=_PROMPT_DESC["motion"])
+    attack: AttackStyle = Field(description=_PROMPT_DESC["attack"])
+    stereo: StereoLabel = Field(description=_PROMPT_DESC["stereo"])
+    depth: bool = Field(description=_PROMPT_DESC["depth"])
+    echo: EchoLabel = Field(description=_PROMPT_DESC["echo"])
+    human: HumanFeelLabel = Field(description=_PROMPT_DESC["human"])
+    grain: GrainStyle = Field(description=_PROMPT_DESC["grain"])
+
+    melody_engine: MelodyEngine = Field(description=_PROMPT_DESC["melody_engine"])
+    phrase_len_bars: int = Field(
+        ge=_PROMPT_PHRASE_MIN,
+        le=_PROMPT_PHRASE_MAX,
+        description=_PROMPT_DESC["phrase_len_bars"],
+    )
+    melody_density: float = Field(
+        ge=_PROMPT_UNIT_MIN,
+        le=_PROMPT_UNIT_MAX,
+        description=_PROMPT_DESC["melody_density"],
+    )
+    syncopation: float = Field(
+        ge=_PROMPT_UNIT_MIN,
+        le=_PROMPT_UNIT_MAX,
+        description=_PROMPT_DESC["syncopation"],
+    )
+    swing: float = Field(
+        ge=_PROMPT_UNIT_MIN,
+        le=_PROMPT_UNIT_MAX,
+        description=_PROMPT_DESC["swing"],
+    )
+    motif_repeat_prob: float = Field(
+        ge=_PROMPT_UNIT_MIN,
+        le=_PROMPT_UNIT_MAX,
+        description=_PROMPT_DESC["motif_repeat_prob"],
+    )
+    step_bias: float = Field(
+        ge=_PROMPT_UNIT_MIN,
+        le=_PROMPT_UNIT_MAX,
+        description=_PROMPT_DESC["step_bias"],
+    )
+    chromatic_prob: float = Field(
+        ge=_PROMPT_UNIT_MIN,
+        le=_PROMPT_UNIT_MAX,
+        description=_PROMPT_DESC["chromatic_prob"],
+    )
+    cadence_strength: float = Field(
+        ge=_PROMPT_UNIT_MIN,
+        le=_PROMPT_UNIT_MAX,
+        description=_PROMPT_DESC["cadence_strength"],
+    )
+    register_min_oct: int = Field(
+        ge=_PROMPT_REGISTER_MIN,
+        le=_PROMPT_REGISTER_MAX,
+        description=_PROMPT_DESC["register_min_oct"],
+    )
+    register_max_oct: int = Field(
+        ge=_PROMPT_REGISTER_MIN,
+        le=_PROMPT_REGISTER_MAX,
+        description=_PROMPT_DESC["register_max_oct"],
+    )
+    tension_curve: TensionCurve = Field(description=_PROMPT_DESC["tension_curve"])
+    harmony_style: HarmonyStyle = Field(description=_PROMPT_DESC["harmony_style"])
+    chord_change_bars: int = Field(
+        ge=_PROMPT_CHORD_CHANGE_MIN,
+        le=_PROMPT_CHORD_CHANGE_MAX,
+        description=_PROMPT_DESC["chord_change_bars"],
+    )
+    chord_extensions: ChordExtensions = Field(description=_PROMPT_DESC["chord_extensions"])
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class MusicConfigPromptPayload(BaseModel):
+    """LLM payload that includes a justification and a config."""
+
+    justification: str = Field(description=_PROMPT_DESC["justification"])
+    config: MusicConfigPrompt = Field(description=_PROMPT_DESC["config"])
+
+    model_config = ConfigDict(extra="forbid")
+
+
+def _assert_prompt_schema_parity() -> None:
+    prompt_fields = set(MusicConfigPrompt.model_fields)
+    config_fields = set(MusicConfig.model_fields)
+    excluded = {"schema_version"}
+    if prompt_fields == (config_fields - excluded):
+        return
+    missing = sorted(config_fields - prompt_fields - excluded)
+    extra = sorted(prompt_fields - config_fields)
+    raise AssertionError(f"MusicConfigPrompt mismatch: missing={missing!r}, extra={extra!r}")
+
+
+_assert_prompt_schema_parity()
 
 
 class _MusicConfigUpdateInternal(BaseModel):
@@ -459,7 +615,6 @@ class _MusicConfigUpdateInternal(BaseModel):
     harmony_style: Optional[HarmonyStyle] = None
     chord_change_bars: Optional[int] = None
     chord_extensions: Optional[ChordExtensions] = None
-    seed: Optional[int] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -504,7 +659,6 @@ class MusicConfigUpdate(BaseModel):
     harmony_style: Optional[HarmonyStyle] = None
     chord_change_bars: Optional[int] = None
     chord_extensions: Optional[ChordExtensions] = None
-    seed: Optional[int] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -544,7 +698,6 @@ class MusicConfigUpdate(BaseModel):
             harmony_style=self.harmony_style,
             chord_change_bars=self.chord_change_bars,
             chord_extensions=self.chord_extensions,
-            seed=self.seed,
         )
 
 

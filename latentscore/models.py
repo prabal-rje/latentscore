@@ -242,6 +242,30 @@ def build_expressive_prompt() -> str:
     return _EXPRESSIVE_PROMPT
 
 
+_LITELLM_PROMPT = "\n".join(
+    [
+        "Role:",
+        "You are a world-class music synthesis expert with deep music theory knowledge.",
+        "",
+        "Task:",
+        "- Given a vibe/mood description, generate ONE JSON payload with justification and config.",
+        "- Place justification before config in the JSON object.",
+        "- Use the source examples as guidance for value choices.",
+        "",
+        "Output requirements:",
+        "- Return only JSON (no markdown, no explanations).",
+        "- Use only the keys shown in the examples.",
+        "",
+        # "Few-shot examples:",
+        # LITELLM_FEW_SHOT_EXAMPLES.strip(),
+    ]
+)
+
+
+def build_litellm_prompt() -> str:
+    return _LITELLM_PROMPT
+
+
 class ExampleConfig(BaseModel):
     vibe: str
     config: MusicConfig

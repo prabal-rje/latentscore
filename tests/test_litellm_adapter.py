@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import warnings
 from types import SimpleNamespace
@@ -10,9 +11,18 @@ import litellm
 import pytest
 
 from latentscore import MusicConfig
+from latentscore.config import MusicConfigPromptPayload
 from latentscore.errors import ConfigGenerateError
-from latentscore.models import build_expressive_prompt
+from latentscore.models import build_litellm_prompt
 from latentscore.providers.litellm import LiteLLMAdapter, _safe_async_cleanup
+
+
+def _payload_json(overrides: dict[str, object] | None = None) -> str:
+    config = MusicConfig().model_dump(exclude={"schema_version", "seed"})
+    if overrides:
+        config.update(overrides)
+    payload = {"justification": "Sound choices explained.", "config": config}
+    return json.dumps(payload)
 
 
 @pytest.mark.asyncio
@@ -23,7 +33,7 @@ async def test_litellm_adapter_enforces_json(
 
     async def fake_acompletion(**kwargs: object) -> object:
         captured.update(kwargs)
-        message = SimpleNamespace(content="{}")
+        message = SimpleNamespace(content=_payload_json())
         choice = SimpleNamespace(message=message)
         return SimpleNamespace(choices=[choice])
 
@@ -32,11 +42,11 @@ async def test_litellm_adapter_enforces_json(
     adapter = LiteLLMAdapter(model="gemini/gemini-3-flash-preview")
     await adapter.generate("warm sunrise")
 
-    assert captured["response_format"] is MusicConfig
+    assert captured["response_format"] is MusicConfigPromptPayload
     messages = captured["messages"]
     assert isinstance(messages, list)
     assert messages[0]["role"] == "system"
-    assert messages[0]["content"] == build_expressive_prompt()
+    assert messages[0]["content"] == build_litellm_prompt()
 
 
 @pytest.mark.asyncio
@@ -47,7 +57,7 @@ async def test_litellm_kwargs_forwarded(
 
     async def fake_acompletion(**kwargs: object) -> object:
         captured.update(kwargs)
-        message = SimpleNamespace(content="{}")
+        message = SimpleNamespace(content=_payload_json())
         choice = SimpleNamespace(message=message)
         return SimpleNamespace(choices=[choice])
 
@@ -71,7 +81,7 @@ def test_litellm_adapter_reuses_loop_across_runs(
     async def fake_acompletion(**kwargs: object) -> object:
         _ = kwargs
         loop_refs.append(asyncio.get_running_loop())
-        message = SimpleNamespace(content="{}")
+        message = SimpleNamespace(content=_payload_json())
         choice = SimpleNamespace(message=message)
         return SimpleNamespace(choices=[choice])
 
@@ -109,13 +119,13 @@ async def test_litellm_adapter_repairs_json(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_acompletion(**kwargs: object) -> object:
-        message = SimpleNamespace(content='{"tempo":"slow",}')
+        message = SimpleNamespace(content='{"justification":"ok","config":{"tempo":"slow"},}')
         choice = SimpleNamespace(message=message)
         return SimpleNamespace(choices=[choice])
 
     def fake_repair_json(content: str) -> str:
         _ = content
-        return '{"tempo":"slow"}'
+        return _payload_json({"tempo": "slow"})
 
     monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
     monkeypatch.setattr(
@@ -124,6 +134,23 @@ async def test_litellm_adapter_repairs_json(
     )
 
     adapter = LiteLLMAdapter(model="external:gemini/gemini-3-flash-preview")
+    config = await adapter.generate("warm sunrise")
+
+    assert config.tempo == "slow"
+
+
+@pytest.mark.asyncio
+async def test_litellm_adapter_accepts_raw_music_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_acompletion(**kwargs: object) -> object:
+        message = SimpleNamespace(content='{"tempo":"slow"}')
+        choice = SimpleNamespace(message=message)
+        return SimpleNamespace(choices=[choice])
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+    adapter = LiteLLMAdapter(model="gemini/gemini-3-flash-preview")
     config = await adapter.generate("warm sunrise")
 
     assert config.tempo == "slow"

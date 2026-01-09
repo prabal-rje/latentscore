@@ -52,10 +52,12 @@ def _demo_live_from_generator() -> None:
 
 
 def _demo_external_with_key(model: str, api_key: str, *, save: bool) -> None:
+    print("HELLO CHAD THIS IS HERE!")
     audio = ls.render(
-        #"glass elevator through clouds",
-        #"8-bit mario the video game theme song",
-        "Cyberpunk rainy night in tokyo",
+        # "glass elevator through clouds",
+        # "8-bit mario the video game theme song",
+        # "Highly Cyberpunk style music",
+        "vinyl crackle midnight jazz",
         duration=30.0,
         model=ls.ExternalModelSpec(model=model, api_key=api_key),
     )

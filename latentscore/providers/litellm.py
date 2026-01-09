@@ -10,9 +10,9 @@ from typing import Any, Callable, Coroutine, Literal
 
 from pydantic import BaseModel, ValidationError
 
-from ..config import MusicConfig
+from ..config import MusicConfig, MusicConfigPromptPayload
 from ..errors import ConfigGenerateError, LLMInferenceError, ModelNotAvailableError
-from ..models import EXTERNAL_PREFIX, build_expressive_prompt
+from ..models import EXTERNAL_PREFIX, build_litellm_prompt
 
 _DEFAULT_TEMPERATURE = 0.0
 _atexit_guard_registered = False
@@ -222,7 +222,7 @@ class LiteLLMAdapter:
         litellm_kwargs: Mapping[str, Any] | None = None,
         temperature: float | None = None,
         system_prompt: str | None = None,
-        response_format: type[BaseModel] | None = MusicConfig,
+        response_format: type[BaseModel] | None = MusicConfigPromptPayload,
         reasoning_effort: ReasoningEffort | None = None,
     ) -> None:
         if model.startswith(EXTERNAL_PREFIX):
@@ -232,12 +232,12 @@ class LiteLLMAdapter:
         self._litellm_kwargs = dict(litellm_kwargs or {})
         self._temperature = temperature
         self._system_prompt = system_prompt
-        self._base_prompt = build_expressive_prompt()
+        self._base_prompt = build_litellm_prompt()
         self._response_format: type[BaseModel] | None = response_format
         self._reasoning_effort: ReasoningEffort | None = reasoning_effort
-        self._schema_str = ""
-        if self._response_format:
-            self._schema_str = f"<schema>{json.dumps(self._response_format.model_json_schema(), separators=(',', ':'))}</schema>"
+        # self._schema_str = ""
+        # if self._response_format:
+        #     self._schema_str = f"<schema>{json.dumps(self._response_format.model_json_schema(), separators=(',', ':'))}</schema>"
         if self._api_key is None:
             _LOGGER.debug("No API key provided; letting LiteLLM read from env vars.")
         invalid_keys = _RESERVED_LITELLM_KWARGS.intersection(self._litellm_kwargs)
@@ -292,9 +292,12 @@ class LiteLLMAdapter:
         messages.append(
             {
                 "role": "user",
-                "content": f"{self._schema_str}\n<vibe>{vibe}</vibe>\n<output>",
+                # "content": f"{self._schema_str}\n<vibe>{vibe}</vibe>\n<output>",
+                "content": f"<vibe>{vibe}</vibe>\n<output>",
             }
         )
+
+        print(json.dumps(messages, indent=2))
 
         request = _LiteLLMRequest(
             model=self._model,
@@ -322,12 +325,13 @@ class LiteLLMAdapter:
             if not isinstance(raw_content, str) or not raw_content.strip():
                 raise ConfigGenerateError("LiteLLM returned empty content")
             content = raw_content.strip()
-            return MusicConfig.model_validate_json(content)
+            print(self._parse_config_payload(content))
+            return self._parse_config_payload(content)
         except ValidationError as exc:
             extracted = _extract_json_payload(content)
             if extracted:
                 try:
-                    return MusicConfig.model_validate_json(extracted)
+                    return self._parse_config_payload(extracted)
                 except ValidationError:
                     _LOGGER.warning(
                         "LiteLLM returned invalid JSON after extraction.", exc_info=True
@@ -335,9 +339,18 @@ class LiteLLMAdapter:
             if repair_json is not None:
                 repaired = repair_json(content)
                 try:
-                    return MusicConfig.model_validate_json(repaired)
+                    return self._parse_config_payload(repaired)
                 except ValidationError:
                     _LOGGER.warning("LiteLLM returned invalid JSON after repair.", exc_info=True)
             snippet = _content_snippet(content) or "<empty>"
             _LOGGER.warning("LiteLLM returned invalid JSON: %s", snippet)
             raise ConfigGenerateError(f"LiteLLM returned non-JSON content: {snippet}") from exc
+
+    def _parse_config_payload(self, payload: str) -> MusicConfig:
+        if self._response_format is MusicConfigPromptPayload:
+            try:
+                wrapper = MusicConfigPromptPayload.model_validate_json(payload)
+            except ValidationError:
+                return MusicConfig.model_validate_json(payload)
+            return MusicConfig.model_validate(wrapper.config.model_dump())
+        return MusicConfig.model_validate_json(payload)

@@ -40,6 +40,40 @@ Maintaining strict type integrity is **required for all merges**.
 
 ---
 
+### Run Coding Style Checks
+
+**You MUST run the coding style checks** (`ruff check` and `ruff format --check`) every single time you change _any_ Python file to enforce a consistent and correct style.
+
+- Run the following commands from the project root AFTER ANY PYTHON FILE CHANGE, before any PR or commit:
+  ```bash
+  conda activate latentscore
+  ruff check .
+  ruff format --check .
+  ```
+- Do **not** ignore style errors unless you have a justified, documented reason and explicit sign-off.
+- For style issues you do not understand, consult Ruff documentation or ask for help.
+
+Passing style checks is **required for all merges**.
+
+---
+
+### Mandatory Coding Guideline Checks
+
+Every code contribution **MUST** adhere to these guidelines:
+
+- **Type Safety:** All new Python code must use explicit type annotations. Type check every change with `pyright`.
+- **Coding Style:** All Python code must follow the enforced style (`ruff check`, `ruff format`). Run style checks every change.
+- **No pass-through exceptions:** Never use a bare `except:` or `except Exception:` without at least logging the error. Always specify the exception type if known (`except ValueError as exc:`) and handle or log/re-raise.
+- **Avoid dataclasses:** Prefer [Pydantic](https://docs.pydantic.dev/) models for new or refactored data structures; avoid `dataclasses` module unless it is going to have performance implications (e.g. in compute intensive code)
+- **Pattern matching:** Prefer Python `match` statements over long `if`/`elif` chains and always add a `_` (“default”) case.
+- **Functional utilities:** Use `functools` and `itertools` for clarity and composability.
+- **Constant management:** Refactor all “magic constants” into named variables/constants in the nearest reasonable scope. For shared values, define in a central location and import as needed.
+- **Branching best practices:** Prefer `match` statements over multiple `if ... else` branches and always use a `_` (default) branch. Use early returns to avoid deep nesting.
+- **Type assertions before casting:** Use `assert` to check type assumptions before casting, e.g., `assert isinstance(obj, DesiredType)` before any cast.
+- **No duplicate logic:** Proactively scan the codebase for duplicate logic before adding new code; refactor or share helpers if similar logic exists elsewhere.
+
+---
+
 ### Write Plan First
 
 **You MUST always use the `writing-plans` skill** before executing any task.
@@ -124,3 +158,5 @@ This is NON-NEGOTIABLE. No exceptions.
 - Testing workflow examples: for quick spikes, drop assertions under an `if __name__ == "__main__":` or early-return block; for integrated pieces, run the main entrypoint with injected dependencies. Use `.inputs`/`.outputs` dirs for sample IO when present.
 - Docs hygiene: when behavior/tooling shifts, update all relevant Markdown (README, CONTRIBUTE, AGENTS, docs/templates) in the same change.
 - Examples: now live in `docs/examples.md` for quick reference.
+
+For all other guidance, defer to the Pyright, Ruff, and project defaults as enforced by `make check`.
