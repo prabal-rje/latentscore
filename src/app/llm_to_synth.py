@@ -95,6 +95,52 @@ class VibeConfig(BaseModel):
         description="Oscillator character. clean=digital, warm=analog, gritty=distorted"
     )
 
+    # Procedural melody + harmony knobs (optional; defaults work fine)
+    melody_engine: Literal["procedural", "pattern"] = Field(
+        default="procedural",
+        description="Which melody system to use. procedural=phrase-aware generator, pattern=legacy templates",
+    )
+    phrase_len_bars: Literal[2, 4, 8] = Field(
+        default=4, description="Phrase length for the procedural melody engine (in bars)"
+    )
+    melody_density: Literal["very_sparse", "sparse", "medium", "busy", "very_busy"] = Field(
+        default="medium", description="How note-dense the melody is (procedural engine)"
+    )
+    syncopation: Literal["straight", "light", "medium", "heavy"] = Field(
+        default="light", description="How much the melody favors offbeats (procedural engine)"
+    )
+    swing: Literal["none", "light", "medium", "heavy"] = Field(
+        default="none", description="Swing amount for 8th-note feel (procedural engine)"
+    )
+    motif_repeat: Literal["rare", "sometimes", "often"] = Field(
+        default="sometimes",
+        description="How often motifs repeat at phrase starts (procedural engine)",
+    )
+    step_vs_leap: Literal["step", "balanced", "leapy"] = Field(
+        default="balanced", description="Melodic motion character (procedural engine)"
+    )
+    chromatic: Literal["none", "light", "medium", "heavy"] = Field(
+        default="light", description="Chromatic approach-tone intensity (procedural engine)"
+    )
+    cadence: Literal["weak", "medium", "strong"] = Field(
+        default="medium", description="How strongly phrases resolve at the end (procedural engine)"
+    )
+    register: Literal["low", "mid", "high", "wide"] = Field(
+        default="mid", description="Melody register range (procedural engine)"
+    )
+    tension_curve: Literal["arc", "ramp", "waves"] = Field(
+        default="arc", description="Tension shape across a phrase (procedural engine)"
+    )
+    harmony: Literal["auto", "pop", "jazz", "cinematic", "ambient"] = Field(
+        default="auto", description="Chord progression family"
+    )
+    chord_change: Literal["very_slow", "slow", "medium", "fast"] = Field(
+        default="medium", description="How fast chords change (bars per chord)"
+    )
+    chord_extensions: Literal["triads", "sevenths", "lush"] = Field(
+        default="triads", description="Chord color / extensions (triads vs 7ths vs lush 9ths)"
+    )
+
 
 # Scored config: a single VibeConfig with a quality score (for single-call generation)
 class ScoredVibeConfig(BaseModel):
@@ -116,6 +162,28 @@ MOTION_MAP = {"static": 0.1, "slow": 0.3, "medium": 0.5, "fast": 0.7, "chaotic":
 STEREO_MAP = {"mono": 0.0, "narrow": 0.25, "medium": 0.5, "wide": 0.75, "ultra_wide": 1.0}
 ECHO_MAP = {"none": 0.0, "subtle": 0.25, "medium": 0.5, "heavy": 0.75, "infinite": 0.95}
 HUMAN_MAP = {"robotic": 0.0, "tight": 0.15, "natural": 0.3, "loose": 0.5, "drunk": 0.8}
+
+# Procedural melody + harmony mappings (categorical -> numeric)
+MELODY_DENSITY_MAP = {
+    "very_sparse": 0.15,
+    "sparse": 0.30,
+    "medium": 0.50,
+    "busy": 0.70,
+    "very_busy": 0.85,
+}
+SYNCOPATION_MAP = {"straight": 0.0, "light": 0.2, "medium": 0.5, "heavy": 0.8}
+SWING_MAP = {"none": 0.0, "light": 0.2, "medium": 0.5, "heavy": 0.8}
+MOTIF_REPEAT_MAP = {"rare": 0.2, "sometimes": 0.5, "often": 0.8}
+STEP_BIAS_MAP = {"step": 0.9, "balanced": 0.7, "leapy": 0.4}
+CHROMATIC_MAP = {"none": 0.0, "light": 0.05, "medium": 0.12, "heavy": 0.25}
+CADENCE_MAP = {"weak": 0.3, "medium": 0.6, "strong": 0.9}
+REGISTER_MAP = {
+    "low": (3, 5),
+    "mid": (4, 6),
+    "high": (5, 7),
+    "wide": (3, 7),
+}
+CHORD_CHANGE_BARS_MAP = {"very_slow": 4, "slow": 2, "medium": 1, "fast": 1}
 
 FEW_SHOT_EXAMPLES = """
 Example 1:
@@ -726,6 +794,21 @@ def vibe_to_multiconfig_with_reasoning(
             "echo": ECHO_MAP[c.echo],
             "human": HUMAN_MAP[c.human],
             "grain": c.grain,
+            "melody_engine": c.melody_engine,
+            "phrase_len_bars": c.phrase_len_bars,
+            "melody_density": MELODY_DENSITY_MAP[c.melody_density],
+            "syncopation": SYNCOPATION_MAP[c.syncopation],
+            "swing": SWING_MAP[c.swing],
+            "motif_repeat_prob": MOTIF_REPEAT_MAP[c.motif_repeat],
+            "step_bias": STEP_BIAS_MAP[c.step_vs_leap],
+            "chromatic_prob": CHROMATIC_MAP[c.chromatic],
+            "cadence_strength": CADENCE_MAP[c.cadence],
+            "register_min_oct": REGISTER_MAP[c.register][0],
+            "register_max_oct": REGISTER_MAP[c.register][1],
+            "tension_curve": c.tension_curve,
+            "harmony_style": c.harmony,
+            "chord_change_bars": CHORD_CHANGE_BARS_MAP[c.chord_change],
+            "chord_extensions": c.chord_extensions,
         }
         configs.append((cfg, c.justification))
         scores.append(sc.score)

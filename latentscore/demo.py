@@ -10,8 +10,10 @@ from latentscore.playback import play_stream
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / ".examples"
-EXTERNAL_MODEL = "external:gemini/gemini-3-flash-preview"
-EXTERNAL_API_ENV = "GEMINI_API_KEY"
+# EXTERNAL_MODEL = "external:gemini/gemini-3-flash-preview"
+# EXTERNAL_API_ENV = "GEMINI_API_KEY"
+EXTERNAL_MODEL = "external:anthropic/claude-opus-4-5-20251101"
+EXTERNAL_API_ENV = "ANTHROPIC_API_KEY"
 # EXTERNAL_MODEL = "external:openrouter/mistralai/voxtral-small-24b-2507"
 # EXTERNAL_API_ENV = "OPENROUTER_API_KEY"
 
@@ -51,8 +53,10 @@ def _demo_live_from_generator() -> None:
 
 def _demo_external_with_key(model: str, api_key: str, *, save: bool) -> None:
     audio = ls.render(
-        "glass elevator through clouds",
-        duration=6.0,
+        #"glass elevator through clouds",
+        #"8-bit mario the video game theme song",
+        "Cyberpunk rainy night in tokyo",
+        duration=30.0,
         model=ls.ExternalModelSpec(model=model, api_key=api_key),
     )
     audio.play()

@@ -94,6 +94,10 @@ AccentStyle = Literal[
 ]
 AttackStyle = Literal["soft", "medium", "sharp"]
 GrainStyle = Literal["clean", "warm", "gritty"]
+MelodyEngine = Literal["pattern", "procedural"]
+TensionCurve = Literal["arc", "ramp", "waves"]
+HarmonyStyle = Literal["auto", "pop", "jazz", "cinematic", "ambient"]
+ChordExtensions = Literal["triads", "sevenths", "lush"]
 
 
 T = TypeVar("T")
@@ -286,6 +290,23 @@ class _MusicConfigInternal(BaseModel):
     human: float = 0.0
     grain: GrainStyle = "clean"
 
+    melody_engine: MelodyEngine = "pattern"
+    phrase_len_bars: int = 4
+    melody_density: float = 0.45
+    syncopation: float = 0.20
+    swing: float = 0.0
+    motif_repeat_prob: float = 0.50
+    step_bias: float = 0.75
+    chromatic_prob: float = 0.05
+    cadence_strength: float = 0.65
+    register_min_oct: int = 4
+    register_max_oct: int = 6
+    tension_curve: TensionCurve = "arc"
+    harmony_style: HarmonyStyle = "auto"
+    chord_change_bars: int = 1
+    chord_extensions: ChordExtensions = "triads"
+    seed: int = 0
+
     model_config = ConfigDict(extra="ignore")
 
     @model_validator(mode="before")
@@ -332,6 +353,23 @@ class MusicConfig(BaseModel):
     human: HumanFeelLabel = "robotic"
     grain: GrainStyle = "clean"
 
+    melody_engine: MelodyEngine = "pattern"
+    phrase_len_bars: int = 4
+    melody_density: float = 0.45
+    syncopation: float = 0.20
+    swing: float = 0.0
+    motif_repeat_prob: float = 0.50
+    step_bias: float = 0.75
+    chromatic_prob: float = 0.05
+    cadence_strength: float = 0.65
+    register_min_oct: int = 4
+    register_max_oct: int = 6
+    tension_curve: TensionCurve = "arc"
+    harmony_style: HarmonyStyle = "auto"
+    chord_change_bars: int = 1
+    chord_extensions: ChordExtensions = "triads"
+    seed: int = 0
+
     model_config = ConfigDict(extra="allow")
 
     @property
@@ -359,6 +397,22 @@ class MusicConfig(BaseModel):
             echo=echo_to_float(self.echo),
             human=human_to_float(self.human),
             grain=self.grain,
+            melody_engine=self.melody_engine,
+            phrase_len_bars=self.phrase_len_bars,
+            melody_density=self.melody_density,
+            syncopation=self.syncopation,
+            swing=self.swing,
+            motif_repeat_prob=self.motif_repeat_prob,
+            step_bias=self.step_bias,
+            chromatic_prob=self.chromatic_prob,
+            cadence_strength=self.cadence_strength,
+            register_min_oct=self.register_min_oct,
+            register_max_oct=self.register_max_oct,
+            tension_curve=self.tension_curve,
+            harmony_style=self.harmony_style,
+            chord_change_bars=self.chord_change_bars,
+            chord_extensions=self.chord_extensions,
+            seed=self.seed,
         )
 
 
@@ -390,6 +444,23 @@ class _MusicConfigUpdateInternal(BaseModel):
     human: Optional[float] = None
     grain: Optional[GrainStyle] = None
 
+    melody_engine: Optional[MelodyEngine] = None
+    phrase_len_bars: Optional[int] = None
+    melody_density: Optional[float] = None
+    syncopation: Optional[float] = None
+    swing: Optional[float] = None
+    motif_repeat_prob: Optional[float] = None
+    step_bias: Optional[float] = None
+    chromatic_prob: Optional[float] = None
+    cadence_strength: Optional[float] = None
+    register_min_oct: Optional[int] = None
+    register_max_oct: Optional[int] = None
+    tension_curve: Optional[TensionCurve] = None
+    harmony_style: Optional[HarmonyStyle] = None
+    chord_change_bars: Optional[int] = None
+    chord_extensions: Optional[ChordExtensions] = None
+    seed: Optional[int] = None
+
     model_config = ConfigDict(extra="forbid")
 
 
@@ -418,6 +489,23 @@ class MusicConfigUpdate(BaseModel):
     human: Optional[HumanFeelLabel] = None
     grain: Optional[GrainStyle] = None
 
+    melody_engine: Optional[MelodyEngine] = None
+    phrase_len_bars: Optional[int] = None
+    melody_density: Optional[float] = None
+    syncopation: Optional[float] = None
+    swing: Optional[float] = None
+    motif_repeat_prob: Optional[float] = None
+    step_bias: Optional[float] = None
+    chromatic_prob: Optional[float] = None
+    cadence_strength: Optional[float] = None
+    register_min_oct: Optional[int] = None
+    register_max_oct: Optional[int] = None
+    tension_curve: Optional[TensionCurve] = None
+    harmony_style: Optional[HarmonyStyle] = None
+    chord_change_bars: Optional[int] = None
+    chord_extensions: Optional[ChordExtensions] = None
+    seed: Optional[int] = None
+
     model_config = ConfigDict(extra="forbid")
 
     def to_internal(self) -> _MusicConfigUpdateInternal:
@@ -441,6 +529,22 @@ class MusicConfigUpdate(BaseModel):
             echo=_optional_map(self.echo, echo_to_float),
             human=_optional_map(self.human, human_to_float),
             grain=self.grain,
+            melody_engine=self.melody_engine,
+            phrase_len_bars=self.phrase_len_bars,
+            melody_density=self.melody_density,
+            syncopation=self.syncopation,
+            swing=self.swing,
+            motif_repeat_prob=self.motif_repeat_prob,
+            step_bias=self.step_bias,
+            chromatic_prob=self.chromatic_prob,
+            cadence_strength=self.cadence_strength,
+            register_min_oct=self.register_min_oct,
+            register_max_oct=self.register_max_oct,
+            tension_curve=self.tension_curve,
+            harmony_style=self.harmony_style,
+            chord_change_bars=self.chord_change_bars,
+            chord_extensions=self.chord_extensions,
+            seed=self.seed,
         )
 
 
