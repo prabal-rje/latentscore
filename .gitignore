@@ -50,5 +50,6 @@ dist/
 .codex/*
 !.codex/setup.sh
 **/repomix-output.xml
+**/repomix-output.md
 docs/plans/**/*.md
 
