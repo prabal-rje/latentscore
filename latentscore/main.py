@@ -39,7 +39,7 @@ from .models import (
     resolve_model,
 )
 from .spinner import Spinner, render_error
-from .synth import MusicConfig as SynthConfig
+from .config import SynthConfig
 from .synth import assemble, interpolate_configs
 
 StreamContent = str | ConfigInput | UpdateInput
@@ -494,31 +494,11 @@ class _ModelLoadState(BaseModel):
 
 
 def _to_synth_config(config: _MusicConfigInternal) -> SynthConfig:
-    return SynthConfig(
-        tempo=config.tempo,
-        root=config.root,
-        mode=config.mode,
-        brightness=config.brightness,
-        space=config.space,
-        density=config.density,
-        bass=config.bass,
-        pad=config.pad,
-        melody=config.melody,
-        rhythm=config.rhythm,
-        texture=config.texture,
-        accent=config.accent,
-        motion=config.motion,
-        attack=config.attack,
-        stereo=config.stereo,
-        depth=config.depth,
-        echo=config.echo,
-        human=config.human,
-        grain=config.grain,
-    )
+    return config
 
 
 def _from_synth_config(config: SynthConfig) -> _MusicConfigInternal:
-    return _MusicConfigInternal(**config.model_dump())
+    return config
 
 
 def _default_internal_config() -> _MusicConfigInternal:

@@ -38,7 +38,7 @@ from .config import (
     TextureStyle,
 )
 from .config import (
-    SynthConfig as MusicConfig,
+    SynthConfig,
 )
 
 # =============================================================================
@@ -521,7 +521,7 @@ def _tension_value(curve: str, x: float) -> float:
 
 
 def _iter_chord_segments(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     harmony: HarmonyPlan | None,
 ) -> Iterable[tuple[float, float, int]]:
@@ -569,28 +569,28 @@ def _chord_tones_ascending(
     return tuple(tones)
 
 
-def _attack_mult(config: MusicConfig) -> float:
+def _attack_mult(config: SynthConfig) -> float:
     return ATTACK_MULT.get(config.attack, 1.0)
 
 
-def _osc_type(config: MusicConfig) -> str:
+def _osc_type(config: SynthConfig) -> str:
     return GRAIN_OSC.get(config.grain, "sine")
 
 
-def _echo_mult(config: MusicConfig) -> float:
+def _echo_mult(config: SynthConfig) -> float:
     return config.echo / 0.5
 
 
-def _bpm(config: MusicConfig) -> float:
+def _bpm(config: SynthConfig) -> float:
     t = float(np.clip(config.tempo, 0.0, 1.0))
     return 55.0 + 110.0 * t
 
 
-def _seconds_per_beat(config: MusicConfig) -> float:
+def _seconds_per_beat(config: SynthConfig) -> float:
     return 60.0 / _bpm(config)
 
 
-def _beats_total(config: MusicConfig, duration: float) -> float:
+def _beats_total(config: SynthConfig, duration: float) -> float:
     return duration / _seconds_per_beat(config)
 
 
@@ -599,7 +599,7 @@ def _semitone_from_degree(mode: ModeName, degree: int) -> int:
     return int(intervals[degree % len(intervals)] + (12 * (degree // len(intervals))))
 
 
-def _scale_freq(config: MusicConfig, degree: int, octave: int = 4) -> float:
+def _scale_freq(config: SynthConfig, degree: int, octave: int = 4) -> float:
     semitone = _semitone_from_degree(config.mode, degree)
     return freq_from_note(config.root, semitone, octave)
 
@@ -627,7 +627,7 @@ def _chord_root_degree_at_beat(beat: float, harmony: HarmonyPlan | None) -> int:
 
 
 PatternFn: TypeAlias = Callable[
-    [MusicConfig, float, HarmonyPlan | None, MelodyPolicy | None, np.random.Generator],
+    [SynthConfig, float, HarmonyPlan | None, MelodyPolicy | None, np.random.Generator],
     FloatArray,
 ]
 
@@ -638,7 +638,7 @@ PatternFn: TypeAlias = Callable[
 
 
 def bass_drone(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -672,7 +672,7 @@ def bass_drone(
 
 
 def bass_sustained(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -710,7 +710,7 @@ def bass_sustained(
 
 
 def bass_pulsing(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -754,7 +754,7 @@ def bass_pulsing(
 
 
 def bass_walking(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -797,7 +797,7 @@ def bass_walking(
 
 
 def bass_fifth_drone(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -830,7 +830,7 @@ def bass_fifth_drone(
 
 
 def bass_sub_pulse(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -892,7 +892,7 @@ BASS_PATTERNS: Mapping[BassStyle, PatternFn] = MappingProxyType(
 
 
 def pad_warm_slow(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -933,7 +933,7 @@ def pad_warm_slow(
 
 
 def pad_dark_sustained(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -960,7 +960,7 @@ def pad_dark_sustained(
 
 
 def pad_cinematic(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -996,7 +996,7 @@ def pad_cinematic(
 
 
 def pad_thin_high(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -1025,7 +1025,7 @@ def pad_thin_high(
 
 
 def pad_ambient_drift(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -1060,7 +1060,7 @@ def pad_ambient_drift(
 
 
 def pad_stacked_fifths(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -1110,7 +1110,7 @@ PAD_PATTERNS: Mapping[PadStyle, PatternFn] = MappingProxyType(
 
 def _resolve_melody_policy(
     policy: MelodyPolicy | None,
-    config: MusicConfig,
+    config: SynthConfig,
 ) -> MelodyPolicy:
     """Return the active MelodyPolicy with safety clamps."""
     base = policy or build_melody_policy(config)
@@ -1214,7 +1214,7 @@ def _choose_anchor_pitch(
 
 
 def _generate_procedural_melody_events(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     harmony: HarmonyPlan | None,
     melody_policy: MelodyPolicy | None,
@@ -1435,7 +1435,7 @@ def _generate_procedural_melody_events(
 
 
 def melody_procedural(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     harmony: HarmonyPlan | None,
     melody_policy: MelodyPolicy | None,
@@ -1475,7 +1475,7 @@ def melody_procedural(
 
 
 def melody_contemplative(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -1514,7 +1514,7 @@ def melody_contemplative(
 
 
 def melody_rising(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -1553,7 +1553,7 @@ def melody_rising(
 
 
 def melody_falling(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -1592,7 +1592,7 @@ def melody_falling(
 
 
 def melody_minimal(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -1631,7 +1631,7 @@ def melody_minimal(
 
 
 def melody_ornamental(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -1679,7 +1679,7 @@ def melody_ornamental(
 
 
 def melody_arp(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -1736,7 +1736,7 @@ MELODY_PATTERNS: Mapping[str, PatternFn] = MappingProxyType(
 
 
 def rhythm_none(
-    _config: MusicConfig,
+    _config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -1747,7 +1747,7 @@ def rhythm_none(
 
 
 def rhythm_minimal(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -1783,7 +1783,7 @@ def rhythm_minimal(
 
 
 def rhythm_heartbeat(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -1816,7 +1816,7 @@ def rhythm_heartbeat(
 
 
 def rhythm_soft_four(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -1849,7 +1849,7 @@ def rhythm_soft_four(
 
 
 def rhythm_hats_only(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -1880,7 +1880,7 @@ def rhythm_hats_only(
 
 
 def rhythm_electronic(
-    _config: MusicConfig,
+    _config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -1939,7 +1939,7 @@ RHYTHM_PATTERNS: Mapping[RhythmStyle, PatternFn] = MappingProxyType(
 
 
 def texture_none(
-    _config: MusicConfig,
+    _config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -1950,7 +1950,7 @@ def texture_none(
 
 
 def texture_shimmer(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -1984,7 +1984,7 @@ def texture_shimmer(
 
 
 def texture_shimmer_slow(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -2017,7 +2017,7 @@ def texture_shimmer_slow(
 
 
 def texture_vinyl_crackle(
-    _config: MusicConfig,
+    _config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -2049,7 +2049,7 @@ def texture_vinyl_crackle(
 
 
 def texture_breath(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -2078,7 +2078,7 @@ def texture_breath(
 
 
 def texture_stars(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -2136,7 +2136,7 @@ TEXTURE_PATTERNS: Mapping[TextureStyle, PatternFn] = MappingProxyType(
 
 
 def accent_none(
-    _config: MusicConfig,
+    _config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -2147,7 +2147,7 @@ def accent_none(
 
 
 def accent_bells(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -2186,7 +2186,7 @@ def accent_bells(
 
 
 def accent_pluck(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -2223,7 +2223,7 @@ def accent_pluck(
 
 
 def accent_chime(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
@@ -2282,7 +2282,7 @@ ACCENT_PATTERNS: Mapping[AccentStyle, PatternFn] = MappingProxyType(
 )
 
 
-def build_melody_policy(config: MusicConfig) -> MelodyPolicy:
+def build_melody_policy(config: SynthConfig) -> MelodyPolicy:
     """Create a MelodyPolicy from config fields."""
     return MelodyPolicy(
         phrase_len_bars=int(max(1, min(16, config.phrase_len_bars))),
@@ -2300,7 +2300,7 @@ def build_melody_policy(config: MusicConfig) -> MelodyPolicy:
 
 
 def build_harmony_plan(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float,
     rng: np.random.Generator,
 ) -> HarmonyPlan:
@@ -2396,7 +2396,7 @@ def build_harmony_plan(
 
 
 def assemble(
-    config: MusicConfig,
+    config: SynthConfig,
     duration: float = 16.0,
     normalize: bool = True,
     rng: np.random.Generator | None = None,
@@ -2407,7 +2407,7 @@ def assemble(
     This is the core function that converts a config into audio.
 
     Args:
-        config: MusicConfig object
+        config: SynthConfig object
         duration: Duration in seconds
         normalize: If True, maximizes volume. Set False for automation chunks
                    to preserve relative dynamics.
@@ -2467,12 +2467,12 @@ def assemble(
     return output
 
 
-def config_to_audio(config: MusicConfig, output_path: str, duration: float = 16.0) -> str:
+def config_to_audio(config: SynthConfig, output_path: str, duration: float = 16.0) -> str:
     """
-    Convert a MusicConfig to an audio file.
+    Convert a SynthConfig to an audio file.
 
     Args:
-        config: MusicConfig object
+        config: SynthConfig object
         output_path: Path to save the WAV file
         duration: Duration in seconds
 
@@ -2502,7 +2502,7 @@ def dict_to_audio(
     Returns:
         Path to the saved file
     """
-    config = MusicConfig.from_dict(config_dict)
+    config = SynthConfig.from_dict(config_dict)
     return config_to_audio(config, output_path, duration)
 
 
@@ -2521,7 +2521,7 @@ def dict_to_audio(
 #     vibe_lower = vibe.lower()
 
 #     # Simple keyword-based config generation
-#     config = MusicConfig()
+#     config = SynthConfig()
 
 #     # Root/mode selection
 #     if any(w in vibe_lower for w in ("dark", "sad", "night", "mysterious")):
@@ -2606,13 +2606,13 @@ def _clamp_density(value: float) -> DensityLevel:
             return 2 if raw < 2 else 6
 
 
-def interpolate_configs(config_a: MusicConfig, config_b: MusicConfig, t: float) -> MusicConfig:
+def interpolate_configs(config_a: SynthConfig, config_b: SynthConfig, t: float) -> SynthConfig:
     """
     Interpolate between two configs.
     t=0.0 → config_a
     t=1.0 → config_b
     """
-    return MusicConfig(
+    return SynthConfig(
         tempo=lerp(config_a.tempo, config_b.tempo, t),
         root=config_a.root if t < 0.5 else config_b.root,
         mode=config_a.mode if t < 0.5 else config_b.mode,
@@ -2653,7 +2653,7 @@ def interpolate_configs(config_a: MusicConfig, config_b: MusicConfig, t: float) 
 
 
 def morph_audio(
-    config_a: MusicConfig, config_b: MusicConfig, duration: float = 60.0, segments: int = 8
+    config_a: SynthConfig, config_b: SynthConfig, duration: float = 60.0, segments: int = 8
 ) -> FloatArray:
     """
     Generate audio that morphs from config_a to config_b over duration.
@@ -2699,7 +2699,7 @@ def crossfade(audio_a: FloatArray, audio_b: FloatArray, crossfade_samples: int) 
     return result
 
 
-def transition(config_a: MusicConfig, config_b: MusicConfig, duration: float = 60.0) -> FloatArray:
+def transition(config_a: SynthConfig, config_b: SynthConfig, duration: float = 60.0) -> FloatArray:
     """Generate with crossfade transition."""
     # Don't normalize individual tracks — normalize after crossfade
     audio_a = assemble(config_a, duration, normalize=False)
@@ -2719,8 +2719,8 @@ def transition(config_a: MusicConfig, config_b: MusicConfig, duration: float = 6
 
 
 def generate_tween_with_automation(
-    config_a: MusicConfig,
-    config_b: MusicConfig,
+    config_a: SynthConfig,
+    config_b: SynthConfig,
     duration: float = 120.0,
     chunk_seconds: float = 2.0,
     overlap_seconds: float = 0.05,
@@ -2901,7 +2901,7 @@ if __name__ == "__main__":
         print(f"\n{'=' * 60}")
         print(f"Vibe: {vibe}")
         print("=" * 60)
-        config = MusicConfig.from_dict(config_dict)
+        config = SynthConfig.from_dict(config_dict)
         print(json.dumps(config_dict, indent=2))
         config_to_audio(config, fname, duration=20.0)
         print(f"   Saved: {fname}")
@@ -2915,7 +2915,7 @@ if __name__ == "__main__":
 
 #     # Example 1: Direct config
 #     print("\n1. Generating from direct config (Indian Wedding)...")
-#     config = MusicConfig(
+#     config = SynthConfig(
 #         tempo=0.36,
 #         root="d",
 #         mode="dorian",
@@ -2979,7 +2979,7 @@ if __name__ == "__main__":
 #     # Example 4: Morph between two configs
 #     print("\n4. Generating morph (Morning → Evening)...")
 
-#     morning = MusicConfig(
+#     morning = SynthConfig(
 #         tempo=0.30,
 #         root="c",
 #         mode="major",
@@ -2993,7 +2993,7 @@ if __name__ == "__main__":
 #         echo=0.7,
 #     )
 
-#     evening = MusicConfig(
+#     evening = SynthConfig(
 #         tempo=0.42,
 #         root="a",
 #         mode="minor",
