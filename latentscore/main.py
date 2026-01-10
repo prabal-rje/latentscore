@@ -21,6 +21,7 @@ from .config import (
     ConfigInput,
     MusicConfig,
     MusicConfigUpdate,
+    SynthConfig,
     UpdateInput,
     _MusicConfigInternal,
     _MusicConfigUpdateInternal,
@@ -39,7 +40,6 @@ from .models import (
     resolve_model,
 )
 from .spinner import Spinner, render_error
-from .config import SynthConfig
 from .synth import assemble, interpolate_configs
 
 StreamContent = str | ConfigInput | UpdateInput

@@ -8,8 +8,11 @@ import re
 from pathlib import Path
 from typing import Iterable, NamedTuple
 
+from pydantic import ValidationError
+
 import latentscore as ls
-from latentscore.config import MusicConfig
+from latentscore.config import MusicConfig, MusicConfigPromptPayload
+from latentscore.models import MODEL_CHOICES, ModelChoice
 from latentscore.playback import play_stream
 from latentscore.prompt_examples import FEW_SHOT_EXAMPLES as TRACK_EXAMPLES_TEXT
 
@@ -22,6 +25,8 @@ EXTERNAL_API_ENV = "ANTHROPIC_API_KEY"
 # EXTERNAL_MODEL = "external:openrouter/mistralai/voxtral-small-24b-2507"
 # EXTERNAL_API_ENV = "OPENROUTER_API_KEY"
 TRACK_DURATION = 12.0
+DEFAULT_VIBE = "warm sunrise over water"
+DEFAULT_MODEL: ModelChoice = "fast"
 
 _TRACK_EXAMPLE_PATTERN = re.compile(
     r"\*\*Example\s+(?P<num>\d+)\*\*\s*Input:\s*\"(?P<input>.*?)\"\s*Output:\s*\n\n```json\n(?P<json>.*?)\n```",
@@ -30,7 +35,7 @@ _TRACK_EXAMPLE_PATTERN = re.compile(
 
 
 class TrackExample(NamedTuple):
-    index: int
+    example_index: int
     key: str
     label: str
     input_text: str
@@ -43,27 +48,34 @@ def _slugify(text: str) -> str:
 
 
 def _parse_track_config(payload: str) -> MusicConfig:
-    data = json.loads(payload)
-    match data:
-        case {"config": config} if isinstance(config, dict):
-            return MusicConfig.model_validate(config)
-        case _:
-            raise ValueError("Track example missing config payload.")
+    try:
+        wrapper = MusicConfigPromptPayload.model_validate_json(payload)
+        return wrapper.config.to_config()
+    except ValidationError:
+        try:
+            return MusicConfig.model_validate_json(payload)
+        except ValidationError:
+            data = json.loads(payload)
+            match data:
+                case {"config": config} if isinstance(config, dict):
+                    return MusicConfig.model_validate(config)
+                case _:
+                    raise ValueError("Track example missing config payload.") from None
 
 
 @functools.lru_cache(maxsize=1)
 def _track_examples() -> tuple[TrackExample, ...]:
     examples: list[TrackExample] = []
     for match in _TRACK_EXAMPLE_PATTERN.finditer(TRACK_EXAMPLES_TEXT):
-        index = int(match.group("num"))
+        example_index = int(match.group("num"))
         input_text = match.group("input").strip()
         label = input_text.split(" - ", 1)[0].strip()
-        key = _slugify(label) or f"example-{index}"
+        key = _slugify(label) or f"example-{example_index}"
         payload = match.group("json").strip()
         config = _parse_track_config(payload)
         examples.append(
             TrackExample(
-                index=index,
+                example_index=example_index,
                 key=key,
                 label=label,
                 input_text=input_text,
@@ -80,8 +92,8 @@ def _track_index() -> dict[str, TrackExample]:
             example.key,
             example.label.lower(),
             example.input_text.lower(),
-            str(example.index),
-            f"example-{example.index}",
+            str(example.example_index),
+            f"example-{example.example_index}",
         }
         for key in keys:
             if key and key not in index:
@@ -108,7 +120,7 @@ def _print_track_examples() -> None:
         return
     print("Available track examples:")
     for example in examples:
-        print(f"- example-{example.index}: {example.label} ({example.key})")
+        print(f"- example-{example.example_index}: {example.label} ({example.key})")
 
 
 def _live_playlist_generator() -> Iterable[ls.Streamable]:
@@ -135,13 +147,24 @@ def _live_playlist_generator() -> Iterable[ls.Streamable]:
     )
 
 
-def _demo_live_from_generator() -> None:
+def _demo_live_from_generator(model: ModelChoice) -> None:
     live_chunks = ls.stream_raw(
         _live_playlist_generator(),
         chunk_seconds=1.0,
-        model="fast",
+        model=model,
     )
     play_stream(live_chunks, sample_rate=ls.SAMPLE_RATE)
+
+
+def _demo_render_vibe(vibe: str, *, model: ModelChoice, save: bool) -> None:
+    audio = ls.render(
+        vibe,
+        duration=8.0,
+        model=model,
+    )
+    audio.play()
+    if save:
+        audio.save(OUTPUT_DIR / "demo_render.wav")
 
 
 def _demo_external_with_key(model: str, api_key: str, *, save: bool) -> None:
@@ -208,6 +231,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"External model name (default: {EXTERNAL_MODEL}).",
     )
     parser.add_argument(
+        "--model",
+        type=str,
+        choices=MODEL_CHOICES,
+        default=DEFAULT_MODEL,
+        help=f"Model for non-external demos (default: {DEFAULT_MODEL}).",
+    )
+    parser.add_argument(
+        "--vibe",
+        type=str,
+        default=DEFAULT_VIBE,
+        help=f"Prompt to render when no mode is selected (default: {DEFAULT_VIBE!r}).",
+    )
+    parser.add_argument(
         "--api-key",
         type=str,
         default=None,
@@ -240,46 +276,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.save:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # audio = ls.render("warm sunrise over water", duration=8.0)
-    # render_path = OUTPUT_DIR / "demo_render.wav"
-    # audio.save(render_path)
-
-    # stream = ls.stream(
-    #     "late night neon",
-    #     "after hours",
-    #     duration=12.0,
-    #     transition=3.0,
-    #     chunk_seconds=1.0,
-    # )
-    # stream_path = OUTPUT_DIR / "demo_stream.wav"
-    # stream.play()
-    # stream.save(stream_path)
-
-    # playlist = ls.Playlist(
-    #     tracks=(
-    #         ls.Track(content="foggy dock", duration=6.0, transition=2.0),
-    #         ls.Track(
-    #             content=ls.MusicConfig(tempo="fast", brightness="bright"),
-    #             duration=6.0,
-    #             transition=2.0,
-    #         ),
-    #         ls.Track(
-    #             content=ls.MusicConfigUpdate(tempo="slow", space="vast"),
-    #             duration=6.0,
-    #             transition=2.0,
-    #         ),
-    #     )
-    # )
-    # playlist_path = OUTPUT_DIR / "demo_playlist.wav"
-    # playlist.render(chunk_seconds=1.0).save(playlist_path)
-
-    # print("Saved demo outputs:")
-    # print(f"- {render_path}")
-    # print(f"- {stream_path}")
-    # print(f"- {playlist_path}")
-
     if args.live:
-        _demo_live_from_generator()
+        _demo_live_from_generator(args.model)
         return
 
     if args.external:
@@ -310,7 +308,7 @@ def main(argv: list[str] | None = None) -> None:
         _demo_track_example(example, save=args.save)
         return
 
-    print("No mode selected. Use --live, --external, or --track.")
+    _demo_render_vibe(args.vibe, model=args.model, save=args.save)
 
 
 if __name__ == "__main__":

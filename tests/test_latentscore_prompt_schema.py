@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, get_origin
 
 from pydantic import BaseModel
 
@@ -21,6 +21,10 @@ def _has_defaults(schema: Any) -> bool:
     return False
 
 
+def _is_literal(annotation: object) -> bool:
+    return get_origin(annotation) is Literal
+
+
 def test_prompt_schema_matches_music_config_fields() -> None:
     excluded = {"schema_version", "seed"}
     assert _field_names(MusicConfigPrompt) == _field_names(MusicConfig) - excluded
@@ -34,3 +38,20 @@ def test_prompt_schema_excludes_seed_and_version() -> None:
 def test_prompt_schema_has_no_defaults() -> None:
     schema = MusicConfigPromptPayload.model_json_schema()
     assert not _has_defaults(schema)
+
+
+def test_prompt_schema_uses_literal_labels_for_scalar_fields() -> None:
+    literal_fields = {
+        "phrase_len_bars",
+        "melody_density",
+        "syncopation",
+        "swing",
+        "motif_repeat_prob",
+        "step_bias",
+        "chromatic_prob",
+        "cadence_strength",
+        "chord_change_bars",
+    }
+    for field_name in literal_fields:
+        annotation = MusicConfigPrompt.model_fields[field_name].annotation
+        assert _is_literal(annotation)

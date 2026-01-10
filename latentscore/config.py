@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from types import MappingProxyType
 from typing import Any, Callable, Literal, Mapping, Optional, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -94,51 +95,144 @@ MelodyEngine = Literal["pattern", "procedural"]
 TensionCurve = Literal["arc", "ramp", "waves"]
 HarmonyStyle = Literal["auto", "pop", "jazz", "cinematic", "ambient"]
 ChordExtensions = Literal["triads", "sevenths", "lush"]
+PhraseLengthBars = Literal[2, 4, 8]
+MelodyDensityLabel = Literal["very_sparse", "sparse", "medium", "busy", "very_busy"]
+SyncopationLabel = Literal["straight", "light", "medium", "heavy"]
+SwingLabel = Literal["none", "light", "medium", "heavy"]
+MotifRepeatLabel = Literal["rare", "sometimes", "often"]
+StepBiasLabel = Literal["step", "balanced", "leapy"]
+ChromaticLabel = Literal["none", "light", "medium", "heavy"]
+CadenceLabel = Literal["weak", "medium", "strong"]
+ChordChangeLabel = Literal["very_slow", "slow", "medium", "fast"]
 
 
 T = TypeVar("T")
 
-_TEMPO_VERY_SLOW = 0.15
-_TEMPO_SLOW = 0.3
-_TEMPO_MEDIUM = 0.5
-_TEMPO_FAST = 0.7
-_TEMPO_VERY_FAST = 0.9
-
-_BRIGHTNESS_VERY_DARK = 0.1
-_BRIGHTNESS_DARK = 0.3
-_BRIGHTNESS_MEDIUM = 0.5
-_BRIGHTNESS_BRIGHT = 0.7
-_BRIGHTNESS_VERY_BRIGHT = 0.9
-
-_SPACE_DRY = 0.1
-_SPACE_SMALL = 0.3
-_SPACE_MEDIUM = 0.5
-_SPACE_LARGE = 0.7
-_SPACE_VAST = 0.95
-
-_MOTION_STATIC = 0.1
-_MOTION_SLOW = 0.3
-_MOTION_MEDIUM = 0.5
-_MOTION_FAST = 0.7
-_MOTION_CHAOTIC = 0.9
-
-_STEREO_MONO = 0.0
-_STEREO_NARROW = 0.25
-_STEREO_MEDIUM = 0.5
-_STEREO_WIDE = 0.75
-_STEREO_ULTRA_WIDE = 1.0
-
-_ECHO_NONE = 0.0
-_ECHO_SUBTLE = 0.25
-_ECHO_MEDIUM = 0.5
-_ECHO_HEAVY = 0.75
-_ECHO_INFINITE = 0.95
-
-_HUMAN_ROBOTIC = 0.0
-_HUMAN_TIGHT = 0.15
-_HUMAN_NATURAL = 0.3
-_HUMAN_LOOSE = 0.5
-_HUMAN_DRUNK = 0.8
+_TEMPO_MAP: Mapping[TempoLabel, float] = MappingProxyType(
+    {
+        "very_slow": 0.15,
+        "slow": 0.3,
+        "medium": 0.5,
+        "fast": 0.7,
+        "very_fast": 0.9,
+    }
+)
+_BRIGHTNESS_MAP: Mapping[BrightnessLabel, float] = MappingProxyType(
+    {
+        "very_dark": 0.1,
+        "dark": 0.3,
+        "medium": 0.5,
+        "bright": 0.7,
+        "very_bright": 0.9,
+    }
+)
+_SPACE_MAP: Mapping[SpaceLabel, float] = MappingProxyType(
+    {
+        "dry": 0.1,
+        "small": 0.3,
+        "medium": 0.5,
+        "large": 0.7,
+        "vast": 0.95,
+    }
+)
+_MOTION_MAP: Mapping[MotionLabel, float] = MappingProxyType(
+    {
+        "static": 0.1,
+        "slow": 0.3,
+        "medium": 0.5,
+        "fast": 0.7,
+        "chaotic": 0.9,
+    }
+)
+_STEREO_MAP: Mapping[StereoLabel, float] = MappingProxyType(
+    {
+        "mono": 0.0,
+        "narrow": 0.25,
+        "medium": 0.5,
+        "wide": 0.75,
+        "ultra_wide": 1.0,
+    }
+)
+_ECHO_MAP: Mapping[EchoLabel, float] = MappingProxyType(
+    {
+        "none": 0.0,
+        "subtle": 0.25,
+        "medium": 0.5,
+        "heavy": 0.75,
+        "infinite": 0.95,
+    }
+)
+_HUMAN_MAP: Mapping[HumanFeelLabel, float] = MappingProxyType(
+    {
+        "robotic": 0.0,
+        "tight": 0.15,
+        "natural": 0.3,
+        "loose": 0.5,
+        "drunk": 0.8,
+    }
+)
+_MELODY_DENSITY_MAP: Mapping[MelodyDensityLabel, float] = MappingProxyType(
+    {
+        "very_sparse": 0.15,
+        "sparse": 0.30,
+        "medium": 0.50,
+        "busy": 0.70,
+        "very_busy": 0.85,
+    }
+)
+_SYNCOPATION_MAP: Mapping[SyncopationLabel, float] = MappingProxyType(
+    {
+        "straight": 0.0,
+        "light": 0.2,
+        "medium": 0.5,
+        "heavy": 0.8,
+    }
+)
+_SWING_MAP: Mapping[SwingLabel, float] = MappingProxyType(
+    {
+        "none": 0.0,
+        "light": 0.2,
+        "medium": 0.5,
+        "heavy": 0.8,
+    }
+)
+_MOTIF_REPEAT_MAP: Mapping[MotifRepeatLabel, float] = MappingProxyType(
+    {
+        "rare": 0.2,
+        "sometimes": 0.5,
+        "often": 0.8,
+    }
+)
+_STEP_BIAS_MAP: Mapping[StepBiasLabel, float] = MappingProxyType(
+    {
+        "step": 0.9,
+        "balanced": 0.7,
+        "leapy": 0.4,
+    }
+)
+_CHROMATIC_MAP: Mapping[ChromaticLabel, float] = MappingProxyType(
+    {
+        "none": 0.0,
+        "light": 0.05,
+        "medium": 0.12,
+        "heavy": 0.25,
+    }
+)
+_CADENCE_MAP: Mapping[CadenceLabel, float] = MappingProxyType(
+    {
+        "weak": 0.3,
+        "medium": 0.6,
+        "strong": 0.9,
+    }
+)
+_CHORD_CHANGE_BARS_MAP: Mapping[ChordChangeLabel, int] = MappingProxyType(
+    {
+        "very_slow": 4,
+        "slow": 2,
+        "medium": 1,
+        "fast": 1,
+    }
+)
 
 
 def _optional_map(value: T | None, mapper: Callable[[T], float]) -> float | None:
@@ -150,115 +244,108 @@ def _optional_map(value: T | None, mapper: Callable[[T], float]) -> float | None
 
 
 def tempo_to_float(value: TempoLabel) -> float:
-    match value:
-        case "very_slow":
-            return _TEMPO_VERY_SLOW
-        case "slow":
-            return _TEMPO_SLOW
-        case "medium":
-            return _TEMPO_MEDIUM
-        case "fast":
-            return _TEMPO_FAST
-        case "very_fast":
-            return _TEMPO_VERY_FAST
-        case _:
-            raise InvalidConfigError(f"Unknown tempo label: {value!r}")
+    try:
+        return _TEMPO_MAP[value]
+    except KeyError as exc:
+        raise InvalidConfigError(f"Unknown tempo label: {value!r}") from exc
 
 
 def brightness_to_float(value: BrightnessLabel) -> float:
-    match value:
-        case "very_dark":
-            return _BRIGHTNESS_VERY_DARK
-        case "dark":
-            return _BRIGHTNESS_DARK
-        case "medium":
-            return _BRIGHTNESS_MEDIUM
-        case "bright":
-            return _BRIGHTNESS_BRIGHT
-        case "very_bright":
-            return _BRIGHTNESS_VERY_BRIGHT
-        case _:
-            raise InvalidConfigError(f"Unknown brightness label: {value!r}")
+    try:
+        return _BRIGHTNESS_MAP[value]
+    except KeyError as exc:
+        raise InvalidConfigError(f"Unknown brightness label: {value!r}") from exc
 
 
 def space_to_float(value: SpaceLabel) -> float:
-    match value:
-        case "dry":
-            return _SPACE_DRY
-        case "small":
-            return _SPACE_SMALL
-        case "medium":
-            return _SPACE_MEDIUM
-        case "large":
-            return _SPACE_LARGE
-        case "vast":
-            return _SPACE_VAST
-        case _:
-            raise InvalidConfigError(f"Unknown space label: {value!r}")
+    try:
+        return _SPACE_MAP[value]
+    except KeyError as exc:
+        raise InvalidConfigError(f"Unknown space label: {value!r}") from exc
 
 
 def motion_to_float(value: MotionLabel) -> float:
-    match value:
-        case "static":
-            return _MOTION_STATIC
-        case "slow":
-            return _MOTION_SLOW
-        case "medium":
-            return _MOTION_MEDIUM
-        case "fast":
-            return _MOTION_FAST
-        case "chaotic":
-            return _MOTION_CHAOTIC
-        case _:
-            raise InvalidConfigError(f"Unknown motion label: {value!r}")
+    try:
+        return _MOTION_MAP[value]
+    except KeyError as exc:
+        raise InvalidConfigError(f"Unknown motion label: {value!r}") from exc
 
 
 def stereo_to_float(value: StereoLabel) -> float:
-    match value:
-        case "mono":
-            return _STEREO_MONO
-        case "narrow":
-            return _STEREO_NARROW
-        case "medium":
-            return _STEREO_MEDIUM
-        case "wide":
-            return _STEREO_WIDE
-        case "ultra_wide":
-            return _STEREO_ULTRA_WIDE
-        case _:
-            raise InvalidConfigError(f"Unknown stereo label: {value!r}")
+    try:
+        return _STEREO_MAP[value]
+    except KeyError as exc:
+        raise InvalidConfigError(f"Unknown stereo label: {value!r}") from exc
 
 
 def echo_to_float(value: EchoLabel) -> float:
-    match value:
-        case "none":
-            return _ECHO_NONE
-        case "subtle":
-            return _ECHO_SUBTLE
-        case "medium":
-            return _ECHO_MEDIUM
-        case "heavy":
-            return _ECHO_HEAVY
-        case "infinite":
-            return _ECHO_INFINITE
-        case _:
-            raise InvalidConfigError(f"Unknown echo label: {value!r}")
+    try:
+        return _ECHO_MAP[value]
+    except KeyError as exc:
+        raise InvalidConfigError(f"Unknown echo label: {value!r}") from exc
 
 
 def human_to_float(value: HumanFeelLabel) -> float:
-    match value:
-        case "robotic":
-            return _HUMAN_ROBOTIC
-        case "tight":
-            return _HUMAN_TIGHT
-        case "natural":
-            return _HUMAN_NATURAL
-        case "loose":
-            return _HUMAN_LOOSE
-        case "drunk":
-            return _HUMAN_DRUNK
-        case _:
-            raise InvalidConfigError(f"Unknown human feel label: {value!r}")
+    try:
+        return _HUMAN_MAP[value]
+    except KeyError as exc:
+        raise InvalidConfigError(f"Unknown human feel label: {value!r}") from exc
+
+
+def melody_density_to_float(value: MelodyDensityLabel) -> float:
+    try:
+        return _MELODY_DENSITY_MAP[value]
+    except KeyError as exc:
+        raise InvalidConfigError(f"Unknown melody density label: {value!r}") from exc
+
+
+def syncopation_to_float(value: SyncopationLabel) -> float:
+    try:
+        return _SYNCOPATION_MAP[value]
+    except KeyError as exc:
+        raise InvalidConfigError(f"Unknown syncopation label: {value!r}") from exc
+
+
+def swing_to_float(value: SwingLabel) -> float:
+    try:
+        return _SWING_MAP[value]
+    except KeyError as exc:
+        raise InvalidConfigError(f"Unknown swing label: {value!r}") from exc
+
+
+def motif_repeat_to_float(value: MotifRepeatLabel) -> float:
+    try:
+        return _MOTIF_REPEAT_MAP[value]
+    except KeyError as exc:
+        raise InvalidConfigError(f"Unknown motif repeat label: {value!r}") from exc
+
+
+def step_bias_to_float(value: StepBiasLabel) -> float:
+    try:
+        return _STEP_BIAS_MAP[value]
+    except KeyError as exc:
+        raise InvalidConfigError(f"Unknown step bias label: {value!r}") from exc
+
+
+def chromatic_to_float(value: ChromaticLabel) -> float:
+    try:
+        return _CHROMATIC_MAP[value]
+    except KeyError as exc:
+        raise InvalidConfigError(f"Unknown chromatic label: {value!r}") from exc
+
+
+def cadence_to_float(value: CadenceLabel) -> float:
+    try:
+        return _CADENCE_MAP[value]
+    except KeyError as exc:
+        raise InvalidConfigError(f"Unknown cadence label: {value!r}") from exc
+
+
+def chord_change_to_bars(value: ChordChangeLabel) -> int:
+    try:
+        return _CHORD_CHANGE_BARS_MAP[value]
+    except KeyError as exc:
+        raise InvalidConfigError(f"Unknown chord change label: {value!r}") from exc
 
 
 class _MusicConfigInternal(BaseModel):
@@ -438,30 +525,24 @@ _PROMPT_DESC: dict[str, str] = {
     "human": "Timing/pitch looseness label.",
     "grain": "Oscillator character (clean/warm/gritty).",
     "melody_engine": "Melody generation mode (procedural or pattern).",
-    "phrase_len_bars": "Phrase length in bars for procedural melody.",
-    "melody_density": "Melody note density from 0.0 (sparse) to 1.0 (busy).",
-    "syncopation": "Offbeat preference from 0.0 (straight) to 1.0 (heavy).",
-    "swing": "Swing amount from 0.0 (none) to 1.0 (heavy).",
-    "motif_repeat_prob": "Probability of motif repetition (0.0 to 1.0).",
-    "step_bias": "Preference for stepwise motion (0.0 leapy to 1.0 stepwise).",
-    "chromatic_prob": "Chance of chromatic tones (0.0 to 1.0).",
-    "cadence_strength": "Cadence emphasis from 0.0 (weak) to 1.0 (strong).",
+    "phrase_len_bars": "Phrase length in bars (2, 4, or 8).",
+    "melody_density": "Melody note density label (very_sparse, sparse, medium, busy, very_busy).",
+    "syncopation": "Offbeat emphasis label (straight, light, medium, heavy).",
+    "swing": "Swing amount label (none, light, medium, heavy).",
+    "motif_repeat_prob": "Motif repetition label (rare, sometimes, often).",
+    "step_bias": "Melodic motion label (step, balanced, leapy).",
+    "chromatic_prob": "Chromaticism label (none, light, medium, heavy).",
+    "cadence_strength": "Cadence emphasis label (weak, medium, strong).",
     "register_min_oct": "Lowest melody octave (integer).",
     "register_max_oct": "Highest melody octave (integer).",
     "tension_curve": "Tension shape across the phrase.",
     "harmony_style": "Harmony progression style.",
-    "chord_change_bars": "Bars per chord change.",
+    "chord_change_bars": "Chord change rate label (very_slow, slow, medium, fast).",
     "chord_extensions": "Chord color/extension level.",
 }
 
-_PROMPT_UNIT_MIN = 0.0
-_PROMPT_UNIT_MAX = 1.0
-_PROMPT_PHRASE_MIN = 1
-_PROMPT_PHRASE_MAX = 16
 _PROMPT_REGISTER_MIN = 1
 _PROMPT_REGISTER_MAX = 8
-_PROMPT_CHORD_CHANGE_MIN = 1
-_PROMPT_CHORD_CHANGE_MAX = 16
 
 
 class MusicConfigPrompt(BaseModel):
@@ -490,46 +571,14 @@ class MusicConfigPrompt(BaseModel):
     grain: GrainStyle = Field(description=_PROMPT_DESC["grain"])
 
     melody_engine: MelodyEngine = Field(description=_PROMPT_DESC["melody_engine"])
-    phrase_len_bars: int = Field(
-        ge=_PROMPT_PHRASE_MIN,
-        le=_PROMPT_PHRASE_MAX,
-        description=_PROMPT_DESC["phrase_len_bars"],
-    )
-    melody_density: float = Field(
-        ge=_PROMPT_UNIT_MIN,
-        le=_PROMPT_UNIT_MAX,
-        description=_PROMPT_DESC["melody_density"],
-    )
-    syncopation: float = Field(
-        ge=_PROMPT_UNIT_MIN,
-        le=_PROMPT_UNIT_MAX,
-        description=_PROMPT_DESC["syncopation"],
-    )
-    swing: float = Field(
-        ge=_PROMPT_UNIT_MIN,
-        le=_PROMPT_UNIT_MAX,
-        description=_PROMPT_DESC["swing"],
-    )
-    motif_repeat_prob: float = Field(
-        ge=_PROMPT_UNIT_MIN,
-        le=_PROMPT_UNIT_MAX,
-        description=_PROMPT_DESC["motif_repeat_prob"],
-    )
-    step_bias: float = Field(
-        ge=_PROMPT_UNIT_MIN,
-        le=_PROMPT_UNIT_MAX,
-        description=_PROMPT_DESC["step_bias"],
-    )
-    chromatic_prob: float = Field(
-        ge=_PROMPT_UNIT_MIN,
-        le=_PROMPT_UNIT_MAX,
-        description=_PROMPT_DESC["chromatic_prob"],
-    )
-    cadence_strength: float = Field(
-        ge=_PROMPT_UNIT_MIN,
-        le=_PROMPT_UNIT_MAX,
-        description=_PROMPT_DESC["cadence_strength"],
-    )
+    phrase_len_bars: PhraseLengthBars = Field(description=_PROMPT_DESC["phrase_len_bars"])
+    melody_density: MelodyDensityLabel = Field(description=_PROMPT_DESC["melody_density"])
+    syncopation: SyncopationLabel = Field(description=_PROMPT_DESC["syncopation"])
+    swing: SwingLabel = Field(description=_PROMPT_DESC["swing"])
+    motif_repeat_prob: MotifRepeatLabel = Field(description=_PROMPT_DESC["motif_repeat_prob"])
+    step_bias: StepBiasLabel = Field(description=_PROMPT_DESC["step_bias"])
+    chromatic_prob: ChromaticLabel = Field(description=_PROMPT_DESC["chromatic_prob"])
+    cadence_strength: CadenceLabel = Field(description=_PROMPT_DESC["cadence_strength"])
     register_min_oct: int = Field(
         ge=_PROMPT_REGISTER_MIN,
         le=_PROMPT_REGISTER_MAX,
@@ -542,12 +591,20 @@ class MusicConfigPrompt(BaseModel):
     )
     tension_curve: TensionCurve = Field(description=_PROMPT_DESC["tension_curve"])
     harmony_style: HarmonyStyle = Field(description=_PROMPT_DESC["harmony_style"])
-    chord_change_bars: int = Field(
-        ge=_PROMPT_CHORD_CHANGE_MIN,
-        le=_PROMPT_CHORD_CHANGE_MAX,
-        description=_PROMPT_DESC["chord_change_bars"],
-    )
+    chord_change_bars: ChordChangeLabel = Field(description=_PROMPT_DESC["chord_change_bars"])
     chord_extensions: ChordExtensions = Field(description=_PROMPT_DESC["chord_extensions"])
+
+    def to_config(self) -> MusicConfig:
+        data = self.model_dump()
+        data["melody_density"] = melody_density_to_float(self.melody_density)
+        data["syncopation"] = syncopation_to_float(self.syncopation)
+        data["swing"] = swing_to_float(self.swing)
+        data["motif_repeat_prob"] = motif_repeat_to_float(self.motif_repeat_prob)
+        data["step_bias"] = step_bias_to_float(self.step_bias)
+        data["chromatic_prob"] = chromatic_to_float(self.chromatic_prob)
+        data["cadence_strength"] = cadence_to_float(self.cadence_strength)
+        data["chord_change_bars"] = chord_change_to_bars(self.chord_change_bars)
+        return MusicConfig.model_validate(data)
 
     model_config = ConfigDict(extra="forbid")
 

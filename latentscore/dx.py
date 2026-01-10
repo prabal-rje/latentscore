@@ -15,6 +15,7 @@ from .config import (
     ConfigInput,
     MusicConfig,
     MusicConfigUpdate,
+    SynthConfig,
     UpdateInput,
     coerce_internal_config,
     coerce_internal_update,
@@ -40,7 +41,6 @@ from .main import (
 )
 from .models import EXTERNAL_PREFIX, ModelSpec
 from .spinner import render_error
-from .config import SynthConfig
 from .synth import assemble
 
 TrackContent = str | MusicConfig | MusicConfigUpdate

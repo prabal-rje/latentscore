@@ -35,11 +35,11 @@ from .config import (
     PadStyle,
     RhythmStyle,
     RootNote,
+    SynthConfig,
     TextureStyle,
 )
-from .config import (
-    SynthConfig,
-)
+
+MusicConfig: TypeAlias = SynthConfig
 
 # =============================================================================
 # CONSTANTS

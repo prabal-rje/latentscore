@@ -6,7 +6,7 @@ import logging
 import warnings
 from collections.abc import Mapping
 from threading import Event, Lock, Thread
-from typing import Any, Callable, Coroutine, Literal
+from typing import Any, Callable, Coroutine, Literal, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -196,6 +196,19 @@ def _extract_json_payload(content: str) -> str | None:
     return content[start : end + 1]
 
 
+def _extract_config_payload(payload: str) -> Mapping[str, Any] | None:
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    match data:
+        case {"config": config} if isinstance(config, dict):
+            assert isinstance(config, dict)
+            return cast(dict[str, Any], config)
+        case _:
+            return None
+
+
 def _content_snippet(content: str, limit: int = 200) -> str:
     cleaned = content.strip()
     if len(cleaned) <= limit:
@@ -351,6 +364,9 @@ class LiteLLMAdapter:
             try:
                 wrapper = MusicConfigPromptPayload.model_validate_json(payload)
             except ValidationError:
+                config_payload = _extract_config_payload(payload)
+                if config_payload is not None:
+                    return MusicConfig.model_validate(config_payload)
                 return MusicConfig.model_validate_json(payload)
-            return MusicConfig.model_validate(wrapper.config.model_dump())
+            return wrapper.config.to_config()
         return MusicConfig.model_validate_json(payload)

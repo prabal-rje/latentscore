@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from latentscore import config as cfg
-
 
 def _field_names(model: object) -> set[str]:
     if hasattr(model, "model_fields"):

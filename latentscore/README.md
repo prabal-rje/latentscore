@@ -66,6 +66,8 @@ Outputs land in `.examples/` at the project root.
 Flags:
 
 ```bash
+python -m latentscore.demo --model expressive
+python -m latentscore.demo --model fast --vibe "late night neon"
 python -m latentscore.demo --live
 python -m latentscore.demo --external --api-key "$GEMINI_API_KEY"
 ```

@@ -13,7 +13,7 @@ audio.save("output.wav")
 ```
 
 - Local-first by default (no API keys required).
-- `latentscore demo` renders a short clip to `demo.wav`.
+- `python -m latentscore.demo` renders a short clip to `.examples/demo_render.wav` (set `--model fast|expressive|local`).
 - `latentscore download expressive` prefetches local LLM weights (~1.2GB).
 - `docs/latentscore-dx.md` has the tiered API, model selection, and audio contract.
 - Streaming supports prefetching, preview playback while configs load, and fallback policies; see `docs/latentscore-dx.md`.
@@ -30,6 +30,7 @@ Use `latentscore doctor` to sanity-check local assets before running:
 
 ### Demo flags + API keys
 
+- Model selection: `python -m latentscore.demo --model expressive`
 - Live generator stream: `python -m latentscore.demo --live`
 - External LLM demo: `python -m latentscore.demo --external --api-key "$GEMINI_API_KEY"`
 - Env fallback demo (for LiteLLM): `export GEMINI_API_KEY="..."` then `python -m latentscore.demo --external`
