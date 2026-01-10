@@ -25,6 +25,7 @@ for chunk in ls.stream("dark ambient", "sunrise"):
 - `stream(...)` yields `np.float32` mono chunks.
 - `duration` is total duration across all items (split evenly).
 - `AudioStream` also supports `.save()` and `.play()`.
+- `stream(...)` accepts a single sequence of items (e.g., `ls.stream(["dark ambient", "sunrise"])`).
 
 ## Live generator stream (dynamic playlist)
 
@@ -59,6 +60,7 @@ async for chunk in ls.stream(
 
 - `stream(...)` supports both `for` and `async for`.
 - `chunk_seconds` controls chunk sizing.
+- `preview=True` uses the fast model as a speculative preview while a slower model loads.
 
 ## Tier 3: Composition primitives
 

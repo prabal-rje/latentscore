@@ -520,6 +520,32 @@ class FastEmbeddingModel:
 class ExpressiveMlxModel:
     """Local MLX-backed model using the LLM prompt from the synth prototype."""
 
+    @staticmethod
+    def check_dependencies() -> None:
+        try:
+            import transformers  # type: ignore[import]
+        except ImportError as exc:
+            raise ModelNotAvailableError("transformers is not installed") from exc
+
+        version = transformers.__version__.split(".")[0]
+        if version.isdigit() and int(version) >= 5:
+            raise ModelNotAvailableError(
+                "transformers>=5 is not supported by mlx_lm; install transformers<5"
+            )
+        try:
+            from transformers import AutoTokenizer
+        except Exception as exc:  # pragma: no cover - dependency mismatch
+            raise ModelNotAvailableError(
+                "transformers is missing AutoTokenizer; install transformers<5"
+            ) from exc
+        _ = AutoTokenizer
+
+        try:
+            import mlx_lm  # type: ignore[import] # noqa: F401
+            import outlines  # type: ignore[import] # noqa: F401
+        except ImportError as exc:
+            raise ModelNotAvailableError("MLX dependencies are not installed") from exc
+
     def __init__(
         self,
         *,
@@ -546,6 +572,8 @@ class ExpressiveMlxModel:
         return base_dir / _EXPRESSIVE_DIR
 
     def _download_expressive(self, model_dir: Path) -> None:
+        _disable_transformers_progress()
+        os.environ.setdefault("TQDM_DISABLE", "1")
         try:
             from huggingface_hub import snapshot_download  # type: ignore[import]
         except ImportError as exc:
@@ -559,7 +587,7 @@ class ExpressiveMlxModel:
         model_dir.mkdir(parents=True, exist_ok=True)
         from .spinner import Spinner
 
-        spinner = Spinner("Downloading expressive model (first run)")
+        spinner = Spinner("Downloading expressive model (first run)", show_elapsed=True)
         spinner.start()
         try:
             snapshot_download(_EXPRESSIVE_REPO, local_dir=str(model_dir))
@@ -569,11 +597,13 @@ class ExpressiveMlxModel:
     @functools.lru_cache(maxsize=1)
     def _load_model(self) -> Any:
         try:
-            import mlx_lm  # type: ignore[import]
-            import outlines  # type: ignore[import]
-        except ImportError as exc:
-            _LOGGER.warning("MLX dependencies not installed: %s", exc, exc_info=True)
-            raise ModelNotAvailableError("MLX dependencies are not installed") from exc
+            self.check_dependencies()
+        except ModelNotAvailableError as exc:
+            _LOGGER.warning("Expressive model dependencies unavailable: %s", exc, exc_info=True)
+            raise
+
+        import mlx_lm  # type: ignore[import]
+        import outlines  # type: ignore[import]
 
         model_dir = self._resolve_model_dir()
         if not model_dir.exists():

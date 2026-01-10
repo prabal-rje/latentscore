@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import functools
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -12,21 +13,23 @@ from pydantic import ValidationError
 
 import latentscore as ls
 from latentscore.config import MusicConfig, MusicConfigPromptPayload
-from latentscore.models import MODEL_CHOICES, ModelChoice
+from latentscore.errors import ModelNotAvailableError
+from latentscore.models import MODEL_CHOICES, ExpressiveMlxModel, ModelChoice
 from latentscore.playback import play_stream
 from latentscore.prompt_examples import FEW_SHOT_EXAMPLES as TRACK_EXAMPLES_TEXT
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / ".examples"
-# EXTERNAL_MODEL = "external:gemini/gemini-3-flash-preview"
-# EXTERNAL_API_ENV = "GEMINI_API_KEY"
-EXTERNAL_MODEL = "external:anthropic/claude-opus-4-5-20251101"
-EXTERNAL_API_ENV = "ANTHROPIC_API_KEY"
+EXTERNAL_MODEL = "external:gemini/gemini-3-pro-preview"
+EXTERNAL_API_ENV = "GEMINI_API_KEY"
+# EXTERNAL_MODEL = "external:anthropic/claude-opus-4-5-20251101"
+# EXTERNAL_API_ENV = "ANTHROPIC_API_KEY"
 # EXTERNAL_MODEL = "external:openrouter/mistralai/voxtral-small-24b-2507"
 # EXTERNAL_API_ENV = "OPENROUTER_API_KEY"
 TRACK_DURATION = 12.0
 DEFAULT_VIBE = "warm sunrise over water"
 DEFAULT_MODEL: ModelChoice = "fast"
+_LOGGER = logging.getLogger("latentscore.demo")
 
 _TRACK_EXAMPLE_PATTERN = re.compile(
     r"\*\*Example\s+(?P<num>\d+)\*\*\s*Input:\s*\"(?P<input>.*?)\"\s*Output:\s*\n\n```json\n(?P<json>.*?)\n```",
@@ -147,13 +150,43 @@ def _live_playlist_generator() -> Iterable[ls.Streamable]:
     )
 
 
-def _demo_live_from_generator(model: ModelChoice) -> None:
+def _demo_live_from_generator(
+    model: ModelChoice,
+    *,
+    preview: bool = False,
+    fallback_model: ModelChoice = "fast",
+) -> None:
     live_chunks = ls.stream_raw(
         _live_playlist_generator(),
         chunk_seconds=1.0,
         model=model,
+        preview=preview,
+        fallback_model=fallback_model,
     )
     play_stream(live_chunks, sample_rate=ls.SAMPLE_RATE)
+
+
+def _preview_enabled_for_stream(
+    model: ModelChoice,
+    *,
+    speculative: bool,
+) -> bool:
+    if not speculative:
+        return False
+    if model == "fast":
+        return False
+    return True
+
+
+def _resolve_live_model(model: ModelChoice) -> ModelChoice:
+    if model not in ("expressive", "local"):
+        return model
+    try:
+        ExpressiveMlxModel.check_dependencies()
+    except ModelNotAvailableError as exc:
+        _LOGGER.warning("Expressive model unavailable: %s; falling back to fast.", exc)
+        return "fast"
+    return model
 
 
 def _demo_render_vibe(vibe: str, *, model: ModelChoice, save: bool) -> None:
@@ -169,15 +202,15 @@ def _demo_render_vibe(vibe: str, *, model: ModelChoice, save: bool) -> None:
 
 def _demo_external_with_key(model: str, api_key: str, *, save: bool) -> None:
     print("HELLO CHAD THIS IS HERE!")
-    audio = ls.render(
-        # "glass elevator through clouds",
-        # "8-bit mario the video game theme song",
-        # "Highly Cyberpunk style music",
+    stream = ls.stream(
         "vinyl crackle midnight jazz",
+        chunk_seconds=1.0,
         duration=30.0,
         model=ls.ExternalModelSpec(model=model, api_key=api_key),
+        preview=False,
+        fallback_model="fast",
     )
-    audio.play()
+    play_stream(stream, sample_rate=ls.SAMPLE_RATE)
     if save:
         audio.save(OUTPUT_DIR / "demo_external_key.wav")
 
@@ -238,6 +271,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"Model for non-external demos (default: {DEFAULT_MODEL}).",
     )
     parser.add_argument(
+        "--speculative",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable speculative streaming warmup (only applies with --live).",
+    )
+    parser.add_argument(
         "--vibe",
         type=str,
         default=DEFAULT_VIBE,
@@ -277,7 +316,18 @@ def main(argv: list[str] | None = None) -> None:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     if args.live:
-        _demo_live_from_generator(args.model)
+        resolved_model = _resolve_live_model(args.model)
+        preview = _preview_enabled_for_stream(resolved_model, speculative=args.speculative)
+        if preview:
+            _LOGGER.warning(
+                "Speculative streaming enabled (fast model warmup while expressive loads). "
+                "Use --no-speculative to wait for the expressive model."
+            )
+        _demo_live_from_generator(
+            resolved_model,
+            preview=preview,
+            fallback_model="fast",
+        )
         return
 
     if args.external:

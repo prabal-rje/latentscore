@@ -14,7 +14,7 @@ from threading import Thread, Timer
 from typing import Any, Callable, Coroutine, Literal, TypeGuard, TypeVar
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from .audio import SAMPLE_RATE, AudioNumbers, FloatArray, ensure_audio_contract, write_wav
 from .config import (
@@ -43,7 +43,6 @@ from .spinner import Spinner, render_error
 from .synth import assemble, interpolate_configs
 
 StreamContent = str | ConfigInput | UpdateInput
-PreviewPolicy = Literal["none", "embedding"]
 FallbackPolicy = Literal["none", "keep_last", "embedding"]
 FallbackInput = FallbackPolicy | ConfigInput | UpdateInput
 ModelLoadRole = Literal["primary", "fallback"]
@@ -70,7 +69,7 @@ class StreamEvent(BaseModel):
     item: Streamable | None = None
     error: Exception | None = None
     fallback: FallbackInput | None = None
-    preview_policy: PreviewPolicy | None = None
+    preview: bool | None = None
 
     model_config = ConfigDict(
         frozen=True,
@@ -102,7 +101,7 @@ class StreamHooks(BaseModel):
     on_item_resolve_error: (
         Callable[[int, Streamable, Exception, FallbackInput | None], None] | None
     ) = None
-    on_item_preview_start: Callable[[int, Streamable, PreviewPolicy], None] | None = None
+    on_item_preview_start: Callable[[int, Streamable, bool], None] | None = None
     on_first_config_ready: Callable[[int, Streamable], None] | None = None
     on_first_audio_chunk: Callable[[], None] | None = None
     on_stream_end: Callable[[], None] | None = None
@@ -184,13 +183,13 @@ class FirstAudioSpinner:
         self,
         index: int,
         item: Streamable,
-        preview_policy: PreviewPolicy,
+        preview: bool,
     ) -> None:
         _ = index
         _ = item
-        if preview_policy == "embedding":
+        if preview:
             self._spinner.update(
-                "Generating first audio (speculative preview running; set preview_policy='none' to disable)"
+                "Generating first audio (speculative preview running; set preview=False to disable)"
             )
 
     def _on_first_audio_chunk(self) -> None:
@@ -235,7 +234,7 @@ class Streamable(BaseModel):
     duration: float = Field(default=60.0, gt=0.0)
     transition_duration: float = Field(default=1.0, ge=0.0)
     fallback: FallbackInput | None = None
-    preview_policy: PreviewPolicy | None = None
+    preview: bool | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -356,12 +355,12 @@ def _emit_event(hooks: StreamHooks | None, event: StreamEvent) -> None:
                     hooks.on_item_preview_start is not None
                     and event.index is not None
                     and event.item is not None
-                    and event.preview_policy is not None
+                    and event.preview is not None
                 ):
                     hooks.on_item_preview_start(
                         event.index,
                         event.item,
-                        event.preview_policy,
+                        event.preview,
                     )
             case "first_config_ready":
                 if (
@@ -451,6 +450,7 @@ class _ModelLoadState(BaseModel):
     role: ModelLoadRole
     hooks: StreamHooks | None
     loaded: bool = False
+    _load_task: asyncio.Task[None] | None = PrivateAttr(default=None)
 
     model_config = ConfigDict(
         extra="forbid",
@@ -467,30 +467,37 @@ class _ModelLoadState(BaseModel):
     async def ensure_loaded(self) -> None:
         if self.loaded:
             return
-        self.loaded = True
-        if self.hooks is None:
+        if self._load_task is None:
+            self._load_task = asyncio.create_task(self._run_load())
+        await self._load_task
+
+    async def _run_load(self) -> None:
+        if self.loaded:
             return
-        _emit_event(
-            self.hooks,
-            StreamEvent(
-                kind="model_load_start",
-                model=self.model,
-                model_role=self.role,
-            ),
-        )
+        self.loaded = True
+        if self.hooks is not None:
+            _emit_event(
+                self.hooks,
+                StreamEvent(
+                    kind="model_load_start",
+                    model=self.model,
+                    model_role=self.role,
+                ),
+            )
         try:
             warmup = getattr(self.model, "warmup", None)
             if callable(warmup):
                 await asyncio.to_thread(warmup)
         finally:
-            _emit_event(
-                self.hooks,
-                StreamEvent(
-                    kind="model_load_end",
-                    model=self.model,
-                    model_role=self.role,
-                ),
-            )
+            if self.hooks is not None:
+                _emit_event(
+                    self.hooks,
+                    StreamEvent(
+                        kind="model_load_end",
+                        model=self.model,
+                        model_role=self.role,
+                    ),
+                )
 
 
 def _to_synth_config(config: _MusicConfigInternal) -> SynthConfig:
@@ -647,7 +654,7 @@ def stream(
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
     prefetch_depth: int = 1,
-    preview_policy: PreviewPolicy = "none",
+    preview: bool = False,
     fallback: FallbackInput | None = None,
     fallback_model: ModelSpec = "fast",
     hooks: StreamHooks | None = None,
@@ -673,7 +680,7 @@ def stream(
             config=config,
             update=update,
             prefetch_depth=prefetch_depth,
-            preview_policy=preview_policy,
+            preview=preview,
             fallback=fallback,
             fallback_model=fallback_model,
             hooks=hooks,
@@ -696,7 +703,7 @@ def stream_texts(
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
     prefetch_depth: int = 1,
-    preview_policy: PreviewPolicy = "none",
+    preview: bool = False,
     fallback: FallbackInput | None = None,
     fallback_model: ModelSpec = "fast",
     hooks: StreamHooks | None = None,
@@ -720,7 +727,7 @@ def stream_texts(
             config=config,
             update=update,
             prefetch_depth=prefetch_depth,
-            preview_policy=preview_policy,
+            preview=preview,
             fallback=fallback,
             fallback_model=fallback_model,
             hooks=hooks,
@@ -741,7 +748,7 @@ def stream_configs(
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
     prefetch_depth: int = 1,
-    preview_policy: PreviewPolicy = "none",
+    preview: bool = False,
     fallback: FallbackInput | None = None,
     fallback_model: ModelSpec = "fast",
     hooks: StreamHooks | None = None,
@@ -766,7 +773,7 @@ def stream_configs(
             config=config,
             update=update,
             prefetch_depth=prefetch_depth,
-            preview_policy=preview_policy,
+            preview=preview,
             fallback=fallback,
             fallback_model=fallback_model,
             hooks=hooks,
@@ -787,7 +794,7 @@ def stream_updates(
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
     prefetch_depth: int = 1,
-    preview_policy: PreviewPolicy = "none",
+    preview: bool = False,
     fallback: FallbackInput | None = None,
     fallback_model: ModelSpec = "fast",
     hooks: StreamHooks | None = None,
@@ -812,7 +819,7 @@ def stream_updates(
             config=config,
             update=update,
             prefetch_depth=prefetch_depth,
-            preview_policy=preview_policy,
+            preview=preview,
             fallback=fallback,
             fallback_model=fallback_model,
             hooks=hooks,
@@ -862,20 +869,29 @@ async def _generate_internal(
     return (await model.generate(vibe)).to_internal()
 
 
+async def _generate_internal_with_load(
+    vibe: str,
+    model: ModelForGeneratingMusicConfig,
+    load_state: _ModelLoadState,
+) -> _MusicConfigInternal:
+    await load_state.ensure_loaded()
+    return await _generate_internal(vibe, model)
+
+
 async def _resolve_preview(
     item: Streamable,
     *,
-    preview_policy: PreviewPolicy,
+    preview: bool,
     fallback_model: ModelForGeneratingMusicConfig,
     update: UpdateInput | None,
     fallback_load: _ModelLoadState | None = None,
 ) -> _MusicConfigInternal | None:
-    if preview_policy != "embedding" or not isinstance(item.content, str):
+    if not preview or not isinstance(item.content, str):
         return None
     if fallback_load is not None:
         await fallback_load.ensure_loaded()
-    preview = await fallback_model.generate(item.content)
-    return _apply_update(preview.to_internal(), update)
+    preview_config = await fallback_model.generate(item.content)
+    return _apply_update(preview_config.to_internal(), update)
 
 
 async def _resolve_fallback(
@@ -917,7 +933,7 @@ async def _render_chunk(
 ) -> FloatArray:
     return await asyncio.to_thread(
         lambda: ensure_audio_contract(
-            assemble(_to_synth_config(config_item), chunk_seconds),
+            assemble(_to_synth_config(config_item), chunk_seconds, normalize=False),
             sample_rate=SAMPLE_RATE,
             check_peak=False,
         )
@@ -934,10 +950,13 @@ async def _prefetch_item(
 ) -> _PrefetchedItem:
     task: asyncio.Task[_MusicConfigInternal] | None = None
     if isinstance(item.content, str):
-        if load_state is not None:
-            await load_state.ensure_loaded()
         _emit_event(hooks, StreamEvent(kind="item_resolve_start", index=index, item=item))
-        task = asyncio.create_task(_generate_internal(item.content, model))
+        if load_state is None:
+            task = asyncio.create_task(_generate_internal(item.content, model))
+        else:
+            task = asyncio.create_task(
+                _generate_internal_with_load(item.content, model, load_state)
+            )
     return _PrefetchedItem(index=index, item=item, task=task)
 
 
@@ -984,7 +1003,7 @@ async def astream(
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
     prefetch_depth: int = 1,
-    preview_policy: PreviewPolicy = "none",
+    preview: bool = False,
     fallback: FallbackInput | None = None,
     fallback_model: ModelSpec = "fast",
     hooks: StreamHooks | None = None,
@@ -1061,7 +1080,7 @@ async def astream(
 
             item = prefetched.item
             index = prefetched.index
-            item_preview = item.preview_policy or preview_policy
+            item_preview = item.preview if item.preview is not None else preview
             item_fallback = item.fallback if item.fallback is not None else fallback
             pending_task = prefetched.task
 
@@ -1115,15 +1134,15 @@ async def astream(
                             ),
                         )
                 else:
-                    preview = await _resolve_preview(
+                    preview_config = await _resolve_preview(
                         item,
-                        preview_policy=item_preview,
+                        preview=item_preview,
                         fallback_model=fallback_resolved,
                         update=update,
                         fallback_load=fallback_load,
                     )
-                    if preview is not None:
-                        target = preview
+                    if preview_config is not None:
+                        target = preview_config
                         pending_real_task = pending_task
                         _emit_event(
                             hooks,
@@ -1131,7 +1150,7 @@ async def astream(
                                 kind="item_preview_start",
                                 index=index,
                                 item=item,
-                                preview_policy=item_preview,
+                                preview=item_preview,
                             ),
                         )
                     else:

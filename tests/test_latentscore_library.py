@@ -169,10 +169,10 @@ def test_streamable_accepts_fallback_and_preview() -> None:
         duration=0.02,
         transition_duration=0.0,
         fallback="keep_last",
-        preview_policy="embedding",
+        preview=True,
     )
     assert item.fallback == "keep_last"
-    assert item.preview_policy == "embedding"
+    assert item.preview is True
 
 
 class SlowModel:
@@ -200,7 +200,7 @@ async def test_astream_preview_yields_before_llm_ready() -> None:
             items,
             chunk_seconds=0.02,
             model=slow,
-            preview_policy="embedding",
+            preview=True,
             fallback_model=fast,
         ):
             return chunk

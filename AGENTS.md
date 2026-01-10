@@ -84,6 +84,15 @@ Every code contribution **MUST** adhere to these guidelines:
 
 ---
 
+### Sequential Subagent-Driven Development (Default)
+
+**Default to sequential subagent-driven development in-session.**
+
+- Execute tasks one at a time in this session unless the user explicitly requests another mode.
+- Treat this as the default workflow unless requested otherwise.
+
+---
+
 ### Use Context-Appropriate Skills
 
 **You MUST invoke skills based on task context**, in addition to the `writing-plans` requirement.

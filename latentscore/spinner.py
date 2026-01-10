@@ -25,6 +25,7 @@ try:
     from rich.progress import (
         BarColumn,
         Progress,
+        SpinnerColumn,
         TextColumn,
         TimeElapsedColumn,
         TimeRemainingColumn,
@@ -41,6 +42,7 @@ except ImportError:  # pragma: no cover - optional dependency
     Traceback = None
     BarColumn = None
     TextColumn = None
+    SpinnerColumn = None
     TimeElapsedColumn = None
     TimeRemainingColumn = None
 
@@ -147,6 +149,55 @@ class _RichSpinner:
         self._status = None
 
 
+class _RichElapsedSpinner:
+    def __init__(
+        self,
+        message: str,
+        *,
+        spinner: str | None = None,
+        stream: IO[str] | None = None,
+    ) -> None:
+        self._message = message
+        self._spinner = spinner or "dots"
+        self._stream = stream or sys.stderr
+        self._console: RichConsole | None = Console(file=self._stream) if Console else None
+        self._progress: RichProgress | None = None
+        self._task_id: RichTaskID | None = None
+
+    def start(self) -> None:
+        if (
+            self._console is None
+            or Progress is None
+            or SpinnerColumn is None
+            or TextColumn is None
+            or TimeElapsedColumn is None
+        ):
+            return
+        if self._progress is not None:
+            return
+        self._progress = Progress(
+            SpinnerColumn(spinner_name=self._spinner),
+            TextColumn("[progress.description]{task.description}"),
+            TimeElapsedColumn(),
+            console=self._console,
+            transient=True,
+        )
+        self._progress.start()
+        self._task_id = self._progress.add_task(self._message, total=None)
+
+    def update(self, message: str) -> None:
+        self._message = message
+        if self._progress is not None and self._task_id is not None:
+            self._progress.update(self._task_id, description=message)
+
+    def stop(self) -> None:
+        if self._progress is None:
+            return
+        self._progress.stop()
+        self._progress = None
+        self._task_id = None
+
+
 class Spinner:
     """Spinner helper with Rich status fallback."""
 
@@ -159,20 +210,36 @@ class Spinner:
         spinner: str | None = None,
         stream: IO[str] | None = None,
         enabled: bool | None = None,
+        show_elapsed: bool = False,
     ) -> None:
         self._message = message
         self._interval = interval
         self._stream = stream or sys.stderr
         self._enabled = self._stream.isatty() if enabled is None else enabled
-        self._backend: _AsciiSpinner | _RichSpinner | None = None
+        self._backend: _AsciiSpinner | _RichSpinner | _RichElapsedSpinner | None = None
         if not self._enabled:
             return
-        if Console and Status:
-            self._backend = _RichSpinner(
-                self._message,
-                spinner=spinner,
-                stream=self._stream,
-            )
+        if Console:
+            if show_elapsed and Progress and SpinnerColumn and TextColumn and TimeElapsedColumn:
+                self._backend = _RichElapsedSpinner(
+                    self._message,
+                    spinner=spinner,
+                    stream=self._stream,
+                )
+            elif Status:
+                self._backend = _RichSpinner(
+                    self._message,
+                    spinner=spinner,
+                    stream=self._stream,
+                )
+            else:
+                self._backend = _AsciiSpinner(
+                    self._message,
+                    interval=self._interval,
+                    frames=frames or "|/-\\",
+                    stream=self._stream,
+                    enabled=self._enabled,
+                )
         else:
             self._backend = _AsciiSpinner(
                 self._message,
@@ -215,6 +282,7 @@ def spinner(
     spinner: str | None = None,
     stream: IO[str] | None = None,
     enabled: bool | None = None,
+    show_elapsed: bool = False,
 ) -> Iterator[Spinner]:
     handle = Spinner(
         message,
@@ -223,6 +291,7 @@ def spinner(
         spinner=spinner,
         stream=stream,
         enabled=enabled,
+        show_elapsed=show_elapsed,
     )
     handle.start()
     try:

@@ -32,6 +32,7 @@ Use `latentscore doctor` to sanity-check local assets before running:
 
 - Model selection: `python -m latentscore.demo --model expressive`
 - Live generator stream: `python -m latentscore.demo --live`
+- Disable speculative warmup for expressive streaming: `python -m latentscore.demo --live --no-speculative`
 - External LLM demo: `python -m latentscore.demo --external --api-key "$GEMINI_API_KEY"`
 - Env fallback demo (for LiteLLM): `export GEMINI_API_KEY="..."` then `python -m latentscore.demo --external`
 - Debug traces: `LATENTSCORE_DEBUG=1 python -m latentscore.demo` (full logs always written to `~/.cache/latentscore/logs/latentscore.log`).

@@ -117,10 +117,11 @@ class RichIndicator:
         self,
         index: int,
         item: Streamable,
-        preview_policy: str,
+        preview: bool,
     ) -> None:
         _ = item
-        self._start(f"Generating preview ({preview_policy}) for item {index + 1}")
+        label = "speculative" if preview else "standard"
+        self._start(f"Generating preview ({label}) for item {index + 1}")
 
     def _on_item_resolve_error(
         self,

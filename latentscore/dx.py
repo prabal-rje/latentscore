@@ -23,13 +23,7 @@ from .config import (
 )
 from .errors import InvalidConfigError, ModelNotAvailableError, PlaybackError
 from .indicators import RichIndicator
-from .main import (
-    FallbackInput,
-    PreviewPolicy,
-    RenderHooks,
-    Streamable,
-    StreamHooks,
-)
+from .main import FallbackInput, RenderHooks, Streamable, StreamHooks
 from .main import (
     astream as astream_raw,
 )
@@ -146,7 +140,7 @@ class Track(BaseModel):
 
 
 StreamItems = Track | TrackContent
-StreamItemsInput = StreamItems | list[StreamItems] | tuple[StreamItems, ...]
+StreamItemsInput = StreamItems | Sequence[StreamItems]
 
 
 class Playlist(BaseModel):
@@ -166,7 +160,7 @@ class Playlist(BaseModel):
         config: ConfigInput | None = None,
         update: UpdateInput | None = None,
         prefetch_depth: int = 1,
-        preview_policy: PreviewPolicy = "none",
+        preview: bool = False,
         fallback: FallbackInput | None = None,
         fallback_model: ModelSpec = "fast",
         hooks: StreamHooks | None = None,
@@ -179,7 +173,7 @@ class Playlist(BaseModel):
             config=config,
             update=update,
             prefetch_depth=prefetch_depth,
-            preview_policy=preview_policy,
+            preview=preview,
             fallback=fallback,
             fallback_model=fallback_model,
             hooks=hooks,
@@ -264,7 +258,7 @@ def stream(
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
     prefetch_depth: int = 1,
-    preview_policy: PreviewPolicy = "none",
+    preview: bool = False,
     fallback: FallbackInput | None = None,
     fallback_model: ModelSpec = "fast",
     hooks: StreamHooks | None = None,
@@ -279,7 +273,7 @@ def stream(
         config=config,
         update=update,
         prefetch_depth=prefetch_depth,
-        preview_policy=preview_policy,
+        preview=preview,
         fallback=fallback,
         fallback_model=fallback_model,
         hooks=hooks,
@@ -288,14 +282,21 @@ def stream(
 
 
 def _normalize_items(items: tuple[StreamItemsInput, ...]) -> list[StreamItems]:
-    if len(items) == 1 and isinstance(items[0], (list, tuple)):
+    if (
+        len(items) == 1
+        and isinstance(items[0], Sequence)
+        and not isinstance(
+            items[0],
+            (str, bytes),
+        )
+    ):
         sequence = items[0]
         items_list = list(sequence)
     else:
         items_list: list[StreamItems] = []
         for item in items:
-            if isinstance(item, (list, tuple)):
-                raise InvalidConfigError("stream expects items or a single list/tuple")
+            if isinstance(item, Sequence) and not isinstance(item, (str, bytes)):
+                raise InvalidConfigError("stream expects items or a single sequence")
             items_list.append(item)
 
     if not items_list:
@@ -366,7 +367,7 @@ def _stream_from_tracks(
     config: ConfigInput | None,
     update: UpdateInput | None,
     prefetch_depth: int,
-    preview_policy: PreviewPolicy,
+    preview: bool,
     fallback: FallbackInput | None,
     fallback_model: ModelSpec,
     hooks: StreamHooks | None,
@@ -389,7 +390,7 @@ def _stream_from_tracks(
             config=config,
             update=update,
             prefetch_depth=prefetch_depth,
-            preview_policy=preview_policy,
+            preview=preview,
             fallback=fallback,
             fallback_model=resolved_fallback,
             hooks=resolved_hooks,
@@ -405,7 +406,7 @@ def _stream_from_tracks(
             config=config,
             update=update,
             prefetch_depth=prefetch_depth,
-            preview_policy=preview_policy,
+            preview=preview,
             fallback=fallback,
             fallback_model=resolved_fallback,
             hooks=resolved_hooks,

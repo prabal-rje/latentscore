@@ -23,7 +23,22 @@ audio.save(".examples/quickstart.wav")
 ```python
 import latentscore as ls
 
-for chunk in ls.stream("dark ambient", "sunrise", duration=60, transition=5):
+for chunk in ls.stream(["dark ambient", "sunrise"], duration=60, transition=5):
+    speaker.write(chunk)
+```
+
+Speculative streaming (fast warmup while slower models load) is available via:
+
+```python
+for chunk in ls.stream(
+    "dark ambient",
+    "sunrise",
+    duration=60,
+    transition=5,
+    model="expressive",
+    preview=True,
+    fallback_model="fast",
+):
     speaker.write(chunk)
 ```
 
@@ -68,7 +83,8 @@ Flags:
 ```bash
 python -m latentscore.demo --model expressive
 python -m latentscore.demo --model fast --vibe "late night neon"
-python -m latentscore.demo --live
+python -m latentscore.demo --live --model expressive
+python -m latentscore.demo --live --no-speculative
 python -m latentscore.demo --external --api-key "$GEMINI_API_KEY"
 ```
 
