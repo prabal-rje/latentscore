@@ -55,47 +55,15 @@ python -m latentscore.demo --model fast --save
 Outputs land in `.examples/` (gitignored). For external LLM demos, create a `.env`
 file at the repo root and set `GEMINI_API_KEY` (or override via `--api-key`).
 
-## Data work
-
-The data pipeline uses its own environment and scripts. See `data_work/README.md`
-for full details, including Modal training and benchmarking.
-
-## Tiny smoke commands
-
-These are minimal, small-footprint runs that exercise each outward-facing script.
+Live streaming example:
 
 ```bash
-# Demo
-python -m latentscore.demo --model fast --save
-
-# Data work: download tiny samples
-python -m data_work.01_download_base_data \
-  --seed 1 \
-  --sample-size 1 \
-  --output-dir data_work/.outputs_smoke
-
-# Data work: process tiny samples (requires OPENROUTER_API_KEY in .env)
-python -m data_work.02_process_base_data \
-  --input-dir data_work/.outputs_smoke \
-  --output-dir data_work/.processed_smoke \
-  --env-file .env \
-  --limit-per-split 1 \
-  --error-rate 0
-
-# Data work: debug noisy vibes
-python -m data_work.lib.debug_vibe_noisy \
-  --input data_work/.processed_smoke/SFT-Train.jsonl \
-  --limit 5
-
-# Data work: Modal import/mount check (requires Modal credentials)
-python -m data_work.03_modal_train check-imports
-
-# Data work: CLAP benchmark on dataset configs (requires laion-clap + torchvision)
-python -m data_work.04_clap_benchmark \
-  --input data_work/.processed_smoke/SFT-Train.jsonl \
-  --dataset-field config_payload:synthetic \
-  --limit 1
+python -m latentscore.demo --live --model fast
 ```
+
+## Data work
+
+See `data_work/README.md` for environment setup, pipeline scripts, benchmarks, and training.
 
 ## Tooling
 
