@@ -1,6 +1,9 @@
 # LatentScore
 
+> ⚠️ **Alpha**: This library is under active development. API may change between versions.
+
 Generate ambient music from text descriptions. Locally. No GPU required.
+
 Read more about how it works [here](https://substack.com/home/post/p-184245090).
 
 ```python
