@@ -1,7 +1,7 @@
 import asyncio
 from pathlib import Path
 
-from data_work.llm_cache import SqliteCache
+from data_work.lib.llm_cache import SqliteCache
 
 
 def test_sqlite_cache_roundtrip(tmp_path: Path) -> None:

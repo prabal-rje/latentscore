@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 MAX_LONG_FIELD_CHARS = 1_000
 MAX_SHORT_FIELD_CHARS = 100
-DEFAULT_MAX_INPUT_TOKENS = 200_000
+DEFAULT_MAX_INPUT_TOKENS = 100_000
 DEFAULT_PAGE_TOKENS = 1_000
 
 SPLITS: tuple[tuple[str, float], ...] = (
@@ -79,18 +79,16 @@ class VibeDescriptor(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    xs_vibe: str = Field(
+    xl_vibe: str = Field(
         ...,
         max_length=MAX_LONG_FIELD_CHARS,
-        description=(
-            "Ultra-short label (1-3 words) capturing the tiniest, most atomic vibe signal."
-        ),
+        description=("Extra-large description (2-3 short lines) that feels vivid and cinematic."),
     )
-    sm_vibe: str = Field(
+    lg_vibe: str = Field(
         ...,
         max_length=MAX_LONG_FIELD_CHARS,
         description=(
-            "Short phrase (5-10 words) that slightly expands the vibe while staying compact."
+            "Large description (2-3 sentences) adding nuance, tone shifts, and sensory cues."
         ),
     )
     m_vibe: str = Field(
@@ -100,17 +98,19 @@ class VibeDescriptor(BaseModel):
             "Medium description (1-2 sentences) capturing the mood with one concrete detail."
         ),
     )
-    lg_vibe: str = Field(
+    sm_vibe: str = Field(
         ...,
         max_length=MAX_LONG_FIELD_CHARS,
         description=(
-            "Large description (2-3 sentences) adding nuance, tone shifts, and sensory cues."
+            "Short phrase (5-10 words) that slightly expands the vibe while staying compact."
         ),
     )
-    xl_vibe: str = Field(
+    xs_vibe: str = Field(
         ...,
         max_length=MAX_LONG_FIELD_CHARS,
-        description=("Extra-large description (2-3 short lines) that feels vivid and cinematic."),
+        description=(
+            "Ultra-short label (1-3 words) capturing the tiniest, most atomic vibe signal."
+        ),
     )
 
     @field_validator("*", mode="before")
@@ -144,7 +144,7 @@ class CharacterVibes(BaseModel):
     @classmethod
     def _trim_name(cls, value: Any) -> str:
         text = _trim_text(value, MAX_SHORT_FIELD_CHARS)
-        return text or "anonymous"
+        return text or "none"
 
 
 class VibeObject(BaseModel):
@@ -157,12 +157,11 @@ class VibeObject(BaseModel):
         ge=0,
         description=("0-based index that increases by 1 in the order the vibe objects appear."),
     )
-    text_page: str = Field(
+    text_page: tuple[int, int] = Field(
         ...,
-        max_length=MAX_SHORT_FIELD_CHARS,
         description=(
-            "Page reference that anchors this vibe, using markers like 'Page 0' or "
-            "'Page 3-4' from the input text."
+            "Inclusive page range tuple. Use [start, end] with 0-based page numbers "
+            "matching the (Page N) markers in the input text."
         ),
     )
     characters: list[CharacterVibes] = Field(
@@ -184,9 +183,37 @@ class VibeObject(BaseModel):
 
     @field_validator("text_page", mode="before")
     @classmethod
-    def _trim_page(cls, value: Any) -> str:
-        text = _trim_text(value, MAX_SHORT_FIELD_CHARS)
-        return text or "Page 0"
+    def _parse_page(cls, value: Any) -> tuple[int, int]:
+        if value is None:
+            return (0, 0)
+        if isinstance(value, (list, tuple)):
+            items = list(value)
+            if not items:
+                return (0, 0)
+            if len(items) == 1:
+                start = int(items[0])
+                end = start
+            else:
+                start = int(items[0])
+                end = int(items[1])
+        elif isinstance(value, str):
+            numbers = [int(item) for item in re.findall(r"\d+", value)]
+            if not numbers:
+                return (0, 0)
+            if len(numbers) == 1:
+                start = numbers[0]
+                end = start
+            else:
+                start = numbers[0]
+                end = numbers[1]
+        else:
+            start = int(value)
+            end = start
+        if start > end:
+            start, end = end, start
+        if start < 0 or end < 0:
+            raise ValueError("text_page values must be >= 0")
+        return (start, end)
 
     @field_validator("tags", mode="before")
     @classmethod
@@ -238,7 +265,7 @@ def build_vibe_prompt() -> str:
         "return ONLY valid JSON that matches the schema exactly. "
         "Follow these rules strictly:\n"
         "- vibe_index starts at 0 and increments by 1 in output order.\n"
-        "- text_page must reference the page markers (e.g., 'Page 0', 'Page 2-3').\n"
+        "- text_page must be a 2-item list [start, end] with inclusive 0-based page numbers.\n"
         "- character_name uses real names when present; otherwise use labels like "
         "'anonymous', 'stranger 1', or '3rd person'.\n"
         "- character_perceived_vibes and scene_vibes use the 5-level descriptor ladder.\n"

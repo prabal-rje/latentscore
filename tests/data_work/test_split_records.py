@@ -1,4 +1,4 @@
-from data_work.vibe_schema import split_records
+from data_work.lib.vibe_schema import split_records
 
 
 def test_split_records_deterministic() -> None:

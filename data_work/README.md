@@ -3,16 +3,24 @@
 This folder is intended for researchers who want to generate data, train models, or otherwise
 run data preparation scripts outside of the core LatentScore package.
 
-## Environment setup
+## Environment setup (separate from core LatentScore)
 
-Create a local Python virtual environment and install dependencies:
+This data pipeline uses a dedicated conda environment to avoid pulling data-only dependencies
+into the main LatentScore install.
+
+```bash
+conda env create -f data_work/environment.yml
+conda activate latentscore-data
+```
+
+You can also use the local venv helper:
 
 ```bash
 ./data_work/setup_python_env.sh
 source data_work/.venv/bin/activate
 ```
 
-You can also do it manually:
+Or install manually:
 
 ```bash
 python3 -m venv data_work/.venv
@@ -22,7 +30,11 @@ pip install -r data_work/requirements.txt
 
 ## Scripts
 
-### `0_download_base_data.py`
+Prefer the numbered modules when running from the project root:
+`python -m data_work.01_download_base_data`, `data_work.02_process_base_data`,
+`data_work.03_modal_train`, `data_work.04_clap_benchmark`, `data_work.05_export_models`.
+
+### `01_download_base_data`
 
 Downloads Common Pile datasets, samples 1,000 texts from each, and writes JSONL files with
 standardized fields (`created`, `metadata`, `dataset`, `id_in_dataset`, `text`). The script
@@ -31,28 +43,179 @@ prints approximate download sizes and prompts for confirmation before downloadin
 Usage example:
 
 ```bash
-python data_work/0_download_base_data.py --seed 123 --sample-size 1000 --output-dir data_work/.outputs
+python -m data_work.01_download_base_data \
+  --seed 123 \
+  --sample-size 1000 \
+  --output-dir data_work/.outputs
 ```
 
-### `1_process_base_data.py`
+### `02_process_base_data`
 
 Validates that downloaded JSONL files match the expected schema, splits them into
-SFT-Train/SFT-Val/GRPO/TEST, and uses LiteLLM to generate vibe objects per text with
-caching, rate limiting, and deterministic noise injection.
+SFT-Train/SFT-Val/GRPO/TEST, and uses LiteLLM to:
+
+- extract structured vibe objects per text
+- inject deterministic noise into ~15 percent of vibes
+- generate music configs per vibe level with a separate model
+- dedupe near-identical vibes per dataset using embeddings
+- write one JSONL per split + a `run_config.json` alongside the outputs
+
+The script prints a configuration hash at startup and uses SQLite caching to make repeated
+runs deterministic and fast.
+
+Noise injection requires `nlpaug` (the run exits if it's missing and `--error-rate > 0`).
+If a split produces zero noisy rows, one row is force-noised to ensure the pipeline is
+exercised.
+
+## CLI usage
+
+Basic processing (uses `OPENROUTER_API_KEY` from `examples/.env`):
+
+```bash
+python -m data_work.02_process_base_data \
+  --input-dir data_work/.outputs \
+  --output-dir data_work/.processed \
+  --env-file examples/.env
+```
+
+Quick E2E smoke run (10 rows total, 2 per split):
+
+```bash
+python -m data_work.02_process_base_data \
+  --input-dir data_work/.outputs \
+  --output-dir data_work/.processed \
+  --env-file examples/.env \
+  --limit-per-split 2
+```
+
+Run from a saved config file (auto-generated in the output folder):
+
+```bash
+python -m data_work.02_process_base_data \
+  --config-file data_work/.processed/run_config.json \
+  --input-dir data_work/.outputs \
+  --output-dir data_work/.processed
+```
+
+Model kwargs (pass JSON strings through to LiteLLM):
+
+```bash
+python -m data_work.02_process_base_data \
+  --input-dir data_work/.outputs \
+  --output-dir data_work/.processed \
+  --env-file examples/.env \
+  --model-kwargs '{"timeout": 120}' \
+  --config-model-kwargs '{"max_tokens": 512}'
+```
+
+Show advanced options (rate limits, retries, dedupe thresholds, etc.):
+
+```bash
+python -m data_work.02_process_base_data --extra-help
+```
+
+### `debug_vibe_noisy`
+
+Quick sanity check for `vibe_noisy` differences in existing outputs plus an
+nlpaug noise demo.
+
+```bash
+python -m data_work.debug_vibe_noisy \
+  --input data_work/.processed_smoke2/SFT-Train.jsonl \
+  --limit 200
+```
+
+### `03_modal_train`
+
+Launches Modal-based SFT + GRPO training for tiny models. Training defaults to
+the noisy vibe column (`vibe_noisy`) and full config payload (`config_payload`),
+so the model learns to handle corrupted inputs while inference remains clean.
+
+If `--download-dir` is set, outputs are downloaded into `<download-dir>/<output>`.
+Use `--delete-remote` to remove the Modal volume output after a successful download.
 
 Usage example:
 
 ```bash
-python data_work/1_process_base_data.py \
-  --input-dir data_work/.outputs \
-  --output-dir data_work/.processed \
-  --model openrouter/openai/gpt-oss-20b \
-  --env-file examples/.env
+python -m data_work.03_modal_train check-imports
 ```
 
-Tip: use `--limit-per-split 10` for quick E2E smoke runs, and tune `--max-concurrency`
-and `--max-qps` to respect rate limits.
-Note: OpenRouter's `openai/gpt-oss-20b` currently caps at ~131k tokens, so set
-`--max-input-tokens 131072` to avoid 400 errors when using the default 200k limit.
+```bash
+python -m data_work.03_modal_train sft \
+  --data data_work/.processed/SFT-Train.jsonl \
+  --output smollm2-sft \
+  --epochs 1 \
+  --download-dir data_work/.modal_outputs \
+  --delete-remote
+```
 
-Use `-h` on each script for detailed CLI help and arguments.
+```bash
+python -m data_work.03_modal_train grpo \
+  --data data_work/.processed/GRPO.jsonl \
+  --model /outputs/smollm2-sft \
+  --output smollm2-grpo \
+  --epochs 1 \
+  --download-dir data_work/.modal_outputs \
+  --delete-remote
+```
+
+### `04_clap_benchmark`
+
+Scores configs with LAION-CLAP. You can benchmark dataset configs, LiteLLM
+models, and local HF models by supplying multiple sources.
+Defaults to the clean vibe column (`vibe_original`) for inference.
+
+Usage example (synthetic configs + teacher model):
+
+```bash
+python -m data_work.04_clap_benchmark \
+  --input data_work/.processed/TEST.jsonl \
+  --dataset-field config_payload:synthetic \
+  --litellm-model openrouter/openai/gpt-oss-20b:teacher \
+  --env-file examples/.env \
+  --limit 10
+```
+
+Usage example (local model):
+
+```bash
+python -m data_work.04_clap_benchmark \
+  --input data_work/.processed/TEST.jsonl \
+  --local-model /path/to/sft-model:local \
+  --limit 10
+```
+
+### `05_export_models`
+
+Merges LoRA adapters into full-precision checkpoints and optionally exports
+GGUF/MLC artifacts.
+
+### Notes on defaults
+
+- Default vibe model: `openrouter/openai/gpt-oss-20b`
+- Default config model: `openrouter/openai/gpt-oss-20b`
+- Default context window: `--max-input-tokens 100000`
+- OpenRouter GPT-OSS currently caps at ~131k tokens; set `--max-input-tokens 131072` if needed.
+- If you override the default vibe model, the script logs a warning with the current
+  context size so you can adjust it for the new model.
+- If `--api-key` is not provided, the script falls back to `OPENROUTER_API_KEY` and
+  logs a masked key preview (prefix/suffix only).
+
+### Output format
+
+Each split produces `SFT-Train.jsonl`, `SFT-Val.jsonl`, `GRPO.jsonl`, `TEST.jsonl` with one
+row per vibe level (xl/lg/m/sm/xs). Rows include:
+
+- `dataset`, `id_in_dataset`, `split`, `vibe_index`, `text_page`
+- `vibe_scope` (`scene` or `character`) and optional `character_name`
+- `vibe_level`, `vibe_original`, `vibe_noisy`
+- `tags_original`, `tags_noisy`
+- `vibe_model`, `config_model`, `config_payload`
+- `config_error` if config generation failed
+
+The output directory also contains `run_config.json` with the non-secret configuration used
+to produce the dataset.
+
+### Helper modules
+
+Non-entrypoint helpers live under `data_work/lib/` and are imported by the entrypoints.

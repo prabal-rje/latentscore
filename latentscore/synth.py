@@ -325,7 +325,9 @@ def _butter_cached(
     b_raw, a_raw = coeffs
     assert isinstance(b_raw, np.ndarray)
     assert isinstance(a_raw, np.ndarray)
-    return b_raw, a_raw
+    b = np.asarray(b_raw, dtype=np.float64)
+    a = np.asarray(a_raw, dtype=np.float64)
+    return b, a
 
 
 def apply_lowpass(signal: FloatArray, cutoff: float, sr: int = SAMPLE_RATE) -> FloatArray:

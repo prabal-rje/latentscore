@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from data_work.resilience import EWMAErrorTracker, retry_async
+from data_work.lib.resilience import EWMAErrorTracker, retry_async
 
 
 async def _always_fail() -> None:

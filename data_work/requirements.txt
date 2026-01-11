@@ -5,3 +5,13 @@ litellm>=1.42
 nlpaug>=1.1
 python-dotenv>=1.0
 tqdm>=4.66
+sentence-transformers>=2.7
+scikit-learn>=1.4
+modal>=0.72
+wandb>=0.21
+weave>=0.50
+laion-clap
+soundfile
+torch
+torchaudio
+transformers>=4.40
