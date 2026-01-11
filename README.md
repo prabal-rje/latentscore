@@ -1,9 +1,13 @@
 # LatentScore
 
-LatentScore is a local-first audio synthesis library. It turns short text vibes or
-structured configs into short audio clips, with a DX layer for rendering, streaming,
-and composing playlists. The repo also contains a separate data pipeline for
-building datasets, benchmarking configs, and training small models.
+Generate ambient music from text descriptions. Locally. No GPU required.
+Read more about how it works [here](https://substack.com/home/post/p-184245090).
+
+```python
+import latentscore as ls
+
+ls.render("warm sunset over water").play()
+```
 
 ## Repo layout
 
