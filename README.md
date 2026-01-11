@@ -17,16 +17,30 @@ building datasets, benchmarking configs, and training small models.
 ### Conda
 
 ```bash
+# download the repo
+git clone https://github.com/prabal-rje/latentscore
+cd latentscore
+
+# create the env, install dependencies
 conda env create -f environment.yml
 conda activate latentscore
+
+# install latentscore
 pip install -e .
 ```
 
 ### Pip
 
 ```bash
+# download the repo
+git clone https://github.com/prabal-rje/latentscore
+cd latentscore
+
+# create the env
 python -m venv .venv
 source .venv/bin/activate
+
+# install dependencies, install latentscore
 pip install -r requirements.txt
 pip install -e .
 ```
