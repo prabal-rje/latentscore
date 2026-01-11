@@ -42,5 +42,5 @@ extend-select = ["I"]
 quote-style = "double"
 
 [tool.pytest.ini_options]
-addopts = "--asyncio-mode=auto --maxfail=1 --cov=app --cov-report=term-missing"
+addopts = "--asyncio-mode=auto --maxfail=1 --cov=latentscore --cov=data_work --cov-report=term-missing"
 testpaths = ["tests"]

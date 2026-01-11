@@ -1,5 +1,5 @@
 {
-  "include": ["src", "latentscore"],
+  "include": ["latentscore"],
   "pythonVersion": "3.10",
   "typeCheckingMode": "strict",
   "reportUnusedImport": "warning",

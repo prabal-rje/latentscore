@@ -74,7 +74,7 @@ async def test_notify_user_early_exit_on_missing_recipient():
     assert fake.sent == []
 ```
 
-## Diagnostics log viewer
+## Demo CLI
 ```bash
-python -m app.diagnostics_tui --log-dir "$HOME/Library/Logs/Sample App"
+python -m latentscore.demo --model fast --save
 ```

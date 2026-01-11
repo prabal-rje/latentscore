@@ -188,7 +188,7 @@ def _build_parser(*, include_extra: bool, use_defaults: bool) -> argparse.Argume
         type=Path,
         default=None,
         use_defaults=use_defaults,
-        help="Optional .env file to load (defaults to .env or examples/.env if present).",
+        help="Optional .env file to load (defaults to .env if present).",
     )
     _add_arg(
         parser,

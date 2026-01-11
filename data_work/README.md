@@ -69,13 +69,13 @@ exercised.
 
 ## CLI usage
 
-Basic processing (uses `OPENROUTER_API_KEY` from `examples/.env`):
+Basic processing (uses `OPENROUTER_API_KEY` from `.env` at the repo root):
 
 ```bash
 python -m data_work.02_process_base_data \
   --input-dir data_work/.outputs \
   --output-dir data_work/.processed \
-  --env-file examples/.env
+  --env-file .env
 ```
 
 Quick E2E smoke run (10 rows total, 2 per split):
@@ -84,7 +84,7 @@ Quick E2E smoke run (10 rows total, 2 per split):
 python -m data_work.02_process_base_data \
   --input-dir data_work/.outputs \
   --output-dir data_work/.processed \
-  --env-file examples/.env \
+  --env-file .env \
   --limit-per-split 2
 ```
 
@@ -103,7 +103,7 @@ Model kwargs (pass JSON strings through to LiteLLM):
 python -m data_work.02_process_base_data \
   --input-dir data_work/.outputs \
   --output-dir data_work/.processed \
-  --env-file examples/.env \
+  --env-file .env \
   --model-kwargs '{"timeout": 120}' \
   --config-model-kwargs '{"max_tokens": 512}'
 ```
@@ -120,7 +120,7 @@ Quick sanity check for `vibe_noisy` differences in existing outputs plus an
 nlpaug noise demo.
 
 ```bash
-python -m data_work.debug_vibe_noisy \
+python -m data_work.lib.debug_vibe_noisy \
   --input data_work/.processed_smoke2/SFT-Train.jsonl \
   --limit 200
 ```
@@ -178,7 +178,7 @@ python -m data_work.04_clap_benchmark \
   --input data_work/.processed/TEST.jsonl \
   --dataset-field config_payload:synthetic \
   --litellm-model openrouter/openai/gpt-oss-20b:teacher \
-  --env-file examples/.env \
+  --env-file .env \
   --limit 10
 ```
 
@@ -194,7 +194,7 @@ python -m data_work.04_clap_benchmark \
 ### `05_export_models`
 
 Merges LoRA adapters into full-precision checkpoints and optionally exports
-GGUF/MLC artifacts.
+GGUF/MLC artifacts. The default merged output path is `data_work/.exports/combined-model`.
 
 ### Notes on defaults
 

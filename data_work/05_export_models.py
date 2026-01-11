@@ -16,7 +16,7 @@ LOGGER = logging.getLogger(__name__)
 
 DEFAULT_GGUF_QUANT = "q4_k_m"
 DEFAULT_MLC_QUANT = "q4f16_1"
-DEFAULT_MERGED_NAME = "combined-model"
+DEFAULT_MERGED_NAME = "data_work/.exports/combined-model"
 
 
 class ExportConfig(BaseModel):

@@ -18,6 +18,12 @@ If the environment already exists, update it:
 conda env update -f environment.yml --prune
 ```
 
+`environment.yml` installs the same dependencies as `requirements.txt`, so pip users can install:
+
+```bash
+pip install -r requirements.txt
+```
+
 ### 3. Activate the Environment
 
 Before installing packages, activate the new environment:

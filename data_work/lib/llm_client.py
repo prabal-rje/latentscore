@@ -23,7 +23,7 @@ class LLMResponseError(RuntimeError):
 
 
 def load_env_file(env_path: Path | None) -> None:
-    candidates = [Path(".env"), Path("examples/.env")]
+    candidates = [Path(".env")]
     resolved = env_path
     if resolved is None:
         for candidate in candidates:

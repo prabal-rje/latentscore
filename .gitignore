@@ -16,6 +16,10 @@ venv/
 .env
 *.env
 
+# --- Local Outputs ---
+
+.examples/
+
 # --- Heavy Assets (The Binaries) ---
 
 # 1. Models: We download these via 'make download-models'
@@ -53,5 +57,8 @@ dist/
 **/repomix-output.md
 docs/plans/**/*.md
 data_work/.cache/
-data_work/.outputs/
-data_work/.processed/
+data_work/.outputs*/
+data_work/.processed*/
+data_work/.benchmarks/
+data_work/.modal_outputs/
+data_work/.exports/
