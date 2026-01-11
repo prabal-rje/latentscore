@@ -39,9 +39,10 @@ Use `latentscore doctor` to sanity-check local assets before running:
 
 ## Quickstart
 - Apple Silicon recommended; use an arm64 Conda (e.g. Miniforge) when possible.
-- `conda create -n latentscore python=3.10` and `conda activate latentscore`.
-- `pip install -r requirements.txt`.
-- Run the demo: `PYTHONPATH=src python -m app` (or `pip install -e .` once).
+- `conda env create -f environment.yml` (or `conda env update -f environment.yml --prune`).
+- `conda activate latentscore`.
+- Optional: `pip install -e .` for editable installs.
+- Run the demo: `PYTHONPATH=src python -m app` (or `python -m latentscore.demo`).
 
 ## UI demos
 - Textual TUI: `python -m app.tui` renders a centered `Hello world!` message in the terminal.

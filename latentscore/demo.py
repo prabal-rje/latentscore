@@ -20,7 +20,7 @@ from latentscore.prompt_examples import FEW_SHOT_EXAMPLES as TRACK_EXAMPLES_TEXT
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / ".examples"
-EXTERNAL_MODEL = "external:gemini/gemini-3-pro-preview"
+EXTERNAL_MODEL = "external:gemini/gemini-3-flash-preview"
 EXTERNAL_API_ENV = "GEMINI_API_KEY"
 # EXTERNAL_MODEL = "external:anthropic/claude-opus-4-5-20251101"
 # EXTERNAL_API_ENV = "ANTHROPIC_API_KEY"
@@ -201,18 +201,17 @@ def _demo_render_vibe(vibe: str, *, model: ModelChoice, save: bool) -> None:
 
 
 def _demo_external_with_key(model: str, api_key: str, *, save: bool) -> None:
-    print("HELLO CHAD THIS IS HERE!")
     stream = ls.stream(
         "vinyl crackle midnight jazz",
-        chunk_seconds=1.0,
+        chunk_seconds=2,
         duration=30.0,
-        model=ls.ExternalModelSpec(model=model, api_key=api_key),
-        preview=False,
-        fallback_model="fast",
+        model=ls.ExternalModelSpec(model=model, api_key=api_key, litellm_kwargs={"temperature": 0.0}),
+        # model="fast",
+        #preview=True,
     )
-    play_stream(stream, sample_rate=ls.SAMPLE_RATE)
+    stream.play()
     if save:
-        audio.save(OUTPUT_DIR / "demo_external_key.wav")
+        stream.save(OUTPUT_DIR / "demo_external_key.wav")
 
 
 def _demo_external_with_env(model: str, api_env: str, *, save: bool) -> bool:
@@ -222,7 +221,7 @@ def _demo_external_with_env(model: str, api_env: str, *, save: bool) -> bool:
     os.environ[api_env] = api_key
     audio = ls.render(
         "vinyl crackle midnight jazz",
-        duration=6.0,
+        duration=30.0,
         model=ls.ExternalModelSpec(model=model, api_key=None),
     )
     audio.play()

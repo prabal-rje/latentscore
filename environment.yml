@@ -3,10 +3,12 @@ channels:
   - conda-forge
 dependencies:
   - python=3.10
-  - numpy
-  - scipy
   - pip
   - pip:
+    # Core Numerics (Install via pip to ensure binary compatibility with MLX/Torch)
+    - numpy
+    - scipy
+    
     # Audio
     - soundfile
     - sounddevice
@@ -15,8 +17,11 @@ dependencies:
     # LLM, MLX
     - mlx>=0.22
     - mlx-lm>=0.22
-    - llm-structured-output  # MLX-native JSON schema
-    - "outlines[mlxlm]"    
+    - llm-structured-output
+    - "outlines[mlxlm]"
+    - transformers<5
+    - huggingface_hub>=0.20
+    - sentencepiece
     - litellm
     - json-repair
     
@@ -44,4 +49,6 @@ dependencies:
     - pytest-asyncio>=0.23
     - pytest-cov>=4.1
     - ruff>=0.6
-  
+
+    # Safety: Pin protobuf to prevent TensorFlow/ONNX conflicts
+    - protobuf>=3.20,<5.0

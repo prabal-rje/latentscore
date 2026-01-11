@@ -310,8 +310,6 @@ class LiteLLMAdapter:
             }
         )
 
-        print(json.dumps(messages, indent=2))
-
         request = _LiteLLMRequest(
             model=self._model,
             messages=messages,

@@ -21,6 +21,7 @@ class RichIndicator:
         self._spinner = Spinner("Starting", stream=self._stream, enabled=enabled)
         self._started = False
         self._stopped = False
+        self._preview_items: set[int] = set()
 
     def render_hooks(self) -> RenderHooks:
         return RenderHooks(
@@ -40,6 +41,7 @@ class RichIndicator:
             on_model_load_end=self._on_stream_model_load_end,
             on_stream_start=self._on_stream_start,
             on_item_resolve_start=self._on_item_resolve_start,
+            on_item_resolve_success=self._on_item_resolve_success,
             on_item_resolve_error=self._on_item_resolve_error,
             on_item_preview_start=self._on_item_preview_start,
             on_first_config_ready=self._on_first_config_ready,
@@ -120,8 +122,15 @@ class RichIndicator:
         preview: bool,
     ) -> None:
         _ = item
+        self._preview_items.add(index)
         label = "speculative" if preview else "standard"
         self._start(f"Generating preview ({label}) for item {index + 1}")
+
+    def _on_item_resolve_success(self, index: int, item: Streamable) -> None:
+        _ = item
+        if index in self._preview_items:
+            self._preview_items.discard(index)
+            self._start(f"Applying final config for item {index + 1}")
 
     def _on_item_resolve_error(
         self,

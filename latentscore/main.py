@@ -30,7 +30,7 @@ from .config import (
     is_empty_update,
     merge_internal_config,
 )
-from .errors import InvalidConfigError
+from .errors import InvalidConfigError, ModelNotAvailableError
 from .logging_utils import log_exception
 from .models import (
     EXTERNAL_PREFIX,
@@ -223,8 +223,33 @@ class FirstAudioSpinner:
 
 
 _MIN_CHUNK_SECONDS = 1e-6
+_MIN_RECOMMENDED_DURATION_SECONDS = 5.0
+_MIN_RECOMMENDED_TRANSITION_SECONDS = 1.0
 _LOGGER = logging.getLogger("latentscore.main")
 _EXECUTOR = ThreadPoolExecutor(max_workers=1)
+
+
+class _PendingTaskError(Exception):
+    def __init__(self, error: Exception) -> None:
+        super().__init__(str(error))
+        self.error = error
+
+
+def _suppress_task_exception(task: asyncio.Task[object]) -> None:
+    try:
+        _ = task.exception()
+    except asyncio.CancelledError:
+        return
+    except Exception as exc:
+        _LOGGER.debug("Background task failed: %s", exc, exc_info=True)
+
+
+def _cancel_task(task: asyncio.Task[object]) -> None:
+    if task.done():
+        _suppress_task_exception(task)
+        return
+    task.add_done_callback(_suppress_task_exception)
+    task.cancel()
 
 
 class Streamable(BaseModel):
@@ -552,6 +577,30 @@ def _iter_transition_configs(
         t = step / steps
         interpolated = interpolate_configs(start, end, t)
         yield _from_synth_config(interpolated)
+
+
+def _warn_aggressive_timing(
+    *,
+    duration: float,
+    transition_duration: float,
+    warned: dict[str, bool],
+) -> None:
+    if duration < _MIN_RECOMMENDED_DURATION_SECONDS and not warned["duration"]:
+        warned["duration"] = True
+        _LOGGER.warning(
+            "Track duration %.2fs is very short (<%.1fs). "
+            "This can reduce quality, and the model may not generate configs fast enough.",
+            duration,
+            _MIN_RECOMMENDED_DURATION_SECONDS,
+        )
+    if transition_duration < _MIN_RECOMMENDED_TRANSITION_SECONDS and not warned["transition"]:
+        warned["transition"] = True
+        _LOGGER.warning(
+            "Transition duration %.2fs is very short (<%.1fs). "
+            "Rapid transitions can significantly impact quality.",
+            transition_duration,
+            _MIN_RECOMMENDED_TRANSITION_SECONDS,
+        )
 
 
 def _wrap_streamables(
@@ -889,9 +938,92 @@ async def _resolve_preview(
     if not preview or not isinstance(item.content, str):
         return None
     if fallback_load is not None:
-        await fallback_load.ensure_loaded()
-    preview_config = await fallback_model.generate(item.content)
+        try:
+            await fallback_load.ensure_loaded()
+        except ModelNotAvailableError as exc:
+            _LOGGER.warning("Preview model unavailable: %s", exc, exc_info=True)
+            return None
+        except Exception as exc:
+            _LOGGER.warning("Preview model warmup failed: %s", exc, exc_info=True)
+            return None
+    try:
+        preview_config = await fallback_model.generate(item.content)
+    except ModelNotAvailableError as exc:
+        _LOGGER.warning("Preview generation unavailable: %s", exc, exc_info=True)
+        return None
+    except Exception as exc:
+        _LOGGER.warning("Preview generation failed: %s", exc, exc_info=True)
+        return None
     return _apply_update(preview_config.to_internal(), update)
+
+
+async def _resolve_preview_or_primary(
+    *,
+    item: Streamable,
+    index: int,
+    pending_task: asyncio.Task[_MusicConfigInternal],
+    preview: bool,
+    fallback_model: ModelForGeneratingMusicConfig,
+    update: UpdateInput | None,
+    fallback_load: _ModelLoadState | None,
+    hooks: StreamHooks | None,
+) -> tuple[_MusicConfigInternal, asyncio.Task[_MusicConfigInternal] | None]:
+    if pending_task.done():
+        try:
+            target = _apply_update(pending_task.result(), update)
+        except Exception as exc:
+            raise _PendingTaskError(exc) from exc
+        _emit_event(hooks, StreamEvent(kind="item_resolve_success", index=index, item=item))
+        return target, None
+
+    if not preview or not isinstance(item.content, str):
+        try:
+            target = _apply_update(await pending_task, update)
+        except Exception as exc:
+            raise _PendingTaskError(exc) from exc
+        _emit_event(hooks, StreamEvent(kind="item_resolve_success", index=index, item=item))
+        return target, None
+
+    preview_task = asyncio.create_task(
+        _resolve_preview(
+            item,
+            preview=preview,
+            fallback_model=fallback_model,
+            update=update,
+            fallback_load=fallback_load,
+        )
+    )
+    _done, _pending = await asyncio.wait(
+        {pending_task, preview_task},
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    if pending_task.done():
+        _cancel_task(preview_task)
+        try:
+            target = _apply_update(pending_task.result(), update)
+        except Exception as exc:
+            raise _PendingTaskError(exc) from exc
+        _emit_event(hooks, StreamEvent(kind="item_resolve_success", index=index, item=item))
+        return target, None
+
+    try:
+        preview_config = await preview_task
+    except Exception as exc:
+        _LOGGER.warning("Preview task failed: %s", exc, exc_info=True)
+        preview_config = None
+    if preview_config is None:
+        try:
+            target = _apply_update(await pending_task, update)
+        except Exception as exc:
+            raise _PendingTaskError(exc) from exc
+        _emit_event(hooks, StreamEvent(kind="item_resolve_success", index=index, item=item))
+        return target, None
+
+    _emit_event(
+        hooks,
+        StreamEvent(kind="item_preview_start", index=index, item=item, preview=preview),
+    )
+    return preview_config, pending_task
 
 
 async def _resolve_fallback(
@@ -913,17 +1045,45 @@ async def _resolve_fallback(
             base = current or _default_internal_config()
             return _apply_update(base, update)
         if fallback_load is not None:
-            await fallback_load.ensure_loaded()
-        target = await fallback_model.generate(item.content)
+            try:
+                await fallback_load.ensure_loaded()
+            except ModelNotAvailableError as exc:
+                _LOGGER.warning("Fallback model unavailable: %s", exc, exc_info=True)
+            except Exception as exc:
+                _LOGGER.warning("Fallback model warmup failed: %s", exc, exc_info=True)
+        try:
+            target = await fallback_model.generate(item.content)
+        except ModelNotAvailableError as exc:
+            _LOGGER.warning("Fallback generation unavailable: %s", exc, exc_info=True)
+            base = current or _default_internal_config()
+            return _apply_update(base, update)
+        except Exception as exc:
+            _LOGGER.warning("Fallback generation failed: %s", exc, exc_info=True)
+            base = current or _default_internal_config()
+            return _apply_update(base, update)
         return _apply_update(target.to_internal(), update)
     if fallback_load is not None and isinstance(fallback, str):
-        await fallback_load.ensure_loaded()
-    return await _resolve_target_async(
-        fallback,
-        current=current,
-        model=fallback_model,
-        update=update,
-    )
+        try:
+            await fallback_load.ensure_loaded()
+        except ModelNotAvailableError as exc:
+            _LOGGER.warning("Fallback model unavailable: %s", exc, exc_info=True)
+            base = current or _default_internal_config()
+            return _apply_update(base, update)
+        except Exception as exc:
+            _LOGGER.warning("Fallback model warmup failed: %s", exc, exc_info=True)
+            base = current or _default_internal_config()
+            return _apply_update(base, update)
+    try:
+        return await _resolve_target_async(
+            fallback,
+            current=current,
+            model=fallback_model,
+            update=update,
+        )
+    except ModelNotAvailableError as exc:
+        _LOGGER.warning("Fallback generation unavailable: %s", exc, exc_info=True)
+        base = current or _default_internal_config()
+        return _apply_update(base, update)
 
 
 async def _render_chunk(
@@ -1049,6 +1209,7 @@ async def astream(
         prefetch_target = max(1, prefetch_depth + 1)
         first_config_ready = False
         first_audio_chunk = False
+        warned: dict[str, bool] = {"duration": False, "transition": False}
 
         async def _next_item() -> Streamable | None:
             try:
@@ -1080,6 +1241,11 @@ async def astream(
 
             item = prefetched.item
             index = prefetched.index
+            _warn_aggressive_timing(
+                duration=item.duration,
+                transition_duration=item.transition_duration,
+                warned=warned,
+            )
             item_preview = item.preview if item.preview is not None else preview
             item_fallback = item.fallback if item.fallback is not None else fallback
             pending_task = prefetched.task
@@ -1096,104 +1262,47 @@ async def astream(
                 )
                 _emit_event(hooks, StreamEvent(kind="item_resolve_success", index=index, item=item))
             else:
-                if pending_task.done():
-                    try:
-                        target = _apply_update(pending_task.result(), update)
-                        _emit_event(
-                            hooks,
-                            StreamEvent(kind="item_resolve_success", index=index, item=item),
-                        )
-                    except Exception as exc:
-                        _emit_event(
-                            hooks,
-                            StreamEvent(
-                                kind="item_resolve_error",
-                                index=index,
-                                item=item,
-                                error=exc,
-                                fallback=item_fallback,
-                            ),
-                        )
-                        target = await _resolve_fallback(
-                            item,
-                            current=current,
-                            fallback=item_fallback,
-                            fallback_model=fallback_resolved,
-                            update=update,
-                            fallback_load=fallback_load,
-                        )
-                        if target is None:
-                            raise
-                        _emit_event(
-                            hooks,
-                            StreamEvent(
-                                kind="fallback_used",
-                                index=index,
-                                item=item,
-                                fallback=item_fallback,
-                            ),
-                        )
-                else:
-                    preview_config = await _resolve_preview(
-                        item,
+                try:
+                    target, pending_real_task = await _resolve_preview_or_primary(
+                        item=item,
+                        index=index,
+                        pending_task=pending_task,
                         preview=item_preview,
                         fallback_model=fallback_resolved,
                         update=update,
                         fallback_load=fallback_load,
+                        hooks=hooks,
                     )
-                    if preview_config is not None:
-                        target = preview_config
-                        pending_real_task = pending_task
-                        _emit_event(
-                            hooks,
-                            StreamEvent(
-                                kind="item_preview_start",
-                                index=index,
-                                item=item,
-                                preview=item_preview,
-                            ),
-                        )
-                    else:
-                        try:
-                            target = _apply_update(await pending_task, update)
-                            _emit_event(
-                                hooks,
-                                StreamEvent(
-                                    kind="item_resolve_success",
-                                    index=index,
-                                    item=item,
-                                ),
-                            )
-                        except Exception as exc:
-                            _emit_event(
-                                hooks,
-                                StreamEvent(
-                                    kind="item_resolve_error",
-                                    index=index,
-                                    item=item,
-                                    error=exc,
-                                    fallback=item_fallback,
-                                ),
-                            )
-                            target = await _resolve_fallback(
-                                item,
-                                current=current,
-                                fallback=item_fallback,
-                                fallback_model=fallback_resolved,
-                                update=update,
-                                fallback_load=fallback_load,
-                            )
-                            if target is None:
-                                raise
-                            _emit_event(
-                                hooks,
-                                StreamEvent(
-                                    kind="fallback_used",
-                                    index=index,
-                                    item=item,
-                                    fallback=item_fallback,
-                                ),
-                            )
+                except _PendingTaskError as exc:
+                    _emit_event(
+                        hooks,
+                        StreamEvent(
+                            kind="item_resolve_error",
+                            index=index,
+                            item=item,
+                            error=exc.error,
+                            fallback=item_fallback,
+                        ),
+                    )
+                    target = await _resolve_fallback(
+                        item,
+                        current=current,
+                        fallback=item_fallback,
+                        fallback_model=fallback_resolved,
+                        update=update,
+                        fallback_load=fallback_load,
+                    )
+                    if target is None:
+                        raise
+                    _emit_event(
+                        hooks,
+                        StreamEvent(
+                            kind="fallback_used",
+                            index=index,
+                            item=item,
+                            fallback=item_fallback,
+                        ),
+                    )
 
             if not first_config_ready:
                 _emit_event(hooks, StreamEvent(kind="first_config_ready", index=index, item=item))
@@ -1229,17 +1338,37 @@ async def astream(
                 case _:
                     raise InvalidConfigError("Stream exhausted with an invalid config")
 
+# ... (inside astream function) ...
+
             while remaining > 0:
-                if pending_real_task is not None and pending_real_task.done():
+                # 1. Create the render task but don't await it yet
+                render_task = asyncio.create_task(
+                    _render_chunk(current_config, chunk_seconds=chunk_seconds)
+                )
+                
+                # 2. Prepare tasks to wait on
+                waiting_on = {render_task}
+                if pending_real_task is not None and not pending_real_task.done():
+                    waiting_on.add(pending_real_task)
+
+                # 3. Race: Wait for EITHER the render to finish OR the LLM to reply
+                done, _ = await asyncio.wait(
+                    waiting_on, 
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+
+                # 4. Handle LLM completion (Priority)
+                if pending_real_task in done:
+                    # The LLM finished!
+                    # Cancel the preview render since we have the "real" data now
+                    render_task.cancel()
+                    _suppress_task_exception(render_task)
+                    
                     try:
                         real_target = _apply_update(pending_real_task.result(), update)
                         _emit_event(
                             hooks,
-                            StreamEvent(
-                                kind="item_resolve_success",
-                                index=index,
-                                item=item,
-                            ),
+                            StreamEvent(kind="item_resolve_success", index=index, item=item),
                         )
                     except Exception as exc:
                         _emit_event(
@@ -1252,6 +1381,7 @@ async def astream(
                                 fallback=item_fallback,
                             ),
                         )
+                        # ... (existing fallback logic) ...
                         real_target = await _resolve_fallback(
                             item,
                             current=current,
@@ -1273,10 +1403,13 @@ async def astream(
                         )
 
                     pending_real_task = None
+                    
+                    # Calculate transition from WHERE WE ARE (current_config) to NEW TARGET
                     transition = min(
                         remaining,
                         _transition_steps(item.transition_duration, chunk_seconds),
                     )
+                    
                     if transition > 0:
                         for config_item in _iter_transition_configs(
                             current_config,
@@ -1291,13 +1424,20 @@ async def astream(
                         remaining -= transition
                         current = current_config
                         continue
+                    
+                    # No transition needed, snap to target
                     current_config = real_target
                     current = real_target
+                    # Loop back to start rendering with the NEW config immediately
+                    continue
 
+                # 5. Handle Render completion (LLM didn't finish yet)
+                # If we get here, the LLM wasn't the winner, so the render must be done.
                 if not first_audio_chunk:
                     _emit_event(hooks, StreamEvent(kind="first_audio_chunk"))
                     first_audio_chunk = True
-                yield await _render_chunk(current_config, chunk_seconds=chunk_seconds)
+                
+                yield await render_task
                 remaining -= 1
 
             if pending_real_task is not None and not pending_real_task.done():
