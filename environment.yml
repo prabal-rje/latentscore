@@ -42,6 +42,9 @@ dependencies:
     - dependency-injector>=4.42
     - pyperclip>=1.8
     - python-dotenv
+    - aiosqlite>=0.20
+    - nlpaug>=1.1
+    - tqdm>=4.66
     
     # Dev
     - pyright>=1.1

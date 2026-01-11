@@ -1,2 +1,7 @@
 datasets>=2.18
 pydantic>=2
+aiosqlite>=0.20
+litellm>=1.42
+nlpaug>=1.1
+python-dotenv>=1.0
+tqdm>=4.66

@@ -52,4 +52,6 @@ dist/
 **/repomix-output.xml
 **/repomix-output.md
 docs/plans/**/*.md
-
+data_work/.cache/
+data_work/.outputs/
+data_work/.processed/
