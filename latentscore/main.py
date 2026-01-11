@@ -1338,24 +1338,21 @@ async def astream(
                 case _:
                     raise InvalidConfigError("Stream exhausted with an invalid config")
 
-# ... (inside astream function) ...
+            # ... (inside astream function) ...
 
             while remaining > 0:
                 # 1. Create the render task but don't await it yet
                 render_task = asyncio.create_task(
                     _render_chunk(current_config, chunk_seconds=chunk_seconds)
                 )
-                
+
                 # 2. Prepare tasks to wait on
                 waiting_on = {render_task}
                 if pending_real_task is not None and not pending_real_task.done():
                     waiting_on.add(pending_real_task)
 
                 # 3. Race: Wait for EITHER the render to finish OR the LLM to reply
-                done, _ = await asyncio.wait(
-                    waiting_on, 
-                    return_when=asyncio.FIRST_COMPLETED
-                )
+                done, _ = await asyncio.wait(waiting_on, return_when=asyncio.FIRST_COMPLETED)
 
                 # 4. Handle LLM completion (Priority)
                 if pending_real_task in done:
@@ -1363,7 +1360,7 @@ async def astream(
                     # Cancel the preview render since we have the "real" data now
                     render_task.cancel()
                     _suppress_task_exception(render_task)
-                    
+
                     try:
                         real_target = _apply_update(pending_real_task.result(), update)
                         _emit_event(
@@ -1403,13 +1400,13 @@ async def astream(
                         )
 
                     pending_real_task = None
-                    
+
                     # Calculate transition from WHERE WE ARE (current_config) to NEW TARGET
                     transition = min(
                         remaining,
                         _transition_steps(item.transition_duration, chunk_seconds),
                     )
-                    
+
                     if transition > 0:
                         for config_item in _iter_transition_configs(
                             current_config,
@@ -1424,7 +1421,7 @@ async def astream(
                         remaining -= transition
                         current = current_config
                         continue
-                    
+
                     # No transition needed, snap to target
                     current_config = real_target
                     current = real_target
@@ -1436,7 +1433,7 @@ async def astream(
                 if not first_audio_chunk:
                     _emit_event(hooks, StreamEvent(kind="first_audio_chunk"))
                     first_audio_chunk = True
-                
+
                 yield await render_task
                 remaining -= 1
 

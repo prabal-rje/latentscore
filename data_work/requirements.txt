@@ -1,0 +1,2 @@
+datasets>=2.18
+pydantic>=2

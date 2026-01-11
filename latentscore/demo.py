@@ -205,9 +205,11 @@ def _demo_external_with_key(model: str, api_key: str, *, save: bool) -> None:
         "vinyl crackle midnight jazz",
         chunk_seconds=2,
         duration=30.0,
-        model=ls.ExternalModelSpec(model=model, api_key=api_key, litellm_kwargs={"temperature": 0.0}),
+        model=ls.ExternalModelSpec(
+            model=model, api_key=api_key, litellm_kwargs={"temperature": 0.0}
+        ),
         # model="fast",
-        #preview=True,
+        # preview=True,
     )
     stream.play()
     if save:
