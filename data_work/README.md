@@ -130,6 +130,12 @@ python -m data_work.debug_vibe_noisy \
 Launches Modal-based SFT + GRPO training for tiny models. Training defaults to
 the noisy vibe column (`vibe_noisy`) and full config payload (`config_payload`),
 so the model learns to handle corrupted inputs while inference remains clean.
+Training outputs are LoRA adapter directories; use `data_work.05_export_models`
+to merge adapters into full-precision checkpoints when needed.
+For GRPO, `--model` can point at the SFT adapter directory because the adapter
+metadata records the base model name. If the base model is private or only
+available locally, merge the adapter first and pass the merged checkpoint path
+instead so Modal can resolve it.
 
 If `--download-dir` is set, outputs are downloaded into `<download-dir>/<output>`.
 Use `--delete-remote` to remove the Modal volume output after a successful download.

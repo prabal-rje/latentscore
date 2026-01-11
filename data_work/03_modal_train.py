@@ -670,7 +670,8 @@ def _build_parser(show_advanced: bool) -> argparse.ArgumentParser:
         description=(
             "Launch SFT or GRPO LoRA training on Modal using Unsloth. "
             "Defaults mirror Modal's Unsloth example, but full-precision model loading "
-            "is enforced for small models."
+            "is enforced for small models. Outputs are LoRA adapter weights; merge them "
+            "with 05_export_models to produce full-precision checkpoints."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -698,7 +699,7 @@ def _build_parser(show_advanced: bool) -> argparse.ArgumentParser:
             "--output",
             type=Path,
             required=True,
-            help="Output directory name (stored in Modal volume).",
+            help="Output directory name (LoRA adapters stored in Modal volume).",
         )
         subparser.add_argument(
             "--download-dir",
