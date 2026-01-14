@@ -16,13 +16,25 @@ dependencies = [
     "simpleaudio",
     "pydantic>=2",
     "rich",
-]
+    "sentence-transformers",
+    "litellm>=1.0",
+    "python-dotenv",
+    "json-repair",
+    "torch",
+    "scikit-learn",
+    "huggingface_hub>=0.20",
+    
+    # --- Apple Silicon (M1/M2/M3) Specifics ---
+    "mlx>=0.22; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "mlx-lm>=0.22; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "llm-structured-output; sys_platform == 'darwin' and platform_machine == 'arm64'",
 
-[project.optional-dependencies]
-fast = ["sentence-transformers", "torch", "scikit-learn"]
-expressive = ["mlx>=0.22", "mlx-lm>=0.22", "llm-structured-output", "outlines[mlxlm]"]
-model = ["huggingface_hub>=0.20"]
-litellm = ["litellm>=1.0", "python-dotenv", "json-repair"]
+    # --- Outlines (Split Version) ---
+    # Case A: Apple Silicon (Needs MLX extras)
+    "outlines[mlxlm]; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    # Case B: Everyone Else (Standard version)
+    "outlines; sys_platform != 'darwin' or platform_machine != 'arm64'",
+]
 
 [project.scripts]
 latentscore = "latentscore.cli:main"

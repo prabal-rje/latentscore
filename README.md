@@ -5,91 +5,112 @@
 Generate ambient music from text descriptions. Locally. No GPU required.
 
 Read more about how it works [here](https://substack.com/home/post/p-184245090).
-
 ```python
 import latentscore as ls
 
 ls.render("warm sunset over water").play()
 ```
 
-## Repo layout
-
-- `latentscore/`: core library + CLI demo
-- `data_work/`: data prep, benchmarking, and Modal training workflows
-- `docs/`: API/DX docs and examples
-- `tests/`: unit + smoke tests
-
 ## Install
 
 ### Conda
-
 ```bash
-# download the repo
-git clone https://github.com/prabal-rje/latentscore
-cd latentscore
-
-# create the env, install dependencies
-conda env create -f environment.yml
+conda create -n latentscore python=3.10
 conda activate latentscore
+conda install pip
 
-# install latentscore
-pip install -e .
+pip install latentscore
 ```
 
 ### Pip
-
 ```bash
-# download the repo
-git clone https://github.com/prabal-rje/latentscore
-cd latentscore
-
-# create the env
 python -m venv .venv
 source .venv/bin/activate
 
-# install dependencies, install latentscore
-pip install -r requirements.txt
-pip install -e .
+pip install latentscore
 ```
 
-## Library usage
+> Requires Python 3.10. If you don't have it: `brew install python@3.10` (macOS) or `pyenv install 3.10`
 
+## Usage
 ```python
 import latentscore as ls
 
+# Render and play
 audio = ls.render("warm sunrise over water")
 audio.play()
-audio.save(".examples/quickstart.wav")
+audio.save("output.wav")
 ```
 
-- Local-first by default (no API keys required).
-- Streaming supports speculative preview while slower models load; see `docs/latentscore-dx.md`.
-- Expressive local model download: `latentscore download expressive`.
-- Health check: `latentscore doctor`.
+### Streaming
+```python
+import latentscore as ls
 
-## Demo CLI
+# Stream a single vibe
+ls.stream("warm sunset over water", duration=120).play()
 
+# Stream multiple vibes with crossfade
+ls.stream(
+    "morning coffee",
+    "afternoon focus", 
+    "evening wind-down",
+    duration=60,
+    transition=5.0,
+).play()
+```
+
+### Async Streaming
+```python
+import latentscore as ls
+import asyncio
+
+async def main():
+    items = [
+        ls.Streamable(content="morning coffee", duration=30),
+        ls.Streamable(content="afternoon focus", duration=30),
+    ]
+    async for chunk in ls.astream(items):
+        # Process chunks as they arrive
+        print(f"Got {len(chunk)} samples")
+
+asyncio.run(main())
+```
+
+### Playlists
+```python
+import latentscore as ls
+
+playlist = ls.Playlist(tracks=(
+    ls.Track(content="morning energy", duration=60),
+    ls.Track(content="deep focus", duration=120),
+    ls.Track(content="evening calm", duration=60),
+))
+playlist.play()
+```
+
+### Modes
+
+- **fast** (default): Embedding lookup. Instant.
+- **expressive**: Local LLM. Slower, more creative. Run `latentscore download expressive` first.
+- **external**: Route through Claude, Gemini, etc. Best quality, needs API key.
+```python
+# Use expressive mode
+ls.render("jazz cafe at midnight", model="expressive").play()
+
+# Use external LLM
+ls.render(
+    "cyberpunk rain",
+    model="external:gemini/gemini-3-pro-preview",
+    api_key="..."
+).play()
+```
+
+## CLI
 ```bash
-python -m latentscore.demo --model fast --save
+latentscore demo                  # Generate and play a sample
+latentscore download expressive   # Fetch local LLM weights
+latentscore doctor                # Check setup
 ```
-
-Outputs land in `.examples/` (gitignored). For external LLM demos, create a `.env`
-file at the repo root and set `GEMINI_API_KEY` (or override via `--api-key`).
-
-Live streaming example:
-
-```bash
-python -m latentscore.demo --live --model fast
-```
-
-## Data work
-
-See `data_work/README.md` for environment setup, pipeline scripts, benchmarks, and training.
-
-## Tooling
-
-- `make check` runs ruff, pyright, and pytest.
-- `make format` applies `ruff format`.
 
 ## Contributing
 

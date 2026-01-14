@@ -1,58 +1,89 @@
-.PHONY: install setup format fmt-check lint typecheck test check run download-models download-llm download-embeddings
+.PHONY: install dev-install setup format fmt-check lint typecheck test check run download-models download-llm download-embeddings
 
-ifndef ENV_NAME
-$(error ❌ ENV_NAME missing. Usage: make install ENV_NAME=latentscore)
-endif
-
+# 1. Configuration
+ENV_NAME ?= latentscore
 MODELS_DIR := models
 LLM_DIR := $(MODELS_DIR)/gemma-3-1b-it-qat-8bit
 LLM_REPO := mlx-community/gemma-3-1b-it-qat-8bit
 EMBED_DIR := $(MODELS_DIR)/all-MiniLM-L6-v2
 EMBED_REPO := sentence-transformers/all-MiniLM-L6-v2
 
+# 2. Environment Detection (The Magic Fix)
+# Check if 'conda' command exists. If yes, use it. If no, use standard python.
+CONDA_EXE := $(shell command -v conda 2> /dev/null)
+
+ifdef CONDA_EXE
+    # We are on Local Mac (Conda)
+    RUN_CMD := conda run -n $(ENV_NAME) --no-capture-output
+    PIP_CMD := $(RUN_CMD) pip
+    PYTHON_CMD := $(RUN_CMD) python
+    MSG_PREFIX := "🍏 (Conda)"
+else
+    # We are on Remote Linux (Standard Python/Venv)
+    RUN_CMD := 
+    PIP_CMD := pip
+    PYTHON_CMD := python
+    MSG_PREFIX := "🐧 (Standard)"
+endif
+
 check-system:
 	@echo "🔍 Checking system..."
-	@which sox >/dev/null 2>&1 || (echo "❌ SoX missing. Run: brew install sox" && exit 1)
-	@echo "✅ System OK"
+	@which sox >/dev/null 2>&1 || (echo "❌ SoX missing. Run: brew install sox (Mac) or apt install sox (Linux)" && exit 1)
 
 install: check-system
-	@echo "🍏 Setting up: $(ENV_NAME)..."
-	conda env update --name $(ENV_NAME) --file environment.yml --prune
-	@echo "✅ Done! Run: conda activate $(ENV_NAME)"
+	@echo $(MSG_PREFIX) "Installing dependencies..."
+ifdef CONDA_EXE
+	# Create Conda env if missing
+	conda create -n $(ENV_NAME) python=3.10 -y || true
+	# Install pip-tools inside Conda
+	$(PIP_CMD) install pip-tools
+else
+	# Ensure pip-tools is installed in current venv
+	$(PIP_CMD) install pip-tools
+endif
+	# Sync requirements (Handles the 'mlx' condition automatically!)
+	$(RUN_CMD) pip-sync data_work/requirements.txt
+	@echo "✅ Dependencies synced."
 
-setup: install
+dev-install:
+	@echo $(MSG_PREFIX) "Installing Dev Tools..."
+	$(PIP_CMD) install ruff pyright pytest
+	@echo "✅ Dev tools installed."
 
+setup: install dev-install download-models
+
+# 3. Model Management
 download-models: download-llm download-embeddings
-	@echo "✅ All models ready"
 
 download-llm:
-	@echo "📥 Downloading Gemma 3 1B IT (4-bit)..."
+	@echo "📥 Downloading LLM..."
 	@mkdir -p $(LLM_DIR)
-	python -c "from huggingface_hub import snapshot_download; snapshot_download('$(LLM_REPO)', local_dir='$(LLM_DIR)')"
-	@echo "✅ LLM ready: $(LLM_DIR)"
+	$(PYTHON_CMD) -c "from huggingface_hub import snapshot_download; snapshot_download('$(LLM_REPO)', local_dir='$(LLM_DIR)')"
 
 download-embeddings:
 	@echo "📥 Downloading embeddings..."
 	@mkdir -p $(EMBED_DIR)
-	python -c "from huggingface_hub import snapshot_download; snapshot_download('$(EMBED_REPO)', local_dir='$(EMBED_DIR)')"
-	@echo "✅ Embeddings ready: $(EMBED_DIR)"
+	$(PYTHON_CMD) -c "from huggingface_hub import snapshot_download; snapshot_download('$(EMBED_REPO)', local_dir='$(EMBED_DIR)')"
+
+# 4. Code Quality & Run
+# RUN_CMD automatically adapts to 'conda run' or '' (empty)
 
 format:
-	ruff format .
+	$(RUN_CMD) ruff format .
 
 fmt-check:
-	ruff format --check .
+	$(RUN_CMD) ruff format --check .
 
 lint:
-	ruff check .
+	$(RUN_CMD) ruff check .
 
 typecheck:
-	pyright
+	$(RUN_CMD) pyright
 
 test:
-	pytest
+	$(RUN_CMD) pytest
 
 check: lint fmt-check typecheck test
 
 run:
-	python -m app
+	$(PYTHON_CMD) -m app

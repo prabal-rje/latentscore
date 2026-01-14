@@ -16,3 +16,21 @@ torch
 torchaudio
 torchvision
 transformers>=4.40
+
+# --- Utils ---
+dependency-injector>=4.42
+pyperclip>=1.8
+# uvloop is fast but doesn't support Windows (safe for Mac/Linux)
+uvloop; sys_platform != "win32"
+
+# --- Dev / Maintenance ---
+# CRITICAL: Must be listed so pip-sync doesn't uninstall itself
+pip-tools
+pyright>=1.1
+pytest>=7.4
+pytest-asyncio>=0.23
+pytest-cov>=4.1
+ruff>=0.6
+
+# --- Safety ---
+protobuf>=3.20,<5.0

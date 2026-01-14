@@ -1,48 +1,61 @@
-# Core numerics
+# --- Core Numerics ---
 numpy
 scipy
 
-# Audio
+# --- Audio ---
 soundfile
 sounddevice
 simpleaudio
 
-# LLM + MLX
-mlx>=0.22; platform_system == "Darwin" and platform_machine == "arm64"
-mlx-lm>=0.22; platform_system == "Darwin" and platform_machine == "arm64"
+# --- MLX (Apple Silicon Only) ---
+# These are strictly for Mac M-series chips. Ignored on Linux/Intel.
+mlx>=0.22; sys_platform == "darwin" and platform_machine == "arm64"
+mlx-lm>=0.22; sys_platform == "darwin" and platform_machine == "arm64"
+
+# --- LLM & GenAI ---
+# On Mac: Install outlines with MLX support
+outlines[mlxlm]; sys_platform == "darwin" and platform_machine == "arm64"
+# On Linux/Others: Install standard outlines (avoids build errors)
+outlines; sys_platform != "darwin" or platform_machine != "arm64"
+
 llm-structured-output
-outlines[mlxlm]
 transformers<5
 huggingface_hub>=0.20
 sentencepiece
 litellm
 json-repair
 
-# Embeddings
+# --- Embeddings ---
+# Note: sentence-transformers pulls in Torch. 
+# Torch works on both Mac and Linux via PyPI, so no special markers needed.
 sentence-transformers
-torch
 scikit-learn
+torch
 
-# UI
+# --- UI ---
 textual>=0.58
 textual-serve>=1.0
 rich
 pywebview>=4.4
-rumps>=0.4; platform_system == "Darwin"
+# System tray support (Mac only)
+rumps>=0.4; sys_platform == "darwin"
 pyinstaller
 
-# Utils
+# --- Utils ---
 dependency-injector>=4.42
 pyperclip>=1.8
 python-dotenv
-uvloop
+# uvloop is fast but doesn't support Windows (safe for Mac/Linux)
+uvloop; sys_platform != "win32"
 
-# Dev
+# --- Dev / Maintenance ---
+# CRITICAL: Must be listed so pip-sync doesn't uninstall itself
+pip-tools
 pyright>=1.1
 pytest>=7.4
 pytest-asyncio>=0.23
 pytest-cov>=4.1
 ruff>=0.6
 
-# Safety
+# --- Safety ---
 protobuf>=3.20,<5.0
