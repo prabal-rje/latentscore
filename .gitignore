@@ -56,9 +56,13 @@ dist/
 **/repomix-output.xml
 **/repomix-output.md
 docs/plans/**/*.md
+docs/plans
+!docs/plans/2026-01-15-dependency-install-docs.md
+!docs/plans/2026-01-15-platform-prereq-clarify.md
 data_work/.cache/
 data_work/.outputs*/
 data_work/.processed*/
 data_work/.benchmarks/
 data_work/.modal_outputs/
 data_work/.exports/
+.worktrees/

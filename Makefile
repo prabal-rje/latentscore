@@ -29,6 +29,9 @@ endif
 check-system:
 	@echo "🔍 Checking system..."
 	@which sox >/dev/null 2>&1 || (echo "❌ SoX missing. Run: brew install sox (Mac) or apt install sox (Linux)" && exit 1)
+	@if [ "$$(uname)" = "Linux" ]; then \
+		test -f /usr/include/alsa/asoundlib.h || (echo "❌ ALSA headers missing (Linux only). Run: apt install libasound2-dev" && exit 1); \
+	fi
 
 install: check-system
 	@echo $(MSG_PREFIX) "Installing dependencies..."

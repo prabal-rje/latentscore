@@ -24,6 +24,27 @@ conda env update -f environment.yml --prune
 pip install -r requirements.txt
 ```
 
+### macOS Prerequisites
+
+Install SoX for audio playback. ALSA headers are Linux-only and are not needed on macOS:
+
+```bash
+brew install sox
+```
+
+### Linux Prerequisites
+
+On Linux, install system packages required for audio playback and ALSA headers:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y sox libasound2-dev
+```
+
+### Windows Prerequisites
+
+Windows does not use ALSA headers. For native Windows, install SoX with your preferred package manager (e.g., `winget install sox`). If you are using WSL, follow the Linux prerequisites above inside your WSL distro.
+
 ### 3. Activate the Environment
 
 Before installing packages, activate the new environment:
