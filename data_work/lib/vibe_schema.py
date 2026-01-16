@@ -157,11 +157,13 @@ class VibeObject(BaseModel):
         ge=0,
         description=("0-based index that increases by 1 in the order the vibe objects appear."),
     )
-    text_page: tuple[int, int] = Field(
+    text_page: int = Field(
         ...,
+        ge=0,
         description=(
-            "Inclusive page range tuple. Use [start, end] with 0-based page numbers "
-            "matching the (Page N) markers in the input text."
+            "Single 0-based page number matching ONE (Page N) marker. "
+            "IMPORTANT: You MUST process ONE page at a time. Page ranges are NOT allowed. "
+            "If content spans multiple pages, create separate vibe objects for each page."
         ),
     )
     characters: list[CharacterVibes] = Field(
@@ -183,37 +185,25 @@ class VibeObject(BaseModel):
 
     @field_validator("text_page", mode="before")
     @classmethod
-    def _parse_page(cls, value: Any) -> tuple[int, int]:
+    def _parse_page(cls, value: Any) -> int:
+        """Parse page number, rejecting ranges."""
         if value is None:
-            return (0, 0)
+            return 0
         if isinstance(value, (list, tuple)):
-            items = list(value)
+            items: list[Any] = list(value)  # type: ignore[arg-type]
             if not items:
-                return (0, 0)
-            if len(items) == 1:
-                start = int(items[0])
-                end = start
-            else:
-                start = int(items[0])
-                end = int(items[1])
-        elif isinstance(value, str):
+                return 0
+            if len(items) > 1:
+                # If given a range, take the first page and warn
+                # The prompt explicitly forbids ranges, so this is a fallback
+                return int(items[0])  # type: ignore[arg-type]
+            return int(items[0])  # type: ignore[arg-type]
+        if isinstance(value, str):
             numbers = [int(item) for item in re.findall(r"\d+", value)]
             if not numbers:
-                return (0, 0)
-            if len(numbers) == 1:
-                start = numbers[0]
-                end = start
-            else:
-                start = numbers[0]
-                end = numbers[1]
-        else:
-            start = int(value)
-            end = start
-        if start > end:
-            start, end = end, start
-        if start < 0 or end < 0:
-            raise ValueError("text_page values must be >= 0")
-        return (start, end)
+                return 0
+            return numbers[0]  # Take first number only
+        return int(value)
 
     @field_validator("tags", mode="before")
     @classmethod
@@ -265,13 +255,15 @@ def build_vibe_prompt() -> str:
         "return ONLY valid JSON that matches the schema exactly. "
         "Follow these rules strictly:\n"
         "- vibe_index starts at 0 and increments by 1 in output order.\n"
-        "- text_page must be a 2-item list [start, end] with inclusive 0-based page numbers.\n"
+        "- text_page is a SINGLE integer (0-based page number). "
+        "You MUST process ONE page at a time. Page ranges are FORBIDDEN. "
+        "If content spans pages, create SEPARATE vibe objects for each page.\n"
         "- character_name uses real names when present; otherwise use labels like "
         "'anonymous', 'stranger 1', or '3rd person'.\n"
         "- character_perceived_vibes and scene_vibes use the 5-level descriptor ladder.\n"
         "- tags are atomic concepts (1-3 words each), lowercase when possible.\n"
         "- Keep every string concise: <=1000 chars for vibe fields, <=100 chars for short "
-        "fields like names, tags, and page refs.\n"
+        "fields like names, tags.\n"
         f"\nSchema:\n{schema}\n"
-        "\nReturn JSON only. No prose, no extra keys."
+        "\nReturn JSON only. No prose, no extra keys. ONE page per vibe object."
     )
