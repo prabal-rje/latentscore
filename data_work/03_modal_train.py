@@ -15,6 +15,9 @@ from typing import TYPE_CHECKING, Any, Callable, Sequence
 import modal
 from pydantic import BaseModel, ConfigDict
 
+from common.reward_config import DEFAULT_REWARD_CONFIG, RewardConfig
+from common.training_config import TrainingConfig
+
 if TYPE_CHECKING:
     from data_work.lib.rewards import RewardBreakdown
 
@@ -330,8 +333,23 @@ def _create_reward_fn(
     reward_type: str,
     audio_scorer: Callable[[str, dict[str, Any]], float] | None,
     wandb_run: Any,
+    reward_config: RewardConfig | None = None,
 ) -> Callable[[Sequence[str], Sequence[str]], list[float]]:
+    """Create a reward function for GRPO training.
+
+    Args:
+        reward_type: Type of reward ('clap', 'schema_only', 'custom')
+        audio_scorer: Optional callable for audio similarity scoring
+        wandb_run: Optional W&B run for logging
+        reward_config: Optional RewardConfig for configurable weights
+
+    Returns:
+        Reward function callable for GRPO trainer
+    """
     from data_work.lib.rewards import compute_partial_reward
+
+    if reward_config is None:
+        reward_config = DEFAULT_REWARD_CONFIG
 
     def reward_fn(
         prompts: Sequence[str],
@@ -349,6 +367,7 @@ def _create_reward_fn(
                 vibe=vibe,
                 output=completion,
                 audio_scorer=audio_scorer,
+                config=reward_config,
             )
             breakdowns.append(breakdown)
             rewards.append(breakdown.total)
@@ -690,6 +709,15 @@ def _build_parser(show_advanced: bool) -> argparse.ArgumentParser:
 
     def add_shared_args(subparser: argparse.ArgumentParser) -> None:
         subparser.add_argument(
+            "--config-file",
+            type=Path,
+            default=None,
+            help=(
+                "Path to JSON config file with TrainingConfig overrides. "
+                "CLI args take precedence over config file values."
+            ),
+        )
+        subparser.add_argument(
             "--data",
             type=Path,
             required=True,
@@ -901,6 +929,36 @@ def _build_parser(show_advanced: bool) -> argparse.ArgumentParser:
         default=DEFAULT_GRPO_BETA,
         help="KL penalty beta for GRPO.",
     )
+    grpo.add_argument(
+        "--ablation-preset",
+        type=str,
+        default=None,
+        help=(
+            "Use predefined ablation config. Format: 'category:name' "
+            "(e.g., 'lora_rank:r32', 'learning_rate:lr1e-4'). "
+            "See common.training_config.ABLATION_PRESETS for options."
+        )
+        if show_advanced
+        else argparse.SUPPRESS,
+    )
+    grpo.add_argument(
+        "--format-weight",
+        type=float,
+        default=None,
+        help="Override reward format weight (0.0-1.0)." if show_advanced else argparse.SUPPRESS,
+    )
+    grpo.add_argument(
+        "--schema-weight",
+        type=float,
+        default=None,
+        help="Override reward schema weight (0.0-1.0)." if show_advanced else argparse.SUPPRESS,
+    )
+    grpo.add_argument(
+        "--audio-weight",
+        type=float,
+        default=None,
+        help="Override reward audio weight (0.0-1.0)." if show_advanced else argparse.SUPPRESS,
+    )
 
     return parser
 
@@ -911,6 +969,73 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     known, _ = pre_parser.parse_known_args(argv)
     parser = _build_parser(show_advanced=known.advanced)
     return parser.parse_args(argv)
+
+
+def _load_config_file(config_path: Path | None) -> TrainingConfig | None:
+    """Load TrainingConfig from JSON file if provided."""
+    if config_path is None:
+        return None
+    if not config_path.exists():
+        raise SystemExit(f"Config file not found: {config_path}")
+    with open(config_path) as f:
+        data = json.load(f)
+    return TrainingConfig.model_validate(data)
+
+
+def _apply_ablation_preset(preset_spec: str | None) -> TrainingConfig | None:
+    """Apply ablation preset if specified.
+
+    Args:
+        preset_spec: Format 'category:name' (e.g., 'lora_rank:r32')
+
+    Returns:
+        TrainingConfig with preset applied, or None if no preset
+    """
+    if preset_spec is None:
+        return None
+
+    from common.training_config import ABLATION_PRESETS
+
+    parts = preset_spec.split(":", 1)
+    if len(parts) != 2:
+        raise SystemExit(
+            f"Invalid ablation preset format: '{preset_spec}'. "
+            "Expected 'category:name' (e.g., 'lora_rank:r32')."
+        )
+    category, name = parts
+    if category not in ABLATION_PRESETS:
+        raise SystemExit(
+            f"Unknown ablation category: '{category}'. Available: {list(ABLATION_PRESETS.keys())}"
+        )
+    if name not in ABLATION_PRESETS[category]:
+        raise SystemExit(
+            f"Unknown preset '{name}' in category '{category}'. "
+            f"Available: {list(ABLATION_PRESETS[category].keys())}"
+        )
+    return ABLATION_PRESETS[category][name]
+
+
+def _build_reward_config_from_args(args: argparse.Namespace) -> RewardConfig | None:
+    """Build RewardConfig from CLI args if any reward weights are overridden."""
+    from common.reward_config import RewardWeights
+
+    format_weight = getattr(args, "format_weight", None)
+    schema_weight = getattr(args, "schema_weight", None)
+    audio_weight = getattr(args, "audio_weight", None)
+
+    if all(w is None for w in [format_weight, schema_weight, audio_weight]):
+        return None
+
+    # Start with defaults, override specified values
+    weights_dict: dict[str, float] = {}
+    if format_weight is not None:
+        weights_dict["format_weight"] = format_weight
+    if schema_weight is not None:
+        weights_dict["schema_weight"] = schema_weight
+    if audio_weight is not None:
+        weights_dict["audio_weight"] = audio_weight
+
+    return RewardConfig(weights=RewardWeights(**weights_dict))
 
 
 def main(argv: Sequence[str] | None = None) -> None:

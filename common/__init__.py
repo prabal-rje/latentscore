@@ -50,6 +50,15 @@ from common.music_schema import (
     schema_hash,
     schema_signature,
 )
+from common.prompt_registry import (
+    PromptConfig,
+    PromptVersion,
+    get_prompt,
+    list_prompts,
+    register_prompt,
+    render_config_prompt,
+    render_prompt,
+)
 from common.prompts import (
     # Output requirements
     OUTPUT_JSON_ONLY,
@@ -75,8 +84,56 @@ from common.prompts import (
     build_music_prompt,
     build_training_prompt,
 )
+from common.reward_config import (
+    DEFAULT_REWARD_CONFIG,
+    ClapScorerConfig,
+    RewardConfig,
+    RewardWeights,
+    ScorerProtocol,
+)
+from common.training_config import (
+    ABLATION_PRESETS,
+    BASE_MODELS,
+    DEFAULT_TRAINING_CONFIG,
+    BatchConfig,
+    DataConfig,
+    GRPOConfig,
+    InfraConfig,
+    LoggingConfig,
+    LoRAConfig,
+    NoiseConfig,
+    OptimizerConfig,
+    TrainingConfig,
+)
 
 __all__ = [
+    # Reward configuration
+    "ClapScorerConfig",
+    "DEFAULT_REWARD_CONFIG",
+    "RewardConfig",
+    "RewardWeights",
+    "ScorerProtocol",
+    # Training configuration
+    "ABLATION_PRESETS",
+    "BASE_MODELS",
+    "BatchConfig",
+    "DataConfig",
+    "DEFAULT_TRAINING_CONFIG",
+    "GRPOConfig",
+    "InfraConfig",
+    "LoggingConfig",
+    "LoRAConfig",
+    "NoiseConfig",
+    "OptimizerConfig",
+    "TrainingConfig",
+    # Prompt registry
+    "PromptConfig",
+    "PromptVersion",
+    "get_prompt",
+    "list_prompts",
+    "register_prompt",
+    "render_config_prompt",
+    "render_prompt",
     # Schema constants
     "MAX_LONG_FIELD_CHARS",
     "PALETTE_COLOR_DESC",

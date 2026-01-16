@@ -10,6 +10,8 @@ from typing import Any, Callable, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from common.reward_config import DEFAULT_REWARD_CONFIG, RewardConfig
+
 LOGGER = logging.getLogger(__name__)
 
 # Palette constants
@@ -193,10 +195,23 @@ def compute_partial_reward(
     vibe: str,
     output: str,
     audio_scorer: Callable[[str, Mapping[str, Any]], float] | None = None,
-    weights: tuple[float, float, float] = (FORMAT_WEIGHT, SCHEMA_WEIGHT, AUDIO_WEIGHT),
+    config: RewardConfig | None = None,
 ) -> RewardBreakdown:
-    """Compute weighted reward with optional audio scorer and palette penalty."""
-    format_weight, schema_weight, audio_weight = weights
+    """Compute weighted reward with configurable weights.
+
+    Args:
+        vibe: The input vibe/mood text
+        output: The generated JSON output string
+        audio_scorer: Optional callable for audio similarity scoring
+        config: Optional RewardConfig for configurable weights (defaults to DEFAULT_REWARD_CONFIG)
+
+    Returns:
+        RewardBreakdown with total score and component breakdown
+    """
+    if config is None:
+        config = DEFAULT_REWARD_CONFIG
+
+    weights = config.weights
     format_score = reward_format(output)
     schema_score, field_errors = reward_schema(output)
 
@@ -210,15 +225,17 @@ def compute_partial_reward(
         if isinstance(palettes, list) and palettes:
             palette_penalty = _palette_duplicate_penalty(palettes)
 
-        # Audio scoring
-        if schema_score > 0.5 and audio_scorer is not None:
+        # Audio scoring - only evaluate if schema score exceeds threshold
+        if schema_score > weights.schema_threshold_for_audio and audio_scorer is not None:
             audio_score = audio_scorer(vibe, parsed)
 
     base_total = (
-        format_weight * format_score + schema_weight * schema_score + audio_weight * audio_score
+        weights.format_weight * format_score
+        + weights.schema_weight * schema_score
+        + weights.audio_weight * audio_score
     )
     # Apply palette duplicate penalty
-    total = max(0.0, base_total - PALETTE_DUPLICATE_PENALTY_WEIGHT * palette_penalty)
+    total = max(0.0, base_total - weights.palette_duplicate_penalty * palette_penalty)
 
     return RewardBreakdown(
         total=total,
