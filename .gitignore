@@ -51,7 +51,9 @@ dist/
 # --- Miscellaneous ---
 
 .chats/
+.claude
 .codex/*
+.opencode/
 # !.codex/setup.sh
 **/repomix-output.xml
 **/repomix-output.md

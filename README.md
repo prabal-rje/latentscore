@@ -112,6 +112,10 @@ latentscore download expressive   # Fetch local LLM weights
 latentscore doctor                # Check setup
 ```
 
+## Architecture
+
+See [`docs/architecture.md`](docs/architecture.md) for the data_work pipeline map and environment notes.
+
 ## Contributing
 
 See `CONTRIBUTE.md` for environment setup and contribution guidelines.

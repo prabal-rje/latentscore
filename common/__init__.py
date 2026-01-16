@@ -1,13 +1,6 @@
-"""Schema for generating music configuration payloads from vibe text.
+"""Common shared definitions for latentscore and data_work."""
 
-This module re-exports shared schema definitions from common.music_schema
-to maintain backwards compatibility for data_work consumers.
-"""
-
-from __future__ import annotations
-
-# Re-export everything from common for backwards compatibility
-from common import (
+from common.music_schema import (
     MAX_LONG_FIELD_CHARS,
     PALETTE_COLOR_DESC,
     PALETTE_DESC,
@@ -57,8 +50,34 @@ from common import (
     schema_hash,
     schema_signature,
 )
+from common.prompts import (
+    # Output requirements
+    OUTPUT_JSON_ONLY,
+    OUTPUT_MATCH_SCHEMA,
+    OUTPUT_USE_ENUMS,
+    OUTPUT_USE_EXAMPLE_KEYS,
+    # Palette requirements
+    PALETTE_REQUIREMENTS,
+    # Core role descriptions
+    ROLE_MUSIC_EXPERT,
+    ROLE_SOUND_DESIGNER,
+    # Style guidance
+    STYLE_AMBIENT,
+    STYLE_JUSTIFICATION_CONCISE,
+    # Task instructions
+    TASK_GENERATE_CONFIG,
+    TASK_JUSTIFICATION_FIRST,
+    TASK_USE_EXAMPLES,
+    # Builder functions
+    build_expressive_prompt,
+    build_inference_prompt,
+    build_litellm_prompt,
+    build_music_prompt,
+    build_training_prompt,
+)
 
 __all__ = [
+    # Schema constants
     "MAX_LONG_FIELD_CHARS",
     "PALETTE_COLOR_DESC",
     "PALETTE_DESC",
@@ -68,6 +87,7 @@ __all__ = [
     "PROMPT_DESC",
     "PROMPT_REGISTER_MAX",
     "PROMPT_REGISTER_MIN",
+    # Schema types
     "AccentStyle",
     "AttackStyle",
     "BassStyle",
@@ -104,7 +124,27 @@ __all__ = [
     "TensionCurve",
     "TextureStyle",
     "WeightLabel",
+    # Schema utilities
     "repair_palette_duplicates",
     "schema_hash",
     "schema_signature",
+    # Prompt constants
+    "ROLE_MUSIC_EXPERT",
+    "ROLE_SOUND_DESIGNER",
+    "TASK_GENERATE_CONFIG",
+    "TASK_JUSTIFICATION_FIRST",
+    "TASK_USE_EXAMPLES",
+    "PALETTE_REQUIREMENTS",
+    "OUTPUT_JSON_ONLY",
+    "OUTPUT_MATCH_SCHEMA",
+    "OUTPUT_USE_ENUMS",
+    "OUTPUT_USE_EXAMPLE_KEYS",
+    "STYLE_AMBIENT",
+    "STYLE_JUSTIFICATION_CONCISE",
+    # Prompt builders
+    "build_expressive_prompt",
+    "build_inference_prompt",
+    "build_litellm_prompt",
+    "build_music_prompt",
+    "build_training_prompt",
 ]

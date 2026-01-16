@@ -17,11 +17,48 @@ from latentscore.models import build_litellm_prompt
 from latentscore.providers.litellm import LiteLLMAdapter, _safe_async_cleanup
 
 
+def _sample_palettes() -> list[dict[str, object]]:
+    """Generate sample palettes for testing."""
+    return [
+        {
+            "colors": [
+                {"hex": "#111111", "weight": "xl"},
+                {"hex": "#222222", "weight": "lg"},
+                {"hex": "#333333", "weight": "md"},
+                {"hex": "#444444", "weight": "sm"},
+                {"hex": "#555555", "weight": "xs"},
+            ]
+        },
+        {
+            "colors": [
+                {"hex": "#aa0000", "weight": "xl"},
+                {"hex": "#00aa00", "weight": "lg"},
+                {"hex": "#0000aa", "weight": "md"},
+                {"hex": "#aaaa00", "weight": "sm"},
+                {"hex": "#00aaaa", "weight": "xs"},
+            ]
+        },
+        {
+            "colors": [
+                {"hex": "#123456", "weight": "xl"},
+                {"hex": "#654321", "weight": "lg"},
+                {"hex": "#abcdef", "weight": "md"},
+                {"hex": "#fedcba", "weight": "sm"},
+                {"hex": "#0f0f0f", "weight": "xs"},
+            ]
+        },
+    ]
+
+
 def _payload_json(overrides: dict[str, object] | None = None) -> str:
     config = MusicConfig().model_dump(exclude={"schema_version", "seed"})
     if overrides:
         config.update(overrides)
-    payload = {"justification": "Sound choices explained.", "config": config}
+    payload = {
+        "justification": "Sound choices explained.",
+        "config": config,
+        "palettes": _sample_palettes(),
+    }
     return json.dumps(payload)
 
 

@@ -12,6 +12,16 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from common import (
+    OUTPUT_JSON_ONLY,
+    OUTPUT_USE_EXAMPLE_KEYS,
+    PALETTE_REQUIREMENTS,
+    ROLE_MUSIC_EXPERT,
+    TASK_GENERATE_CONFIG,
+    TASK_JUSTIFICATION_FIRST,
+    TASK_USE_EXAMPLES,
+)
+
 from .config import MusicConfig
 from .errors import ConfigGenerateError, LLMInferenceError, ModelNotAvailableError
 
@@ -221,16 +231,15 @@ Vibe: "epic cinematic battle scene"
 
 _EXPRESSIVE_PROMPT = "\n".join(
     [
-        "Role:",
-        "You are a world-class music synthesis expert with deep music theory knowledge.",
+        f"Role: {ROLE_MUSIC_EXPERT}",
         "",
         "Task:",
         "- Given a vibe/mood description, generate ONE MusicConfig JSON object.",
-        "- Use the source examples as guidance for value choices.",
+        f"- {TASK_USE_EXAMPLES}",
         "",
         "Output requirements:",
-        "- Return only JSON (no markdown, no explanations).",
-        "- Use only the keys shown in the examples.",
+        f"- {OUTPUT_JSON_ONLY}",
+        f"- {OUTPUT_USE_EXAMPLE_KEYS}",
         "",
         "Few-shot examples:",
         FEW_SHOT_EXAMPLES.strip(),
@@ -244,20 +253,19 @@ def build_expressive_prompt() -> str:
 
 _LITELLM_PROMPT = "\n".join(
     [
-        "Role:",
-        "You are a world-class music synthesis expert with deep music theory knowledge.",
+        f"Role: {ROLE_MUSIC_EXPERT}",
         "",
         "Task:",
-        "- Given a vibe/mood description, generate ONE JSON payload with justification and config.",
-        "- Place justification before config in the JSON object.",
-        "- Use the source examples as guidance for value choices.",
+        f"- {TASK_GENERATE_CONFIG}",
+        f"- {TASK_JUSTIFICATION_FIRST}",
+        f"- {TASK_USE_EXAMPLES}",
+        "",
+        PALETTE_REQUIREMENTS,
         "",
         "Output requirements:",
-        "- Return only JSON (no markdown, no explanations).",
-        "- Use only the keys shown in the examples.",
+        f"- {OUTPUT_JSON_ONLY}",
+        f"- {OUTPUT_USE_EXAMPLE_KEYS}",
         "",
-        # "Few-shot examples:",
-        # LITELLM_FEW_SHOT_EXAMPLES.strip(),
     ]
 )
 

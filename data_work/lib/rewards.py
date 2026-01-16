@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from collections.abc import Sequence
 from typing import Any, Callable, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 
 LOGGER = logging.getLogger(__name__)
+
+# Palette constants
+PALETTE_SIZE = 5
+PALETTE_COUNT = 3
+WEIGHT_LABELS = ("xs", "sm", "md", "lg", "xl", "xxl")
+HEX_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 TEMPO_LABELS = ("very_slow", "slow", "medium", "fast", "very_fast")
 BRIGHTNESS_LABELS = ("very_dark", "dark", "medium", "bright", "very_bright")
@@ -40,6 +48,7 @@ PAD_STYLES = (
     "bright_open",
 )
 MELODY_STYLES = (
+    "procedural",
     "contemplative",
     "rising",
     "falling",
@@ -94,6 +103,7 @@ GRAIN_STYLES = ("clean", "warm", "gritty")
 FORMAT_WEIGHT = 0.2
 SCHEMA_WEIGHT = 0.3
 AUDIO_WEIGHT = 0.5
+PALETTE_DUPLICATE_PENALTY_WEIGHT = 0.2
 
 
 class SynthConfig(BaseModel):
@@ -150,20 +160,28 @@ def reward_format(output: str) -> float:
 
 
 def reward_schema(output: str) -> tuple[float, dict[str, list[str]]]:
-    """Return schema reward between 0-1 plus field error details."""
+    """Return schema reward between 0-1 plus field error details.
+
+    Handles both flat config (just fields) and nested payload (config inside "config" key).
+    """
     parsed = _parse_json(output)
     if parsed is None:
         return 0.0, {"__json__": ["invalid_json"]}
+
+    # Support nested "config" key for MusicConfigPromptPayload structure
+    config_data = parsed.get("config", parsed)
+    if not isinstance(config_data, dict):
+        return 0.0, {"__json__": ["config_not_object"]}
 
     errors: dict[str, list[str]] = {}
     total_fields = len(SynthConfig.model_fields)
     valid_fields = 0
 
     for field_name in SynthConfig.model_fields:
-        if field_name not in parsed:
+        if field_name not in config_data:
             errors.setdefault(field_name, []).append("missing")
             continue
-        if _field_is_valid(field_name, parsed[field_name]):
+        if _field_is_valid(field_name, config_data[field_name]):
             valid_fields += 1
         else:
             errors.setdefault(field_name, []).append("invalid_value")
@@ -177,20 +195,31 @@ def compute_partial_reward(
     audio_scorer: Callable[[str, Mapping[str, Any]], float] | None = None,
     weights: tuple[float, float, float] = (FORMAT_WEIGHT, SCHEMA_WEIGHT, AUDIO_WEIGHT),
 ) -> RewardBreakdown:
-    """Compute weighted reward with optional audio scorer."""
+    """Compute weighted reward with optional audio scorer and palette penalty."""
     format_weight, schema_weight, audio_weight = weights
     format_score = reward_format(output)
     schema_score, field_errors = reward_schema(output)
 
     audio_score = 0.0
-    if format_score > 0 and schema_score > 0.5 and audio_scorer is not None:
-        parsed = _parse_json(output)
-        if parsed is not None:
-            audio_score = audio_scorer(vibe, parsed)
-        else:
-            LOGGER.warning("Skipping audio scoring due to JSON parse failure.")
+    palette_penalty = 0.0
+    parsed = _parse_json(output)
 
-    total = format_weight * format_score + schema_weight * schema_score + audio_weight * audio_score
+    if format_score > 0 and parsed is not None:
+        # Check for palette duplicates
+        palettes = parsed.get("palettes", [])
+        if isinstance(palettes, list) and palettes:
+            palette_penalty = _palette_duplicate_penalty(palettes)
+
+        # Audio scoring
+        if schema_score > 0.5 and audio_scorer is not None:
+            audio_score = audio_scorer(vibe, parsed)
+
+    base_total = (
+        format_weight * format_score + schema_weight * schema_score + audio_weight * audio_score
+    )
+    # Apply palette duplicate penalty
+    total = max(0.0, base_total - PALETTE_DUPLICATE_PENALTY_WEIGHT * palette_penalty)
+
     return RewardBreakdown(
         total=total,
         format=format_score,
@@ -242,3 +271,67 @@ def _field_is_valid(field_name: str, value: Any) -> bool:
             return value in GRAIN_STYLES
         case _:
             return False
+
+
+def _palette_color_is_valid(color: Mapping[str, Any]) -> bool:
+    """Check if a single palette color is valid."""
+    if not isinstance(color, Mapping):
+        return False
+    hex_val = color.get("hex")
+    weight = color.get("weight")
+    if not isinstance(hex_val, str) or not HEX_PATTERN.match(hex_val):
+        return False
+    if weight not in WEIGHT_LABELS:
+        return False
+    return True
+
+
+def _palette_is_valid(palette: Mapping[str, Any]) -> bool:
+    """Check if a single palette is valid."""
+    if not isinstance(palette, Mapping):
+        return False
+    colors = palette.get("colors")
+    if not isinstance(colors, list) or len(colors) != PALETTE_SIZE:
+        return False
+    return all(_palette_color_is_valid(c) for c in colors)
+
+
+def _palette_duplicate_penalty(palettes: Sequence[Mapping[str, Any]]) -> float:
+    """Compute penalty for duplicate hex colors within palettes.
+
+    Returns a value between 0 and 1, where 0 means no duplicates
+    and higher values indicate more duplicates.
+    """
+    if not palettes:
+        return 0.0
+
+    total_penalty = 0.0
+    valid_palettes = 0
+
+    for palette in palettes:
+        if not isinstance(palette, Mapping):
+            continue
+        colors = palette.get("colors")
+        if not isinstance(colors, list):
+            continue
+
+        valid_palettes += 1
+        hexes: list[str] = []
+        for color in colors:
+            if isinstance(color, Mapping):
+                hex_val = color.get("hex")
+                if isinstance(hex_val, str):
+                    hexes.append(hex_val)
+
+        if hexes:
+            unique_count = len(set(hexes))
+            total_count = len(hexes)
+            if total_count > 0:
+                # Penalty is fraction of duplicates
+                duplicate_fraction = (total_count - unique_count) / total_count
+                total_penalty += duplicate_fraction
+
+    if valid_palettes == 0:
+        return 0.0
+
+    return total_penalty / valid_palettes

@@ -6,104 +6,52 @@ from typing import Any, Callable, Literal, Mapping, Optional, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+# Import shared types from common
+from common import (
+    MAX_LONG_FIELD_CHARS,
+    PALETTES_DESC,
+    PROMPT_DESC,
+    PROMPT_REGISTER_MAX,
+    PROMPT_REGISTER_MIN,
+    AccentStyle,
+    AttackStyle,
+    BassStyle,
+    BrightnessLabel,
+    CadenceLabel,
+    ChordChangeLabel,
+    ChordExtensions,
+    ChromaticLabel,
+    DensityLevel,
+    EchoLabel,
+    GrainStyle,
+    HarmonyStyle,
+    HumanFeelLabel,
+    MelodyDensityLabel,
+    MelodyEngine,
+    MelodyStyle,
+    ModeName,
+    MotifRepeatLabel,
+    MotionLabel,
+    PadStyle,
+    Palette,
+    PaletteColor,  # noqa: F401 - re-exported for schema parity tests
+    PhraseLengthBars,
+    RhythmStyle,
+    RootNote,
+    SpaceLabel,
+    StepBiasLabel,
+    StereoLabel,
+    SwingLabel,
+    SyncopationLabel,
+    TempoLabel,
+    TensionCurve,
+    TextureStyle,
+    WeightLabel,  # noqa: F401 - re-exported for schema parity tests
+)
+
 from .errors import InvalidConfigError
 
 _LOGGER = logging.getLogger("latentscore.config")
-
-TempoLabel = Literal["very_slow", "slow", "medium", "fast", "very_fast"]
-BrightnessLabel = Literal["very_dark", "dark", "medium", "bright", "very_bright"]
-SpaceLabel = Literal["dry", "small", "medium", "large", "vast"]
-MotionLabel = Literal["static", "slow", "medium", "fast", "chaotic"]
-StereoLabel = Literal["mono", "narrow", "medium", "wide", "ultra_wide"]
-EchoLabel = Literal["none", "subtle", "medium", "heavy", "infinite"]
-HumanFeelLabel = Literal["robotic", "tight", "natural", "loose", "drunk"]
-RootNote = Literal["c", "c#", "d", "d#", "e", "f", "f#", "g", "g#", "a", "a#", "b"]
-ModeName = Literal["major", "minor", "dorian", "mixolydian"]
-DensityLevel = Literal[2, 3, 4, 5, 6]
-BassStyle = Literal[
-    "drone",
-    "sustained",
-    "pulsing",
-    "walking",
-    "fifth_drone",
-    "sub_pulse",
-    "octave",
-    "arp_bass",
-]
-PadStyle = Literal[
-    "warm_slow",
-    "dark_sustained",
-    "cinematic",
-    "thin_high",
-    "ambient_drift",
-    "stacked_fifths",
-    "bright_open",
-]
-MelodyStyle = Literal[
-    "procedural",
-    "contemplative",
-    "rising",
-    "falling",
-    "minimal",
-    "ornamental",
-    "arp_melody",
-    "contemplative_minor",
-    "call_response",
-    "heroic",
-]
-RhythmStyle = Literal[
-    "none",
-    "minimal",
-    "heartbeat",
-    "soft_four",
-    "hats_only",
-    "electronic",
-    "kit_light",
-    "kit_medium",
-    "military",
-    "tabla_essence",
-    "brush",
-]
-TextureStyle = Literal[
-    "none",
-    "shimmer",
-    "shimmer_slow",
-    "vinyl_crackle",
-    "breath",
-    "stars",
-    "glitch",
-    "noise_wash",
-    "crystal",
-    "pad_whisper",
-]
-AccentStyle = Literal[
-    "none",
-    "bells",
-    "pluck",
-    "chime",
-    "bells_dense",
-    "blip",
-    "blip_random",
-    "brass_hit",
-    "wind",
-    "arp_accent",
-    "piano_note",
-]
-AttackStyle = Literal["soft", "medium", "sharp"]
-GrainStyle = Literal["clean", "warm", "gritty"]
-MelodyEngine = Literal["pattern", "procedural"]
-TensionCurve = Literal["arc", "ramp", "waves"]
-HarmonyStyle = Literal["auto", "pop", "jazz", "cinematic", "ambient"]
-ChordExtensions = Literal["triads", "sevenths", "lush"]
-PhraseLengthBars = Literal[2, 4, 8]
-MelodyDensityLabel = Literal["very_sparse", "sparse", "medium", "busy", "very_busy"]
-SyncopationLabel = Literal["straight", "light", "medium", "heavy"]
-SwingLabel = Literal["none", "light", "medium", "heavy"]
-MotifRepeatLabel = Literal["rare", "sometimes", "often"]
-StepBiasLabel = Literal["step", "balanced", "leapy"]
-ChromaticLabel = Literal["none", "light", "medium", "heavy"]
-CadenceLabel = Literal["weak", "medium", "strong"]
-ChordChangeLabel = Literal["very_slow", "slow", "medium", "fast"]
 
 
 T = TypeVar("T")
@@ -499,50 +447,10 @@ class MusicConfig(BaseModel):
 SynthConfig = _MusicConfigInternal
 
 
-_PROMPT_DESC: dict[str, str] = {
-    "justification": (
-        "Explain the sonic reasoning for the choices. Mention vibe decomposition, sonic "
-        "translation, coherence check, and which examples guided the selection."
-    ),
-    "config": "Music configuration that matches the requested vibe.",
-    "tempo": "Tempo label controlling overall speed and energy.",
-    "root": "Root note of the scale.",
-    "mode": "Scale mode that shapes the emotional color.",
-    "brightness": "Filter brightness / spectral tilt label.",
-    "space": "Reverb/room size label.",
-    "density": "Layer count indicating overall thickness.",
-    "bass": "Bass style or movement pattern.",
-    "pad": "Pad texture and harmonic bed style.",
-    "melody": "Melody style or contour.",
-    "rhythm": "Percussion pattern style (or none).",
-    "texture": "Background texture or noise layer.",
-    "accent": "Sparse accent sound type.",
-    "motion": "Modulation/LFO rate label.",
-    "attack": "Transient sharpness label.",
-    "stereo": "Stereo width label.",
-    "depth": "Whether to add sub-bass depth.",
-    "echo": "Delay amount label.",
-    "human": "Timing/pitch looseness label.",
-    "grain": "Oscillator character (clean/warm/gritty).",
-    "melody_engine": "Melody generation mode (procedural or pattern).",
-    "phrase_len_bars": "Phrase length in bars (2, 4, or 8).",
-    "melody_density": "Melody note density label (very_sparse, sparse, medium, busy, very_busy).",
-    "syncopation": "Offbeat emphasis label (straight, light, medium, heavy).",
-    "swing": "Swing amount label (none, light, medium, heavy).",
-    "motif_repeat_prob": "Motif repetition label (rare, sometimes, often).",
-    "step_bias": "Melodic motion label (step, balanced, leapy).",
-    "chromatic_prob": "Chromaticism label (none, light, medium, heavy).",
-    "cadence_strength": "Cadence emphasis label (weak, medium, strong).",
-    "register_min_oct": "Lowest melody octave (integer).",
-    "register_max_oct": "Highest melody octave (integer).",
-    "tension_curve": "Tension shape across the phrase.",
-    "harmony_style": "Harmony progression style.",
-    "chord_change_bars": "Chord change rate label (very_slow, slow, medium, fast).",
-    "chord_extensions": "Chord color/extension level.",
-}
-
-_PROMPT_REGISTER_MIN = 1
-_PROMPT_REGISTER_MAX = 8
+# Use PROMPT_DESC from common for field descriptions
+_PROMPT_DESC = PROMPT_DESC
+_PROMPT_REGISTER_MIN = PROMPT_REGISTER_MIN
+_PROMPT_REGISTER_MAX = PROMPT_REGISTER_MAX
 
 
 class MusicConfigPrompt(BaseModel):
@@ -610,10 +518,20 @@ class MusicConfigPrompt(BaseModel):
 
 
 class MusicConfigPromptPayload(BaseModel):
-    """LLM payload that includes a justification and a config."""
+    """LLM payload that includes a justification, config, and palettes."""
 
-    justification: str = Field(description=_PROMPT_DESC["justification"])
+    justification: str = Field(
+        ...,
+        max_length=MAX_LONG_FIELD_CHARS,
+        description=_PROMPT_DESC["justification"],
+    )
     config: MusicConfigPrompt = Field(description=_PROMPT_DESC["config"])
+    palettes: list[Palette] = Field(
+        ...,
+        min_length=3,
+        max_length=3,
+        description=PALETTES_DESC,
+    )
 
     model_config = ConfigDict(extra="forbid")
 
