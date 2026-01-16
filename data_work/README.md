@@ -140,7 +140,51 @@ instead so Modal can resolve it.
 If `--download-dir` is set, outputs are downloaded into `<download-dir>/<output>`.
 Use `--delete-remote` to remove the Modal volume output after a successful download.
 
-Usage example:
+#### Configuration System
+
+Training hyperparameters are centralized in `common/training_config.py`. You can
+override them via CLI flags, config files, or ablation presets.
+
+**Config file:** Load a JSON file with `TrainingConfig` structure:
+
+```bash
+python -m data_work.03_modal_train sft \
+  --config-file my_config.json \
+  --data data_work/.processed/SFT-Train.jsonl \
+  --output smollm2-sft \
+  --epochs 1
+```
+
+**Ablation presets:** Use predefined configs for common ablation studies (requires `--advanced`):
+
+```bash
+python -m data_work.03_modal_train --advanced grpo \
+  --data data_work/.processed/GRPO.jsonl \
+  --model /outputs/smollm2-sft \
+  --output smollm2-grpo-beta02 \
+  --epochs 1 \
+  --ablation-preset grpo_beta:beta0.02
+```
+
+Available presets: `lora_rank:{r4,r8,r16,r32,r64}`, `learning_rate:{lr1e-05,...}`,
+`grpo_beta:{beta0.01,...}`, `batch_size:{bs4,bs8,bs16,bs32}`.
+
+**Reward weight overrides:** Customize GRPO reward weights (requires `--advanced`):
+
+```bash
+python -m data_work.03_modal_train --advanced grpo \
+  --data data_work/.processed/GRPO.jsonl \
+  --model /outputs/smollm2-sft \
+  --output smollm2-grpo-custom \
+  --epochs 1 \
+  --format-weight 0.3 \
+  --schema-weight 0.4 \
+  --audio-weight 0.3
+```
+
+See `docs/ablation-guide.md` for full parameter reference.
+
+#### Usage Examples
 
 ```bash
 python -m data_work.03_modal_train check-imports
