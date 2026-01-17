@@ -107,3 +107,65 @@ def test_config_file_none():
 
     result = modal_train._load_config_file(None)
     assert result is None
+
+
+def test_default_max_seq_length_is_1024():
+    """Default max sequence length should be large enough for training samples."""
+    from common.training_config import TrainingConfig
+
+    config = TrainingConfig()
+    assert config.data.max_seq_length == 1024
+
+
+def test_resolve_model_path_defaults_to_outputs():
+    """Bare model names should resolve to the Modal outputs volume."""
+    import importlib
+
+    modal_train = importlib.import_module("data_work.03_modal_train")
+
+    assert modal_train._resolve_model_path("exp-sft-baseline") == "/outputs/exp-sft-baseline"
+    assert (
+        modal_train._resolve_model_path("/outputs/exp-sft-baseline")
+        == "/outputs/exp-sft-baseline"
+    )
+    assert (
+        modal_train._resolve_model_path("outputs/exp-sft-baseline")
+        == "/outputs/exp-sft-baseline"
+    )
+    assert modal_train._resolve_model_path("org/model") == "org/model"
+
+
+class _DummyTokenizer:
+    def __call__(self, texts, add_special_tokens=False):
+        return {"input_ids": [text.split() for text in texts]}
+
+
+def test_estimate_max_token_length():
+    """Estimator should return the longest tokenized length."""
+    import importlib
+
+    modal_train = importlib.import_module("data_work.03_modal_train")
+    tokenizer = _DummyTokenizer()
+    texts = ["short", "two words here", "a b c d e"]
+
+    assert modal_train._estimate_max_token_length(texts, tokenizer, batch_size=2) == 5
+
+
+def test_validate_max_seq_length_raises_for_short_limit():
+    """Guard should raise when configured max is too small."""
+    import importlib
+
+    modal_train = importlib.import_module("data_work.03_modal_train")
+
+    with pytest.raises(SystemExit):
+        modal_train._validate_max_seq_length(max_seq_length=3, observed_max_length=4)
+
+
+def test_validate_max_seq_length_allows_equal_or_longer():
+    """Guard should allow max lengths that meet or exceed observed lengths."""
+    import importlib
+
+    modal_train = importlib.import_module("data_work.03_modal_train")
+
+    modal_train._validate_max_seq_length(max_seq_length=4, observed_max_length=4)
+    modal_train._validate_max_seq_length(max_seq_length=5, observed_max_length=4)

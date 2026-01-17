@@ -11,13 +11,21 @@ import random
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Iterable, Mapping, Sequence
+from collections.abc import Mapping
+from typing import Any, Awaitable, Callable, Iterable, Sequence
 
 if __package__ is None and __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pydantic import BaseModel, Field, ValidationError
 
+from data_work.lib.config_batcher import (
+    ConfigBatcher,
+    build_batch_prompt,
+    build_batch_response_keys,
+    build_batch_response_model,
+    parse_batch_response,
+)
 from data_work.lib.config_io import build_config_hash, load_config_file, write_config_file
 from data_work.lib.dedupe import dedupe_rows
 from data_work.lib.jsonl_io import iter_jsonl
@@ -73,6 +81,8 @@ DEFAULT_CONFIG_MAX_CONCURRENCY = 4
 DEFAULT_CONFIG_MAX_QPS = 2.0
 DEFAULT_CONFIG_MAX_RETRIES = 3
 DEFAULT_CONFIG_RETRY_BASE_DELAY = 0.5
+DEFAULT_CONFIG_BATCH_SIZE = 1
+DEFAULT_CONFIG_BATCH_WAIT_MS = 200
 DEFAULT_DEDUPE_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_DEDUPE_THRESHOLD = 0.97
 RUN_CONFIG_NAME = "run_config.json"
@@ -395,6 +405,22 @@ def _build_parser(*, include_extra: bool, use_defaults: bool) -> argparse.Argume
         )
         _add_arg(
             parser,
+            "--config-batch-size",
+            type=int,
+            default=DEFAULT_CONFIG_BATCH_SIZE,
+            use_defaults=use_defaults,
+            help="Batch size for vibe-to-config generation (1 disables batching).",
+        )
+        _add_arg(
+            parser,
+            "--config-batch-wait-ms",
+            type=int,
+            default=DEFAULT_CONFIG_BATCH_WAIT_MS,
+            use_defaults=use_defaults,
+            help="Max wait (ms) to fill a config batch before sending.",
+        )
+        _add_arg(
+            parser,
             "--dedupe-model",
             type=str,
             default=DEFAULT_DEDUPE_MODEL,
@@ -444,6 +470,8 @@ def _default_config() -> dict[str, Any]:
         "config_max_qps": DEFAULT_CONFIG_MAX_QPS,
         "config_max_retries": DEFAULT_CONFIG_MAX_RETRIES,
         "config_retry_base_delay": DEFAULT_CONFIG_RETRY_BASE_DELAY,
+        "config_batch_size": DEFAULT_CONFIG_BATCH_SIZE,
+        "config_batch_wait_ms": DEFAULT_CONFIG_BATCH_WAIT_MS,
         "model_kwargs": {},
         "config_model_kwargs": {},
         "dedupe_model": DEFAULT_DEDUPE_MODEL,
@@ -779,6 +807,33 @@ async def call_music_config(
     )
 
 
+async def call_music_config_batch(
+    *,
+    vibe_texts: Sequence[str],
+    model: str,
+    api_key: str | None,
+    api_base: str | None,
+    system_prompt: str,
+    model_kwargs: Mapping[str, Any],
+) -> list[MusicConfigPromptPayload]:
+    keys = build_batch_response_keys(len(vibe_texts))
+    prompt = build_batch_prompt(vibe_texts, keys)
+    response_model = build_batch_response_model(len(vibe_texts))
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt},
+    ]
+    response = await litellm_structured_completion(
+        model=model,
+        messages=messages,
+        response_model=response_model,
+        api_key=api_key,
+        api_base=api_base,
+        model_kwargs=model_kwargs,
+    )
+    return parse_batch_response(response, len(vibe_texts))
+
+
 def _coerce_augmented(value: Any, fallback: str) -> str:
     match value:
         case list() if value:
@@ -1047,6 +1102,8 @@ async def process_split(
     config_max_qps: float,
     config_max_retries: int,
     config_retry_base_delay: float,
+    config_batch_size: int,
+    config_batch_wait_ms: int,
     error_rate: float,
     error_seed: int,
     ewma_alpha: float,
@@ -1101,12 +1158,6 @@ async def process_split(
             model_kwargs=model_kwargs,
         )
 
-    @cached_async(
-        cache=cache,
-        key_fn=lambda vibe_text, cache_key, payload: (cache_key, payload),
-        serializer=lambda response: response.model_dump(),
-        deserializer=lambda data: MusicConfigPromptPayload.model_validate(data),
-    )
     @retry_async(
         max_retries=config_max_retries,
         base_delay=config_retry_base_delay,
@@ -1114,11 +1165,7 @@ async def process_split(
     )
     @rate_limited(config_limiter)
     @with_semaphore(config_semaphore)
-    async def cached_config_call(
-        vibe_text: str,
-        cache_key: str,
-        payload: dict[str, Any],
-    ) -> MusicConfigPromptPayload:
+    async def single_config_call(vibe_text: str) -> MusicConfigPromptPayload:
         return await call_music_config(
             vibe_text=vibe_text,
             model=config_model,
@@ -1127,6 +1174,54 @@ async def process_split(
             system_prompt=config_prompt,
             model_kwargs=config_model_kwargs,
         )
+
+    @retry_async(
+        max_retries=config_max_retries,
+        base_delay=config_retry_base_delay,
+        logger=_LOGGER,
+    )
+    @rate_limited(config_limiter)
+    @with_semaphore(config_semaphore)
+    async def batched_config_call(vibe_texts: Sequence[str]) -> list[MusicConfigPromptPayload]:
+        return await call_music_config_batch(
+            vibe_texts=vibe_texts,
+            model=config_model,
+            api_key=api_key,
+            api_base=config_api_base,
+            system_prompt=config_prompt,
+            model_kwargs=config_model_kwargs,
+        )
+
+    batcher: ConfigBatcher | None = None
+    if config_batch_size > 1:
+        batcher = ConfigBatcher(
+            batch_size=config_batch_size,
+            max_wait=config_batch_wait_ms / 1000.0,
+            call_batch=batched_config_call,
+        )
+
+    @cached_async(
+        cache=cache,
+        key_fn=lambda vibe_text, cache_key, payload: (cache_key, payload),
+        serializer=lambda response: response.model_dump(),
+        deserializer=lambda data: MusicConfigPromptPayload.model_validate(data),
+    )
+    async def cached_config_call(
+        vibe_text: str,
+        cache_key: str,
+        payload: dict[str, Any],
+    ) -> MusicConfigPromptPayload:
+        if batcher is None:
+            return await single_config_call(vibe_text)
+        try:
+            return await batcher.submit(vibe_text)
+        except Exception as exc:
+            _LOGGER.warning(
+                "Batch config call failed; falling back to single-item call. (%s)",
+                exc,
+                exc_info=True,
+            )
+            return await single_config_call(vibe_text)
 
     async def bound_process(index: int, record: BaseRecord) -> tuple[int, RecordResult]:
         result = await process_record(
@@ -1152,44 +1247,48 @@ async def process_split(
         )
         return index, result
 
-    tasks = [
-        asyncio.create_task(bound_process(index, record))
-        for index, record in enumerate(pending_records)
-    ]
+    try:
+        tasks = [
+            asyncio.create_task(bound_process(index, record))
+            for index, record in enumerate(pending_records)
+        ]
 
-    results: dict[int, RecordResult] = {}
-    abort_event = asyncio.Event()
+        results: dict[int, RecordResult] = {}
+        abort_event = asyncio.Event()
 
-    with tqdm(total=len(pending_records), desc=split_name) as progress:
-        for task in asyncio.as_completed(tasks):
-            index, result = await task
-            results[index] = result
-            progress.update(1)
-            tracker.update(success=result.error is None)
-            if tracker.threshold_reached(ewma_threshold):
-                abort_event.set()
-                _LOGGER.error(
-                    "Excessive error rate detected (EWMA=%.2f) for split %s. Aborting.",
-                    tracker.error_rate,
-                    split_name,
-                )
-                break
+        with tqdm(total=len(pending_records), desc=split_name) as progress:
+            for task in asyncio.as_completed(tasks):
+                index, result = await task
+                results[index] = result
+                progress.update(1)
+                tracker.update(success=result.error is None)
+                if tracker.threshold_reached(ewma_threshold):
+                    abort_event.set()
+                    _LOGGER.error(
+                        "Excessive error rate detected (EWMA=%.2f) for split %s. Aborting.",
+                        tracker.error_rate,
+                        split_name,
+                    )
+                    break
 
-    if abort_event.is_set():
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        raise SystemExit("Excessive error rate detected - try again later.")
+        if abort_event.is_set():
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            raise SystemExit("Excessive error rate detected - try again later.")
 
-    good_rows: list[dict[str, Any]] = []
-    error_rows: list[dict[str, Any]] = []
-    for index in sorted(results):
-        result = results[index]
-        for row in result.rows:
-            if row.get("error") or row.get("config_error"):
-                error_rows.append(row)
-            else:
-                good_rows.append(row)
+        good_rows: list[dict[str, Any]] = []
+        error_rows: list[dict[str, Any]] = []
+        for index in sorted(results):
+            result = results[index]
+            for row in result.rows:
+                if row.get("error") or row.get("config_error"):
+                    error_rows.append(row)
+                else:
+                    good_rows.append(row)
+    finally:
+        if batcher is not None:
+            await batcher.aclose()
 
     rows_by_dataset: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in good_rows:
@@ -1328,6 +1427,8 @@ async def main_async(args: argparse.Namespace) -> None:
             config_max_qps=args.config_max_qps,
             config_max_retries=args.config_max_retries,
             config_retry_base_delay=args.config_retry_base_delay,
+            config_batch_size=args.config_batch_size,
+            config_batch_wait_ms=args.config_batch_wait_ms,
             error_rate=args.error_rate,
             error_seed=error_seed,
             ewma_alpha=args.ewma_alpha,

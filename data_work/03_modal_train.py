@@ -10,9 +10,12 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Sequence
 
-import modal
+try:
+    import modal
+except ModuleNotFoundError:  # pragma: no cover - handled in tests without Modal installed
+    modal = None
 from pydantic import BaseModel, ConfigDict
 
 from common.reward_config import DEFAULT_REWARD_CONFIG, RewardConfig
@@ -41,15 +44,8 @@ MAX_RETRIES = 3
 DEFAULT_RETRY_INITIAL_DELAY = 1.0
 DEFAULT_RETRY_BACKOFF = 2.0
 DEFAULT_RETRY_MAX_DELAY = 30.0
-RETRY_POLICY = modal.Retries(
-    max_retries=MAX_RETRIES,
-    backoff_coefficient=DEFAULT_RETRY_BACKOFF,
-    initial_delay=DEFAULT_RETRY_INITIAL_DELAY,
-    max_delay=DEFAULT_RETRY_MAX_DELAY,
-)
 REMOTE_OUTPUT_PATH = "/outputs"
 VOLUME_NAME = "latentscore-training-outputs"
-OUTPUTS_VOLUME = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -60,7 +56,7 @@ DEFAULT_SYSTEM_PROMPT = (
 DEFAULT_DATASET_TEXT_FIELD = "text"
 DEFAULT_PROMPT_FIELD = "vibe_noisy"
 DEFAULT_RESPONSE_FIELD = "config_payload"
-DEFAULT_MAX_SEQ_LEN = 512
+DEFAULT_MAX_SEQ_LEN = 1024
 
 DEFAULT_LORA_R = 16
 DEFAULT_LORA_ALPHA = 16
@@ -82,28 +78,59 @@ BASE_MODELS = {
     "qwen3-600m": "unsloth/Qwen3-600M",
 }
 
-TRAIN_IMAGE = (
-    modal.Image.debian_slim(python_version="3.11")
-    .uv_pip_install(
-        "accelerate==1.9.0",
-        "datasets==3.6.0",
-        "hf-transfer==0.1.9",
-        "huggingface_hub==0.34.2",
-        "peft==0.16.0",
-        "transformers==4.54.0",
-        "trl==0.19.1",
-        "unsloth[cu128-torch270]==2025.7.8",
-        "unsloth_zoo==2025.7.10",
-        "pydantic==2.7.4",
-        "wandb==0.21.0",
-        "weave==0.50.0",
-    )
-    .add_local_python_source("data_work", copy=True)
-    .env({"HF_HOME": "/model_cache", "PYTHONPATH": REMOTE_REPO_PATH})
-    .add_local_dir(REPO_ROOT, remote_path=REMOTE_REPO_PATH, copy=True)
-)
+class _ModalStubRun:
+    def __enter__(self) -> None:
+        raise RuntimeError("Modal is required to run training commands.")
 
-app = modal.App(APP_NAME)
+    def __exit__(self, exc_type: Any, exc: Any, exc_tb: Any) -> bool:
+        return False
+
+
+class _ModalStubApp:
+    def function(self, *args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            return func
+
+        return decorator
+
+    def run(self) -> _ModalStubRun:
+        return _ModalStubRun()
+
+
+if modal is None:
+    RETRY_POLICY = None
+    OUTPUTS_VOLUME = None
+    TRAIN_IMAGE = None
+    app = _ModalStubApp()
+else:
+    RETRY_POLICY = modal.Retries(
+        max_retries=MAX_RETRIES,
+        backoff_coefficient=DEFAULT_RETRY_BACKOFF,
+        initial_delay=DEFAULT_RETRY_INITIAL_DELAY,
+        max_delay=DEFAULT_RETRY_MAX_DELAY,
+    )
+    OUTPUTS_VOLUME = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
+    TRAIN_IMAGE = (
+        modal.Image.debian_slim(python_version="3.11")
+        .uv_pip_install(
+            "accelerate==1.9.0",
+            "datasets==3.6.0",
+            "hf-transfer==0.1.9",
+            "huggingface_hub==0.34.2",
+            "peft==0.16.0",
+            "transformers==4.54.0",
+            "trl==0.19.1",
+            "unsloth[cu128-torch270]==2025.7.8",
+            "unsloth_zoo==2025.7.10",
+            "pydantic==2.7.4",
+            "wandb==0.21.0",
+            "weave==0.50.0",
+        )
+        .add_local_python_source("data_work", copy=True)
+        .env({"HF_HOME": "/model_cache", "PYTHONPATH": REMOTE_REPO_PATH})
+        .add_local_dir(REPO_ROOT, remote_path=REMOTE_REPO_PATH, copy=True)
+    )
+    app = modal.App(APP_NAME)
 
 
 class SftConfig(BaseModel):
@@ -223,6 +250,17 @@ def _resolve_remote_data_file(data_file: Path) -> str:
     return str(Path(REMOTE_REPO_PATH) / relative)
 
 
+def _resolve_model_path(model_path: str) -> str:
+    if "/" not in model_path:
+        return str(Path(REMOTE_OUTPUT_PATH) / model_path)
+    path = Path(model_path)
+    if path.is_absolute():
+        return model_path
+    if path.parts and path.parts[0] == "outputs":
+        return str(Path(REMOTE_OUTPUT_PATH) / Path(*path.parts[1:]))
+    return model_path
+
+
 def _resolve_volume_path(remote_output: str) -> str:
     output_path = Path(remote_output)
     try:
@@ -302,6 +340,41 @@ def _filter_kwargs_for_callable(
     kwargs: dict[str, Any],
 ) -> dict[str, Any]:
     return {key: value for key, value in kwargs.items() if _supports_param(callable_obj, key)}
+
+
+def _estimate_max_token_length(
+    texts: Iterable[str],
+    tokenizer: Any,
+    *,
+    batch_size: int = 256,
+) -> int:
+    max_length = 0
+    batch: list[str] = []
+
+    def flush_batch() -> int:
+        if not batch:
+            return 0
+        encoded = tokenizer(batch, add_special_tokens=False)
+        input_ids = encoded.get("input_ids", [])
+        return max((len(ids) for ids in input_ids), default=0)
+
+    for text in texts:
+        batch.append(text)
+        if len(batch) >= batch_size:
+            max_length = max(max_length, flush_batch())
+            batch.clear()
+
+    max_length = max(max_length, flush_batch())
+    return max_length
+
+
+def _validate_max_seq_length(max_seq_length: int, observed_max_length: int) -> None:
+    if observed_max_length > max_seq_length:
+        raise SystemExit(
+            "Configured max_seq_length is too small for the dataset. "
+            f"max_seq_length={max_seq_length}, observed_max_length={observed_max_length}. "
+            "Increase --max-seq-length to at least the observed value."
+        )
 
 
 @app.function(image=TRAIN_IMAGE, timeout=60, retries=0)
@@ -488,6 +561,12 @@ def run_sft(config: dict[str, Any]) -> str:
 
     dataset = dataset.map(format_example, remove_columns=dataset.column_names)
 
+    observed_max_length = _estimate_max_token_length(
+        (example[DEFAULT_DATASET_TEXT_FIELD] for example in dataset),
+        tokenizer,
+    )
+    _validate_max_seq_length(sft.max_seq_length, observed_max_length)
+
     training_args = TrainingArguments(
         output_dir=sft.output_dir,
         per_device_train_batch_size=sft.batch_size,
@@ -620,6 +699,12 @@ def run_grpo(config: dict[str, Any]) -> str:
         return {"prompt": text}
 
     dataset = dataset.map(format_prompts, remove_columns=dataset.column_names)
+
+    observed_max_length = _estimate_max_token_length(
+        (example["prompt"] for example in dataset),
+        tokenizer,
+    )
+    _validate_max_seq_length(grpo.max_seq_length, observed_max_length)
 
     training_kwargs = {
         "output_dir": grpo.output_dir,
@@ -1220,7 +1305,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 case "grpo":
                     assert training_config is not None
                     config = GrpoConfig(
-                        model_path=args.model,
+                        model_path=_resolve_model_path(args.model),
                         data_file=str(remote_data_file),
                         output_dir=str(output_dir),
                         system_prompt=training_config.system_prompt,
