@@ -91,11 +91,68 @@ def resolve_api_key_for_models(
             return env_value
         return None
     if required:
+        model_list = ", ".join(model for model, _ in models if model in required)
         raise SystemExit(
-            "API key required for model(s): "
-            + ", ".join(model for model, _ in models if model in required)
+            f"API key required for model(s): {model_list}\n\n"
+            f"Set the environment variable and try again:\n"
+            f"  export {api_key_env}='your-key-here'\n\n"
+            f"Or pass --api-key directly, or create a .env file."
         )
     return None
+
+
+def check_env_keys_at_startup(
+    *,
+    required_keys: Sequence[tuple[str, str]],
+    optional_keys: Sequence[tuple[str, str]] | None = None,
+) -> dict[str, str | None]:
+    """Check for required environment keys at startup and print helpful messages.
+
+    Args:
+        required_keys: List of (env_var_name, description) tuples that must be set.
+        optional_keys: List of (env_var_name, description) tuples that are optional.
+
+    Returns:
+        Dict mapping env var names to their values (None for missing optional keys).
+
+    Raises:
+        SystemExit: If any required key is missing, with a helpful error message.
+    """
+    result: dict[str, str | None] = {}
+    missing: list[tuple[str, str]] = []
+
+    for key, desc in required_keys:
+        value = os.environ.get(key)
+        if value:
+            result[key] = value
+            LOGGER.debug("Found %s: %s", key, mask_api_key(value))
+        else:
+            missing.append((key, desc))
+
+    if missing:
+        lines = [
+            "Missing required environment variable(s):",
+            "",
+        ]
+        for key, desc in missing:
+            lines.append(f"  {key}")
+            lines.append(f"    {desc}")
+            lines.append("")
+        lines.append("Set the variable(s) and try again:")
+        for key, _ in missing:
+            lines.append(f"  export {key}='your-key-here'")
+        lines.append("")
+        lines.append("Or create a .env file with the variable(s).")
+        raise SystemExit("\n".join(lines))
+
+    if optional_keys:
+        for key, desc in optional_keys:
+            value = os.environ.get(key)
+            result[key] = value
+            if value:
+                LOGGER.debug("Found optional %s: %s", key, mask_api_key(value))
+
+    return result
 
 
 def format_prompt_json(system_prompt: str, user_prompt: str) -> str:
@@ -147,16 +204,21 @@ def _coerce_response(
     response_model: type[T],
     context: str,
 ) -> T:
+    """Coerce various response formats into the expected model type."""
+    # Check if already the target type first (can't be done in match easily)
     if isinstance(content, response_model):
         return content
-    if isinstance(content, BaseModel):
-        return response_model.model_validate(content.model_dump())
-    if isinstance(content, dict):
-        return response_model.model_validate(content)
-    if isinstance(content, str):
-        parsed = _parse_json_payload(content)
-        return response_model.model_validate(parsed)
-    raise LLMResponseError(f"{context} response missing structured content.")
+
+    match content:
+        case BaseModel():
+            return response_model.model_validate(content.model_dump())
+        case dict():
+            return response_model.model_validate(content)
+        case str():
+            parsed = _parse_json_payload(content)
+            return response_model.model_validate(parsed)
+        case _:
+            raise LLMResponseError(f"{context} response missing structured content.")
 
 
 async def litellm_structured_completion(

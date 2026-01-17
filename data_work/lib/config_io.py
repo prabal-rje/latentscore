@@ -12,11 +12,14 @@ _BANNED_KEYS = {"api_key", "api_key_env"}
 
 
 def _normalize_value(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {key: _normalize_value(value[key]) for key in sorted(value)}
-    if isinstance(value, (list, tuple)):
-        return [_normalize_value(item) for item in value]
-    return value
+    """Recursively normalize values for stable JSON serialization."""
+    match value:
+        case Mapping():
+            return {key: _normalize_value(value[key]) for key in sorted(value)}
+        case list() | tuple():
+            return [_normalize_value(item) for item in value]
+        case _:
+            return value
 
 
 def normalize_config(config: Mapping[str, Any]) -> dict[str, Any]:
@@ -33,14 +36,17 @@ def build_config_hash(config: Mapping[str, Any]) -> str:
 
 
 def load_config_file(path: Path) -> dict[str, Any]:
+    """Load and validate a JSON config file."""
     data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise ValueError("Config file must contain a JSON object.")
-    banned = _BANNED_KEYS.intersection(data)
-    if banned:
-        keys = ", ".join(sorted(banned))
-        raise ValueError(f"Config file cannot contain API key fields: {keys}")
-    return data
+    match data:
+        case dict():
+            banned = _BANNED_KEYS.intersection(data)
+            if banned:
+                keys = ", ".join(sorted(banned))
+                raise ValueError(f"Config file cannot contain API key fields: {keys}")
+            return data
+        case _:
+            raise ValueError("Config file must contain a JSON object.")
 
 
 def write_config_file(path: Path, config: Mapping[str, Any]) -> None:

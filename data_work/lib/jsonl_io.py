@@ -14,5 +14,8 @@ def iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
             if not stripped:
                 continue
             row = json.loads(stripped)
-            if isinstance(row, dict):
-                yield row
+            match row:
+                case dict():
+                    yield row
+                case _:
+                    pass

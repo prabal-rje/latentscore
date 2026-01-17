@@ -147,8 +147,11 @@ def sample_dataset(
     rows: list[dict[str, Any]] = []
     for idx, row in zip(indices, selected):
         text_value = row.get(TEXT_FIELD)
-        if not isinstance(text_value, str):
-            raise ValueError(f"Row text is not a string in {dataset_label} (index {idx}).")
+        match text_value:
+            case str():
+                pass
+            case _:
+                raise ValueError(f"Row text is not a string in {dataset_label} (index {idx}).")
         row_metadata = {key: value for key, value in row.items() if key != TEXT_FIELD}
         row_id = row_metadata.get("id", idx)
         rows.append(

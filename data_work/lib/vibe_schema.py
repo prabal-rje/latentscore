@@ -187,33 +187,33 @@ class VibeObject(BaseModel):
     @classmethod
     def _parse_page(cls, value: Any) -> int:
         """Parse page number, rejecting ranges."""
-        if value is None:
-            return 0
-        if isinstance(value, (list, tuple)):
-            items: list[Any] = list(value)  # type: ignore[arg-type]
-            if not items:
+        match value:
+            case None:
                 return 0
-            if len(items) > 1:
-                # If given a range, take the first page and warn
+            case list() | tuple():
+                items: list[Any] = list(value)
+                if not items:
+                    return 0
+                # If given a range, take the first page only
                 # The prompt explicitly forbids ranges, so this is a fallback
-                return int(items[0])  # type: ignore[arg-type]
-            return int(items[0])  # type: ignore[arg-type]
-        if isinstance(value, str):
-            numbers = [int(item) for item in re.findall(r"\d+", value)]
-            if not numbers:
-                return 0
-            return numbers[0]  # Take first number only
-        return int(value)
+                return int(items[0])
+            case str():
+                numbers = [int(item) for item in re.findall(r"\d+", value)]
+                return numbers[0] if numbers else 0
+            case _:
+                return int(value)
 
     @field_validator("tags", mode="before")
     @classmethod
     def _normalize_tags(cls, value: Any) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, str):
-            items = [value]
-        else:
-            items = list(value)
+        """Normalize tags to a list of trimmed strings."""
+        match value:
+            case None:
+                return []
+            case str():
+                items = [value]
+            case _:
+                items = list(value)
         normalized: list[str] = []
         for item in items:
             text = _trim_text(item, MAX_SHORT_FIELD_CHARS)

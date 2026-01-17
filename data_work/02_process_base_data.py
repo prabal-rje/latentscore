@@ -453,36 +453,47 @@ def _default_config() -> dict[str, Any]:
 
 
 def _coerce_path(value: Any) -> Path | None:
-    if value is None:
-        return None
-    if isinstance(value, Path):
-        return value
-    return Path(str(value))
+    """Coerce various input types to Path."""
+    match value:
+        case None:
+            return None
+        case Path():
+            return value
+        case _:
+            return Path(str(value))
 
 
 def _coerce_only_splits(value: Any) -> list[str] | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return [value]
-    return [str(item) for item in value]
+    """Coerce various input types to list of strings."""
+    match value:
+        case None:
+            return None
+        case str():
+            return [value]
+        case _:
+            return [str(item) for item in value]
 
 
 def _parse_model_kwargs(value: Any, *, label: str) -> dict[str, Any]:
-    if value in (None, ""):
-        return {}
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError as exc:
-            raise SystemExit(f"{label} must be valid JSON.") from exc
-    elif isinstance(value, Mapping):
-        parsed = dict(value)
-    else:
-        raise SystemExit(f"{label} must be a JSON object.")
-    if not isinstance(parsed, dict):
-        raise SystemExit(f"{label} must be a JSON object.")
-    return parsed
+    """Parse model kwargs from various input types."""
+    match value:
+        case None | "":
+            return {}
+        case str():
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise SystemExit(f"{label} must be valid JSON.") from exc
+        case Mapping():
+            parsed = dict(value)
+        case _:
+            raise SystemExit(f"{label} must be a JSON object.")
+
+    match parsed:
+        case dict():
+            return parsed
+        case _:
+            raise SystemExit(f"{label} must be a JSON object.")
 
 
 def _sanitize_model_kwargs(kwargs: Mapping[str, Any], *, label: str) -> dict[str, Any]:

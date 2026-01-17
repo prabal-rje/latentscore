@@ -31,7 +31,7 @@ from data_work.lib.llm_client import (
 from data_work.lib.music_prompt import build_music_prompt
 from data_work.lib.music_schema import MusicConfigPromptPayload
 from latentscore.audio import write_wav
-from latentscore.config import MusicConfig
+from latentscore.config import MusicConfig, MusicConfigPrompt
 from latentscore.synth import assemble
 
 LOGGER = logging.getLogger("data_work.clap_benchmark")
@@ -64,6 +64,8 @@ BAD_CONCEPTS = [
 
 
 class BenchmarkSource(BaseModel):
+    """Configuration for a benchmark source (model or dataset field)."""
+
     model_config = ConfigDict(extra="forbid")
 
     kind: str
@@ -71,6 +73,48 @@ class BenchmarkSource(BaseModel):
     model: str | None = None
     field: str | None = None
     api_base: str | None = None
+
+
+class ClapScore(BaseModel):
+    """CLAP scoring result for a single vibe-audio pair."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    audio_text_similarity: float
+    audio_bad_similarity: float
+    text_bad_similarity: float
+    excess_badness: float
+    penalty: float
+    raw_score: float
+    final_reward: float
+
+
+class BenchmarkResult(BaseModel):
+    """Result from benchmarking a single vibe-config pair."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vibe: str
+    model: str
+    source_kind: str
+    config_field: str | None = None
+    id_in_dataset: str | int | None = None
+    dataset: str | None = None
+    split: str | None = None
+    config: dict[str, Any] | None = None
+    config_error: str | None = None
+    clap_reward: float | None = None
+    clap_details: ClapScore | None = None
+    audio_path: str | None = None
+
+
+class ModelSummary(BaseModel):
+    """Summary statistics for a model's benchmark results."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    count: int
+    mean_clap_reward: float
 
 
 class ClapScorer:
@@ -102,7 +146,8 @@ class ClapScorer:
         denom = float(np.linalg.norm(a) * np.linalg.norm(b) + 1e-8)
         return numerator / denom
 
-    def score(self, vibe: str, audio_path: str) -> dict[str, float]:
+    def score(self, vibe: str, audio_path: str) -> ClapScore:
+        """Score audio against vibe text using CLAP embeddings."""
         text_embed = self._model.get_text_embedding([vibe])
         audio_embed = self._model.get_audio_embedding_from_filelist([audio_path])
         bad_embed = self._get_bad_embedding()
@@ -115,15 +160,15 @@ class ClapScorer:
         raw_score = self._softplus(audio_text_sim, beta=2.0) - 0.5 * penalty
         reward = float(np.clip(math.exp(raw_score - 1.0), 0.0, 1.0))
 
-        return {
-            "audio_text_similarity": float(audio_text_sim),
-            "audio_bad_similarity": float(audio_bad_sim),
-            "text_bad_similarity": float(text_bad_sim),
-            "excess_badness": float(excess_badness),
-            "penalty": float(penalty),
-            "raw_score": float(raw_score),
-            "final_reward": reward,
-        }
+        return ClapScore(
+            audio_text_similarity=float(audio_text_sim),
+            audio_bad_similarity=float(audio_bad_sim),
+            text_bad_similarity=float(text_bad_sim),
+            excess_badness=float(excess_badness),
+            penalty=float(penalty),
+            raw_score=float(raw_score),
+            final_reward=reward,
+        )
 
 
 def parse_source_entries(values: Sequence[str], kind: str) -> list[BenchmarkSource]:
@@ -149,24 +194,38 @@ def parse_field_entries(values: Sequence[str]) -> list[BenchmarkSource]:
 
 
 def _extract_config(value: Any) -> dict[str, Any]:
-    if value is None:
-        raise ValueError("Missing config payload.")
-    if isinstance(value, str):
-        parsed = json.loads(value)
-    elif isinstance(value, BaseModel):
-        parsed = value.model_dump()
-    else:
-        parsed = value
-    if isinstance(parsed, dict):
-        if "config" in parsed and isinstance(parsed["config"], dict):
-            return parsed["config"]
-        return parsed
-    raise ValueError("Config payload was not a JSON object.")
+    """Extract config dict from various input formats."""
+    match value:
+        case None:
+            raise ValueError("Missing config payload.")
+        case str():
+            parsed = json.loads(value)
+        case BaseModel():
+            parsed = value.model_dump()
+        case _:
+            parsed = value
+
+    match parsed:
+        case {"config": dict() as inner_config}:
+            return inner_config
+        case dict():
+            return parsed
+        case _:
+            raise ValueError("Config payload was not a JSON object.")
 
 
 def _config_to_audio(config_payload: Mapping[str, Any], duration: float) -> np.ndarray:
-    config = MusicConfig.model_validate(dict(config_payload))
-    internal = config.to_internal()
+    config_dict = dict(config_payload)
+    # Try MusicConfigPrompt first (string labels like "sparse", "light")
+    # then convert to MusicConfig via to_config() which handles the label->float mapping
+    music_config: MusicConfig
+    try:
+        prompt_config: MusicConfigPrompt = MusicConfigPrompt.model_validate(config_dict)
+        music_config = prompt_config.to_config()
+    except Exception:
+        # Fallback: maybe it's already in MusicConfig format (numeric values)
+        music_config = MusicConfig.model_validate(config_dict)
+    internal = music_config.to_internal()
     return assemble(internal, duration=duration)
 
 
@@ -209,27 +268,27 @@ async def _generate_litellm_payload(
     )
 
 
-def _write_results(path: Path, rows: Iterable[Mapping[str, Any]]) -> None:
+def _write_results(path: Path, rows: Iterable[BenchmarkResult]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            handle.write(row.model_dump_json() + "\n")
 
 
-def _summarize(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def _summarize(results: Sequence[BenchmarkResult]) -> dict[str, ModelSummary]:
+    """Summarize benchmark results by model."""
     by_model: dict[str, list[float]] = {}
-    for row in rows:
-        model = str(row.get("model", "unknown"))
-        reward = row.get("clap_reward")
-        if isinstance(reward, (int, float)):
-            by_model.setdefault(model, []).append(float(reward))
-    summary = {}
-    for model, scores in by_model.items():
-        summary[model] = {
-            "count": len(scores),
-            "mean_clap_reward": sum(scores) / len(scores) if scores else 0.0,
-        }
-    return summary
+    for result in results:
+        if result.clap_reward is not None:
+            by_model.setdefault(result.model, []).append(result.clap_reward)
+
+    return {
+        model: ModelSummary(
+            count=len(scores),
+            mean_clap_reward=sum(scores) / len(scores) if scores else 0.0,
+        )
+        for model, scores in by_model.items()
+    }
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -287,6 +346,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="Local HF model path to benchmark. Format: path[:label].",
+    )
+    parser.add_argument(
+        "--baseline",
+        action="append",
+        default=[],
+        help="Baseline type to benchmark (random, rule_based). Format: type[:label].",
     )
     parser.add_argument(
         "--system-prompt",
@@ -365,10 +430,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     dataset_sources = parse_field_entries(args.dataset_field)
     litellm_sources = parse_source_entries(args.litellm_model, "litellm")
     local_sources = parse_source_entries(args.local_model, "local")
-    sources = [*dataset_sources, *litellm_sources, *local_sources]
+    baseline_sources = parse_source_entries(args.baseline, "baseline")
+    sources = [*dataset_sources, *litellm_sources, *local_sources, *baseline_sources]
     if not sources:
         raise SystemExit(
-            "At least one --dataset-field, --litellm-model, or --local-model is required."
+            "At least one --dataset-field, --litellm-model, --local-model, or --baseline is required."
         )
 
     input_path = args.input.expanduser().resolve()
@@ -412,7 +478,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
 
     scorer = ClapScorer()
-    results: list[dict[str, Any]] = []
+    results: list[BenchmarkResult] = []
 
     audio_dir = output_dir / "audio"
     if args.keep_audio:
@@ -451,6 +517,13 @@ def main(argv: Sequence[str] | None = None) -> None:
                         prompt = format_prompt_json(args.system_prompt, vibe)
                         payload = client.generate_structured(prompt, MusicConfigPromptPayload)
                         config_payload = payload.config.model_dump()
+                    case "baseline":
+                        from data_work.lib.baselines import get_baseline
+
+                        assert source.model is not None
+                        baseline = get_baseline(source.model)
+                        baseline_payload = baseline.generate(vibe)
+                        config_payload = baseline_payload.config.model_dump()
                     case _:
                         error = f"Unsupported source kind: {source.kind}"
             except Exception as exc:
@@ -458,16 +531,16 @@ def main(argv: Sequence[str] | None = None) -> None:
 
             if config_payload is None:
                 results.append(
-                    {
-                        "model": source.label,
-                        "source_kind": source.kind,
-                        "config_field": source.field,
-                        "config_error": error or "missing_config",
-                        "vibe": vibe,
-                        "id_in_dataset": row.get("id_in_dataset"),
-                        "dataset": row.get("dataset"),
-                        "split": row.get("split"),
-                    }
+                    BenchmarkResult(
+                        model=source.label,
+                        source_kind=source.kind,
+                        config_field=source.field,
+                        config_error=error or "missing_config",
+                        vibe=vibe,
+                        id_in_dataset=row.get("id_in_dataset"),
+                        dataset=row.get("dataset"),
+                        split=row.get("split"),
+                    )
                 )
                 continue
 
@@ -489,37 +562,39 @@ def main(argv: Sequence[str] | None = None) -> None:
                         audio_file = str(audio_path)
                         clap_metrics = scorer.score(vibe, audio_file)
                 results.append(
-                    {
-                        "model": source.label,
-                        "source_kind": source.kind,
-                        "config_field": source.field,
-                        "vibe": vibe,
-                        "id_in_dataset": row.get("id_in_dataset"),
-                        "dataset": row.get("dataset"),
-                        "split": row.get("split"),
-                        "clap_reward": clap_metrics["final_reward"],
-                        "clap_audio_text_sim": clap_metrics["audio_text_similarity"],
-                        "clap_penalty": clap_metrics["penalty"],
-                        "audio_path": audio_record,
-                    }
+                    BenchmarkResult(
+                        model=source.label,
+                        source_kind=source.kind,
+                        config_field=source.field,
+                        vibe=vibe,
+                        id_in_dataset=row.get("id_in_dataset"),
+                        dataset=row.get("dataset"),
+                        split=row.get("split"),
+                        config=config_payload,
+                        clap_reward=clap_metrics.final_reward,
+                        clap_details=clap_metrics,
+                        audio_path=audio_record,
+                    )
                 )
             except Exception as exc:
                 results.append(
-                    {
-                        "model": source.label,
-                        "source_kind": source.kind,
-                        "config_field": source.field,
-                        "config_error": str(exc),
-                        "vibe": vibe,
-                        "id_in_dataset": row.get("id_in_dataset"),
-                        "dataset": row.get("dataset"),
-                        "split": row.get("split"),
-                    }
+                    BenchmarkResult(
+                        model=source.label,
+                        source_kind=source.kind,
+                        config_field=source.field,
+                        config_error=str(exc),
+                        vibe=vibe,
+                        id_in_dataset=row.get("id_in_dataset"),
+                        dataset=row.get("dataset"),
+                        split=row.get("split"),
+                        config=config_payload,
+                    )
                 )
 
     _write_results(output_path, results)
     summary = _summarize(results)
-    summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    summary_dict = {model: stats.model_dump() for model, stats in summary.items()}
+    summary_path.write_text(json.dumps(summary_dict, indent=2) + "\n", encoding="utf-8")
     LOGGER.info("Wrote results to %s", output_path)
     LOGGER.info("Wrote summary to %s", summary_path)
 

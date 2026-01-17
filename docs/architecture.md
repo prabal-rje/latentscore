@@ -23,3 +23,33 @@ The `data_work/` folder is a standalone data pipeline outside the core package.
 - `data_work/environment.yml` and `data_work/requirements.txt` define the data-only deps
 - `data_work/setup_python_env.sh` provisions a local venv
 - Prefer the `latentscore-data` environment for `data_work/` scripts and tooling
+
+## Schema Conversion Flow
+
+The pipeline uses two schema formats for music configs that require conversion:
+
+```
+MusicConfigPromptPayload (LLM output)
+├── justification: str
+├── config: MusicConfigPrompt  ← string labels ("sparse", "light", "medium")
+└── palettes: list[Palette]
+
+         ↓ .config.to_config()
+
+MusicConfig (runtime)           ← numeric values (0.3, 0.2, 0.5)
+```
+
+**Why two schemas?**
+- `MusicConfigPrompt` uses human-readable string labels that LLMs understand
+- `MusicConfig` uses numeric values that the synthesizer needs
+
+**Conversion happens in:**
+- `latentscore/config.py`: `MusicConfigPrompt.to_config()` converts labels to floats
+- `data_work/lib/clap_scorer.py`: `score_config()` uses this conversion for CLAP scoring
+- `data_work/04_clap_benchmark.py`: `_config_to_audio()` uses this for audio generation
+
+**Label mappings (defined in `latentscore/config.py`):**
+- `melody_density`: "very_sparse" → 0.15, "sparse" → 0.30, "medium" → 0.50, etc.
+- `syncopation`: "straight" → 0.0, "light" → 0.2, "medium" → 0.5, "heavy" → 0.8
+- `swing`: "none" → 0.0, "light" → 0.2, "medium" → 0.5, "heavy" → 0.8
+- Similar mappings for: `motif_repeat_prob`, `step_bias`, `chromatic_prob`, `cadence_strength`, `chord_change_bars`

@@ -54,6 +54,10 @@ dist/
 .claude
 .codex/*
 .opencode/
+.opencode
+.trash/
+
+
 # !.codex/setup.sh
 **/repomix-output.xml
 **/repomix-output.md
@@ -68,3 +72,10 @@ data_work/.benchmarks/
 data_work/.modal_outputs/
 data_work/.exports/
 .worktrees/
+
+# --- TODO files ---
+
+# Local TODO tracking files (not documentation)
+TODO.md
+data_work/TODO.md
+data_work/.eval_results/

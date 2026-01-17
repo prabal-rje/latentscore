@@ -151,9 +151,11 @@ def _parse_json(output: str) -> Mapping[str, Any] | None:
         parsed = json.loads(output)
     except json.JSONDecodeError:
         return None
-    if not isinstance(parsed, dict):
-        return None
-    return parsed
+    match parsed:
+        case dict():
+            return parsed
+        case _:
+            return None
 
 
 def reward_format(output: str) -> float:
@@ -171,9 +173,12 @@ def reward_schema(output: str) -> tuple[float, dict[str, list[str]]]:
         return 0.0, {"__json__": ["invalid_json"]}
 
     # Support nested "config" key for MusicConfigPromptPayload structure
-    config_data = parsed.get("config", parsed)
-    if not isinstance(config_data, dict):
-        return 0.0, {"__json__": ["config_not_object"]}
+    raw_config = parsed.get("config", parsed)
+    match raw_config:
+        case dict():
+            config_data = raw_config
+        case _:
+            return 0.0, {"__json__": ["config_not_object"]}
 
     errors: dict[str, list[str]] = {}
     total_fields = len(SynthConfig.model_fields)
@@ -221,9 +226,12 @@ def compute_partial_reward(
 
     if format_score > 0 and parsed is not None:
         # Check for palette duplicates
-        palettes = parsed.get("palettes", [])
-        if isinstance(palettes, list) and palettes:
-            palette_penalty = _palette_duplicate_penalty(palettes)
+        raw_palettes = parsed.get("palettes", [])
+        match raw_palettes:
+            case list() if raw_palettes:
+                palette_penalty = _palette_duplicate_penalty(raw_palettes)
+            case _:
+                pass
 
         # Audio scoring - only evaluate if schema score exceeds threshold
         if schema_score > weights.schema_threshold_for_audio and audio_scorer is not None:
@@ -279,7 +287,11 @@ def _field_is_valid(field_name: str, value: Any) -> bool:
         case "stereo":
             return value in STEREO_LABELS
         case "depth":
-            return isinstance(value, bool)
+            match value:
+                case bool():
+                    return True
+                case _:
+                    return False
         case "echo":
             return value in ECHO_LABELS
         case "human":
@@ -290,30 +302,43 @@ def _field_is_valid(field_name: str, value: Any) -> bool:
             return False
 
 
-def _palette_color_is_valid(color: Mapping[str, Any]) -> bool:
+def _palette_color_is_valid(color: Any) -> bool:
     """Check if a single palette color is valid."""
-    if not isinstance(color, Mapping):
-        return False
-    hex_val = color.get("hex")
-    weight = color.get("weight")
-    if not isinstance(hex_val, str) or not HEX_PATTERN.match(hex_val):
-        return False
+    match color:
+        case dict():
+            hex_val = color.get("hex")
+            weight = color.get("weight")
+        case _:
+            return False
+    match hex_val:
+        case str() if HEX_PATTERN.match(hex_val):
+            pass
+        case _:
+            return False
     if weight not in WEIGHT_LABELS:
         return False
     return True
 
 
-def _palette_is_valid(palette: Mapping[str, Any]) -> bool:
-    """Check if a single palette is valid."""
-    if not isinstance(palette, Mapping):
-        return False
-    colors = palette.get("colors")
-    if not isinstance(colors, list) or len(colors) != PALETTE_SIZE:
-        return False
-    return all(_palette_color_is_valid(c) for c in colors)
+def _dead_palette_is_valid(palette: Any) -> bool:
+    """Check if a single palette is valid.
+
+    NOTE: This function is currently unused. Marked as dead code pending removal.
+    Validation is done inline in _palette_duplicate_penalty instead.
+    """
+    match palette:
+        case dict():
+            colors = palette.get("colors")
+        case _:
+            return False
+    match colors:
+        case list() if len(colors) == PALETTE_SIZE:
+            return all(_palette_color_is_valid(c) for c in colors)
+        case _:
+            return False
 
 
-def _palette_duplicate_penalty(palettes: Sequence[Mapping[str, Any]]) -> float:
+def _palette_duplicate_penalty(palettes: Sequence[Any]) -> float:
     """Compute penalty for duplicate hex colors within palettes.
 
     Returns a value between 0 and 1, where 0 means no duplicates
@@ -326,19 +351,30 @@ def _palette_duplicate_penalty(palettes: Sequence[Mapping[str, Any]]) -> float:
     valid_palettes = 0
 
     for palette in palettes:
-        if not isinstance(palette, Mapping):
-            continue
-        colors = palette.get("colors")
-        if not isinstance(colors, list):
-            continue
+        match palette:
+            case dict():
+                colors = palette.get("colors")
+            case _:
+                continue
+        match colors:
+            case list():
+                pass
+            case _:
+                continue
 
         valid_palettes += 1
         hexes: list[str] = []
         for color in colors:
-            if isinstance(color, Mapping):
-                hex_val = color.get("hex")
-                if isinstance(hex_val, str):
-                    hexes.append(hex_val)
+            match color:
+                case dict():
+                    hex_val = color.get("hex")
+                    match hex_val:
+                        case str():
+                            hexes.append(hex_val)
+                        case _:
+                            pass
+                case _:
+                    pass
 
         if hexes:
             unique_count = len(set(hexes))

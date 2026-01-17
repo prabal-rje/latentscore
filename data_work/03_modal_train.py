@@ -402,9 +402,11 @@ def _parse_prompt_json(prompt: str) -> dict[str, Any] | None:
         parsed = json.loads(prompt)
     except json.JSONDecodeError:
         return None
-    if not isinstance(parsed, dict):
-        return None
-    return parsed
+    match parsed:
+        case dict():
+            return parsed
+        case _:
+            return None
 
 
 @app.function(
@@ -1038,6 +1040,129 @@ def _build_reward_config_from_args(args: argparse.Namespace) -> RewardConfig | N
     return RewardConfig(weights=RewardWeights(**weights_dict))
 
 
+def _resolve_training_config(args: argparse.Namespace) -> TrainingConfig:
+    """Resolve effective TrainingConfig from config file, presets, and CLI args.
+
+    Priority (highest to lowest):
+    1. CLI args (explicit overrides)
+    2. Ablation preset
+    3. Config file
+    4. Default TrainingConfig
+    """
+    from common.training_config import DEFAULT_TRAINING_CONFIG
+
+    # Start with default or loaded config
+    config_file_path = getattr(args, "config_file", None)
+    base_config = _load_config_file(config_file_path) or DEFAULT_TRAINING_CONFIG
+
+    # Apply ablation preset if specified (for GRPO)
+    preset_spec = getattr(args, "ablation_preset", None)
+    if preset_spec:
+        preset_config = _apply_ablation_preset(preset_spec)
+        if preset_config:
+            # Merge preset into base config
+            base_config = base_config.model_copy(
+                update={
+                    "lora": preset_config.lora,
+                    "optimizer": preset_config.optimizer,
+                    "batch": preset_config.batch,
+                    "grpo": preset_config.grpo,
+                }
+            )
+
+    # Build updates from CLI args (CLI takes precedence)
+    updates: dict[str, Any] = {}
+
+    # Base model
+    if hasattr(args, "base_model") and args.base_model != BASE_MODELS.get("smollm2-135m"):
+        updates["base_model"] = args.base_model
+
+    # System prompt
+    if args.system_prompt != DEFAULT_SYSTEM_PROMPT:
+        updates["system_prompt"] = args.system_prompt
+
+    # LoRA config - check if any CLI args differ from config
+    lora_updates: dict[str, Any] = {}
+    if args.lora_r != base_config.lora.r:
+        lora_updates["r"] = args.lora_r
+    if args.lora_alpha != base_config.lora.alpha:
+        lora_updates["alpha"] = args.lora_alpha
+    if args.lora_dropout != base_config.lora.dropout:
+        lora_updates["dropout"] = args.lora_dropout
+    if args.lora_bias != base_config.lora.bias:
+        lora_updates["bias"] = args.lora_bias
+    if lora_updates:
+        updates["lora"] = base_config.lora.model_copy(update=lora_updates)
+
+    # Optimizer config
+    optim_updates: dict[str, Any] = {}
+    if args.optim != base_config.optimizer.name:
+        optim_updates["name"] = args.optim
+    if args.lr != base_config.optimizer.learning_rate:
+        optim_updates["learning_rate"] = args.lr
+    if args.lr_scheduler != base_config.optimizer.lr_scheduler:
+        optim_updates["lr_scheduler"] = args.lr_scheduler
+    if args.warmup_ratio != base_config.optimizer.warmup_ratio:
+        optim_updates["warmup_ratio"] = args.warmup_ratio
+    if args.weight_decay != base_config.optimizer.weight_decay:
+        optim_updates["weight_decay"] = args.weight_decay
+    if optim_updates:
+        updates["optimizer"] = base_config.optimizer.model_copy(update=optim_updates)
+
+    # Batch config
+    batch_updates: dict[str, Any] = {}
+    if args.batch_size != base_config.batch.batch_size:
+        batch_updates["batch_size"] = args.batch_size
+    if args.grad_accum != base_config.batch.gradient_accumulation_steps:
+        batch_updates["gradient_accumulation_steps"] = args.grad_accum
+    if batch_updates:
+        updates["batch"] = base_config.batch.model_copy(update=batch_updates)
+
+    # Data config
+    data_updates: dict[str, Any] = {}
+    if args.prompt_field != base_config.data.prompt_field:
+        data_updates["prompt_field"] = args.prompt_field
+    if args.response_field != base_config.data.response_field:
+        data_updates["response_field"] = args.response_field
+    if args.max_seq_length != base_config.data.max_seq_length:
+        data_updates["max_seq_length"] = args.max_seq_length
+    if data_updates:
+        updates["data"] = base_config.data.model_copy(update=data_updates)
+
+    # GRPO config (only for GRPO command)
+    if args.command == "grpo":
+        grpo_updates: dict[str, Any] = {}
+        if args.num_generations != base_config.grpo.num_generations:
+            grpo_updates["num_generations"] = args.num_generations
+        if args.beta != base_config.grpo.beta:
+            grpo_updates["beta"] = args.beta
+        # Apply reward config from CLI args
+        reward_config = _build_reward_config_from_args(args)
+        if reward_config:
+            grpo_updates["reward"] = reward_config
+        if grpo_updates:
+            updates["grpo"] = base_config.grpo.model_copy(update=grpo_updates)
+
+    # Logging config
+    logging_updates: dict[str, Any] = {}
+    if args.wandb_project != base_config.logging.wandb_project:
+        logging_updates["wandb_project"] = args.wandb_project
+    if args.wandb_entity != base_config.logging.wandb_entity:
+        logging_updates["wandb_entity"] = args.wandb_entity
+    if logging_updates:
+        updates["logging"] = base_config.logging.model_copy(update=logging_updates)
+
+    # Epochs and seed
+    if args.epochs != base_config.epochs:
+        updates["epochs"] = args.epochs
+    if args.seed != base_config.seed:
+        updates["seed"] = args.seed
+
+    if updates:
+        return base_config.model_copy(update=updates)
+    return base_config
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     args = parse_args(argv if argv is not None else os.sys.argv[1:])
@@ -1052,69 +1177,80 @@ def main(argv: Sequence[str] | None = None) -> None:
         output_dir = Path(REMOTE_OUTPUT_PATH) / args.output
         remote_data_file = _resolve_remote_data_file(data_file)
 
+    # Resolve training config from file, presets, and CLI args
+    training_config = _resolve_training_config(args) if args.command in {"sft", "grpo"} else None
+
     with app.run():
         try:
             match args.command:
                 case "check-imports":
                     result = check_imports.remote()
                 case "sft":
+                    assert training_config is not None
                     config = SftConfig(
-                        base_model=_resolve_model(args.base_model),
+                        base_model=training_config.resolve_base_model(),
                         data_file=str(remote_data_file),
                         output_dir=str(output_dir),
-                        system_prompt=args.system_prompt,
-                        prompt_field=args.prompt_field,
-                        response_field=args.response_field,
-                        max_seq_length=args.max_seq_length,
-                        lora_r=args.lora_r,
-                        lora_alpha=args.lora_alpha,
-                        lora_dropout=args.lora_dropout,
-                        lora_bias=args.lora_bias,
-                        optim=args.optim,
-                        batch_size=args.batch_size,
-                        gradient_accumulation_steps=args.grad_accum,
-                        learning_rate=args.lr,
-                        lr_scheduler_type=args.lr_scheduler,
-                        warmup_ratio=args.warmup_ratio,
-                        weight_decay=args.weight_decay,
-                        epochs=args.epochs,
-                        seed=args.seed,
+                        system_prompt=training_config.system_prompt,
+                        prompt_field=training_config.data.prompt_field,
+                        response_field=training_config.data.response_field,
+                        max_seq_length=training_config.data.max_seq_length,
+                        lora_r=training_config.lora.r,
+                        lora_alpha=training_config.lora.alpha,
+                        lora_dropout=training_config.lora.dropout,
+                        lora_bias=training_config.lora.bias,
+                        optim=training_config.optimizer.name,
+                        batch_size=training_config.batch.batch_size,
+                        gradient_accumulation_steps=training_config.batch.gradient_accumulation_steps,
+                        learning_rate=training_config.optimizer.learning_rate,
+                        lr_scheduler_type=training_config.optimizer.lr_scheduler,
+                        warmup_ratio=training_config.optimizer.warmup_ratio,
+                        weight_decay=training_config.optimizer.weight_decay,
+                        epochs=training_config.epochs,
+                        seed=training_config.seed,
                         overwrite=args.overwrite,
-                        wandb_project=args.wandb_project,
-                        wandb_entity=args.wandb_entity,
+                        wandb_project=training_config.logging.wandb_project,
+                        wandb_entity=training_config.logging.wandb_entity,
                         wandb_run_name=args.wandb_run_name,
+                    )
+                    LOGGER.info(
+                        "Using TrainingConfig: %s", training_config.model_dump_json(indent=2)
                     )
                     result = run_sft.remote(config.model_dump())
                 case "grpo":
+                    assert training_config is not None
                     config = GrpoConfig(
                         model_path=args.model,
                         data_file=str(remote_data_file),
                         output_dir=str(output_dir),
-                        system_prompt=args.system_prompt,
-                        prompt_field=args.prompt_field,
-                        response_field=args.response_field,
-                        max_seq_length=args.max_seq_length,
-                        lora_r=args.lora_r,
-                        lora_alpha=args.lora_alpha,
-                        lora_dropout=args.lora_dropout,
-                        lora_bias=args.lora_bias,
-                        optim=args.optim,
-                        batch_size=args.batch_size,
-                        gradient_accumulation_steps=args.grad_accum,
-                        learning_rate=args.lr,
-                        lr_scheduler_type=args.lr_scheduler,
-                        warmup_ratio=args.warmup_ratio,
-                        weight_decay=args.weight_decay,
-                        epochs=args.epochs,
-                        num_generations=args.num_generations,
-                        beta=args.beta,
+                        system_prompt=training_config.system_prompt,
+                        prompt_field=training_config.data.prompt_field,
+                        response_field=training_config.data.response_field,
+                        max_seq_length=training_config.data.max_seq_length,
+                        lora_r=training_config.lora.r,
+                        lora_alpha=training_config.lora.alpha,
+                        lora_dropout=training_config.lora.dropout,
+                        lora_bias=training_config.lora.bias,
+                        optim=training_config.optimizer.name,
+                        batch_size=training_config.batch.batch_size,
+                        gradient_accumulation_steps=training_config.batch.gradient_accumulation_steps,
+                        learning_rate=training_config.optimizer.learning_rate,
+                        lr_scheduler_type=training_config.optimizer.lr_scheduler,
+                        warmup_ratio=training_config.optimizer.warmup_ratio,
+                        weight_decay=training_config.optimizer.weight_decay,
+                        epochs=training_config.epochs,
+                        num_generations=training_config.grpo.num_generations,
+                        beta=training_config.grpo.beta,
                         reward_type=args.reward_type,
                         audio_reward=getattr(args, "audio_reward", None),
-                        seed=args.seed,
+                        seed=training_config.seed,
                         overwrite=args.overwrite,
-                        wandb_project=args.wandb_project,
-                        wandb_entity=args.wandb_entity,
+                        wandb_project=training_config.logging.wandb_project,
+                        wandb_entity=training_config.logging.wandb_entity,
                         wandb_run_name=args.wandb_run_name,
+                    )
+                    LOGGER.info(
+                        "Using TrainingConfig: %s", training_config.model_dump_json(indent=2)
                     )
                     result = run_grpo.remote(config.model_dump())
                 case _:
