@@ -8,7 +8,6 @@ class DummyScorer:
         return LLMScoreResult(
             vibe_match=0.5,
             audio_quality=0.6,
-            coherence=0.7,
             creativity=0.8,
             justification="ok",
         )

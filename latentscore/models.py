@@ -12,15 +12,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from common import (
-    OUTPUT_JSON_ONLY,
-    OUTPUT_USE_EXAMPLE_KEYS,
-    PALETTE_REQUIREMENTS,
-    ROLE_MUSIC_EXPERT,
-    TASK_GENERATE_CONFIG,
-    TASK_JUSTIFICATION_FIRST,
-    TASK_USE_EXAMPLES,
-)
+from common import build_config_generation_prompt
 
 from .config import MusicConfig
 from .errors import ConfigGenerateError, LLMInferenceError, ModelNotAvailableError
@@ -106,172 +98,12 @@ ModelSpec = ModelChoice | ExternalModelSpec | ModelForGeneratingMusicConfig
 def _is_model(obj: object) -> TypeGuard[ModelForGeneratingMusicConfig]:
     return hasattr(obj, "generate")
 
-
-FEW_SHOT_EXAMPLES = """
-Example 1:
-Vibe: "dark ambient underwater cave with bioluminescence"
-{
-  "tempo": "very_slow",
-  "root": "d",
-  "mode": "dorian",
-  "brightness": "very_dark",
-  "space": "vast",
-  "density": 4,
-  "bass": "drone",
-  "pad": "dark_sustained",
-  "melody": "minimal",
-  "rhythm": "none",
-  "texture": "shimmer_slow",
-  "accent": "none",
-  "motion": "slow",
-  "attack": "soft",
-  "stereo": "wide",
-  "depth": true,
-  "echo": "heavy",
-  "human": "tight",
-  "grain": "warm"
-}
-
-Example 2:
-Vibe: "uplifting sunrise over mountains"
-{
-  "tempo": "medium",
-  "root": "c",
-  "mode": "major",
-  "brightness": "bright",
-  "space": "large",
-  "density": 4,
-  "bass": "sustained",
-  "pad": "warm_slow",
-  "melody": "rising",
-  "rhythm": "minimal",
-  "texture": "shimmer",
-  "accent": "bells",
-  "motion": "medium",
-  "attack": "soft",
-  "stereo": "wide",
-  "depth": false,
-  "echo": "medium",
-  "human": "natural",
-  "grain": "clean"
-}
-
-Example 3:
-Vibe: "cyberpunk nightclub in tokyo"
-{
-  "tempo": "fast",
-  "root": "a",
-  "mode": "minor",
-  "brightness": "bright",
-  "space": "small",
-  "density": 6,
-  "bass": "pulsing",
-  "pad": "cinematic",
-  "melody": "arp_melody",
-  "rhythm": "electronic",
-  "texture": "none",
-  "accent": "none",
-  "motion": "fast",
-  "attack": "sharp",
-  "stereo": "wide",
-  "depth": true,
-  "echo": "subtle",
-  "human": "robotic",
-  "grain": "gritty"
-}
-
-Example 4:
-Vibe: "peaceful meditation in a zen garden"
-{
-  "tempo": "very_slow",
-  "root": "f",
-  "mode": "major",
-  "brightness": "medium",
-  "space": "large",
-  "density": 2,
-  "bass": "drone",
-  "pad": "ambient_drift",
-  "melody": "minimal",
-  "rhythm": "none",
-  "texture": "breath",
-  "accent": "chime",
-  "motion": "static",
-  "attack": "soft",
-  "stereo": "medium",
-  "depth": false,
-  "echo": "medium",
-  "human": "natural",
-  "grain": "clean"
-}
-
-Example 5:
-Vibe: "epic cinematic battle scene"
-{
-  "tempo": "very_fast",
-  "root": "d",
-  "mode": "minor",
-  "brightness": "medium",
-  "space": "medium",
-  "density": 6,
-  "bass": "pulsing",
-  "pad": "cinematic",
-  "melody": "rising",
-  "rhythm": "soft_four",
-  "texture": "none",
-  "accent": "bells",
-  "motion": "fast",
-  "attack": "sharp",
-  "stereo": "ultra_wide",
-  "depth": true,
-  "echo": "subtle",
-  "human": "robotic",
-  "grain": "warm"
-}
-"""
-
-_EXPRESSIVE_PROMPT = "\n".join(
-    [
-        f"Role: {ROLE_MUSIC_EXPERT}",
-        "",
-        "Task:",
-        "- Given a vibe/mood description, generate ONE MusicConfig JSON object.",
-        f"- {TASK_USE_EXAMPLES}",
-        "",
-        "Output requirements:",
-        f"- {OUTPUT_JSON_ONLY}",
-        f"- {OUTPUT_USE_EXAMPLE_KEYS}",
-        "",
-        "Few-shot examples:",
-        FEW_SHOT_EXAMPLES.strip(),
-    ]
-)
-
-
 def build_expressive_prompt() -> str:
-    return _EXPRESSIVE_PROMPT
-
-
-_LITELLM_PROMPT = "\n".join(
-    [
-        f"Role: {ROLE_MUSIC_EXPERT}",
-        "",
-        "Task:",
-        f"- {TASK_GENERATE_CONFIG}",
-        f"- {TASK_JUSTIFICATION_FIRST}",
-        f"- {TASK_USE_EXAMPLES}",
-        "",
-        PALETTE_REQUIREMENTS,
-        "",
-        "Output requirements:",
-        f"- {OUTPUT_JSON_ONLY}",
-        f"- {OUTPUT_USE_EXAMPLE_KEYS}",
-        "",
-    ]
-)
+    return build_config_generation_prompt()
 
 
 def build_litellm_prompt() -> str:
-    return _LITELLM_PROMPT
+    return build_config_generation_prompt()
 
 
 class ExampleConfig(BaseModel):
@@ -633,13 +465,7 @@ class ExpressiveMlxModel:
         return outlines_any.from_mlxlm(model_any, tokenizer_any)
 
     def _build_prompt(self, vibe: str) -> str:
-        return (
-            f"{build_expressive_prompt()}\n\n"
-            '<input description="The vibe/mood description to generate configs for">\n'
-            f'Vibe: "{vibe}"\n'
-            "</input>\n\n"
-            "<output>\n"
-        )
+        return f"{build_expressive_prompt()}\n\n{vibe}\n"
 
     def _generate_sync(self, vibe: str) -> MusicConfig:
         model = self._load_model()

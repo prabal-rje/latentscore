@@ -267,7 +267,6 @@ async def evaluate_source(
         # LLM-based audio scoring (optional)
         llm_vibe_match: float | None = None
         llm_audio_quality: float | None = None
-        llm_coherence: float | None = None
         llm_creativity: float | None = None
         llm_justification: str | None = None
         llm_score_value: float | None = None
@@ -284,16 +283,14 @@ async def evaluate_source(
                 )
                 llm_vibe_match = llm_detailed.vibe_match
                 llm_audio_quality = llm_detailed.audio_quality
-                llm_coherence = llm_detailed.coherence
                 llm_creativity = llm_detailed.creativity
                 llm_justification = llm_detailed.justification
 
                 # Compute weighted overall score
                 llm_score_value = (
-                    llm_vibe_match * 0.5
-                    + llm_audio_quality * 0.2
-                    + llm_coherence * 0.2
-                    + llm_creativity * 0.1
+                    llm_vibe_match * 0.6
+                    + llm_audio_quality * 0.25
+                    + llm_creativity * 0.15
                 )
             except ValidationError as exc:
                 llm_error = f"SchemaError: {exc}"
@@ -318,7 +315,6 @@ async def evaluate_source(
             clap_error=clap_error,
             llm_vibe_match=llm_vibe_match,
             llm_audio_quality=llm_audio_quality,
-            llm_coherence=llm_coherence,
             llm_creativity=llm_creativity,
             llm_justification=llm_justification,
             llm_score=llm_score_value,
@@ -380,9 +376,6 @@ def compute_metrics(
     llm_audio_qualities = [r.llm_audio_quality for r in results if r.llm_audio_quality is not None]
     llm_audio_quality_mean = statistics.mean(llm_audio_qualities) if llm_audio_qualities else None
 
-    llm_coherences = [r.llm_coherence for r in results if r.llm_coherence is not None]
-    llm_coherence_mean = statistics.mean(llm_coherences) if llm_coherences else None
-
     llm_creativities = [r.llm_creativity for r in results if r.llm_creativity is not None]
     llm_creativity_mean = statistics.mean(llm_creativities) if llm_creativities else None
 
@@ -430,7 +423,6 @@ def compute_metrics(
         llm_score_std=llm_score_std,
         llm_vibe_match_mean=llm_vibe_match_mean,
         llm_audio_quality_mean=llm_audio_quality_mean,
-        llm_coherence_mean=llm_coherence_mean,
         llm_creativity_mean=llm_creativity_mean,
         n_config_errors=n_config_errors,
         n_clap_errors=n_clap_errors,
@@ -498,8 +490,6 @@ def write_results(
                 f.write(f"- Vibe Match Mean: {metrics.llm_vibe_match_mean:.3f}\n")
             if metrics.llm_audio_quality_mean is not None:
                 f.write(f"- Audio Quality Mean: {metrics.llm_audio_quality_mean:.3f}\n")
-            if metrics.llm_coherence_mean is not None:
-                f.write(f"- Coherence Mean: {metrics.llm_coherence_mean:.3f}\n")
             if metrics.llm_creativity_mean is not None:
                 f.write(f"- Creativity Mean: {metrics.llm_creativity_mean:.3f}\n")
             f.write("\n")
@@ -800,8 +790,6 @@ async def main_async(args: argparse.Namespace) -> None:
                 print(f"  Vibe Match: {metrics.llm_vibe_match_mean:.3f}")
             if metrics.llm_audio_quality_mean is not None:
                 print(f"  Audio Quality: {metrics.llm_audio_quality_mean:.3f}")
-            if metrics.llm_coherence_mean is not None:
-                print(f"  Coherence: {metrics.llm_coherence_mean:.3f}")
             if metrics.llm_creativity_mean is not None:
                 print(f"  Creativity: {metrics.llm_creativity_mean:.3f}")
         if metrics.inference_time_mean_ms is not None:

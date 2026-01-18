@@ -10,6 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from common.prompts import build_llm_scoring_prompt
 from data_work.lib.clap_scorer import ClapScore, ClapScorerProtocol
 from latentscore.audio import write_wav
 from latentscore.config import MusicConfig, MusicConfigPrompt
@@ -17,36 +18,7 @@ from latentscore.synth import assemble
 
 LOGGER = logging.getLogger("data_work.llm_scorer")
 
-# Scoring prompt template
-DEFAULT_SCORING_PROMPT = """You are an expert music critic evaluating ambient/electronic music.
-
-Listen to the audio and evaluate how well it matches the intended vibe/mood description.
-
-**Intended Vibe:** {vibe}
-
-Score the audio on these dimensions (each 0.0 to 1.0):
-
-1. **vibe_match** (0.0-1.0): How well does the audio capture the intended vibe/mood?
-   - 0.0 = Completely mismatched, wrong mood entirely
-   - 0.5 = Partially captures the vibe, some elements work
-   - 1.0 = Perfectly captures the intended vibe/mood
-
-2. **audio_quality** (0.0-1.0): Technical quality of the audio
-   - 0.0 = Harsh, grating, painful to listen to
-   - 0.5 = Acceptable quality, some rough edges
-   - 1.0 = Clean, well-produced, pleasant to listen to
-
-3. **coherence** (0.0-1.0): How coherent and intentional does the music sound?
-   - 0.0 = Random noise, no musical structure
-   - 0.5 = Some structure but disjointed
-   - 1.0 = Coherent, intentional musical piece
-
-4. **creativity** (0.0-1.0): How creative/interesting is the interpretation?
-   - 0.0 = Generic, boring, predictable
-   - 0.5 = Decent interpretation, expected choices
-   - 1.0 = Creative, surprising, engaging interpretation
-
-Provide a brief justification for your scores."""
+DEFAULT_SCORING_PROMPT = build_llm_scoring_prompt()
 
 
 class LLMScoreResult(BaseModel):
@@ -63,11 +35,6 @@ class LLMScoreResult(BaseModel):
         ge=0.0,
         le=1.0,
         description="Technical quality of the audio (0.0-1.0)",
-    )
-    coherence: float = Field(
-        ge=0.0,
-        le=1.0,
-        description="How coherent and intentional the music sounds (0.0-1.0)",
     )
     creativity: float = Field(
         ge=0.0,
@@ -130,15 +97,13 @@ def _llm_score_to_clap_score(result: LLMScoreResult) -> ClapScore:
 
     # Weighted final score
     weights = {
-        "vibe_match": 0.5,
-        "audio_quality": 0.2,
-        "coherence": 0.2,
-        "creativity": 0.1,
+        "vibe_match": 0.6,
+        "audio_quality": 0.25,
+        "creativity": 0.15,
     }
     raw_score = (
         result.vibe_match * weights["vibe_match"]
         + result.audio_quality * weights["audio_quality"]
-        + result.coherence * weights["coherence"]
         + result.creativity * weights["creativity"]
     )
     final_reward = max(0.0, min(1.0, raw_score - penalty))
@@ -213,12 +178,11 @@ class LLMScorer:
         )
 
         LOGGER.debug(
-            "LLM score for '%s': vibe=%.2f quality=%.2f coherence=%.2f creativity=%.2f",
-            vibe[:30],
-            result.vibe_match,
-            result.audio_quality,
-            result.coherence,
-            result.creativity,
+        "LLM score for '%s': vibe=%.2f quality=%.2f creativity=%.2f",
+        vibe[:30],
+        result.vibe_match,
+        result.audio_quality,
+        result.creativity,
         )
 
         return _llm_score_to_clap_score(result)

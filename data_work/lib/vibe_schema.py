@@ -8,6 +8,7 @@ import random
 import re
 from typing import Any, Iterable, Sequence, TypeVar
 
+from common.prompts import build_vibe_extraction_prompt
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 MAX_LONG_FIELD_CHARS = 1_000
@@ -250,20 +251,4 @@ def schema_hash() -> str:
 
 def build_vibe_prompt() -> str:
     schema = schema_signature()
-    return (
-        "You are an expert data labeler. Read the input text with (Page N) markers and "
-        "return ONLY valid JSON that matches the schema exactly. "
-        "Follow these rules strictly:\n"
-        "- vibe_index starts at 0 and increments by 1 in output order.\n"
-        "- text_page is a SINGLE integer (0-based page number). "
-        "You MUST process ONE page at a time. Page ranges are FORBIDDEN. "
-        "If content spans pages, create SEPARATE vibe objects for each page.\n"
-        "- character_name uses real names when present; otherwise use labels like "
-        "'anonymous', 'stranger 1', or '3rd person'.\n"
-        "- character_perceived_vibes and scene_vibes use the 5-level descriptor ladder.\n"
-        "- tags are atomic concepts (1-3 words each), lowercase when possible.\n"
-        "- Keep every string concise: <=1000 chars for vibe fields, <=100 chars for short "
-        "fields like names, tags.\n"
-        f"\nSchema:\n{schema}\n"
-        "\nReturn JSON only. No prose, no extra keys. ONE page per vibe object."
-    )
+    return build_vibe_extraction_prompt(schema)

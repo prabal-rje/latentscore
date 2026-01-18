@@ -8,10 +8,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from common.music_schema import schema_signature as music_schema_signature
-from common.prompts import (
-    PALETTE_REQUIREMENTS,
-    ROLE_SOUND_DESIGNER,
-)
+from common.prompts import CONFIG_GENERATION_PROMPT_TEMPLATE, VIBE_EXTRACTION_PROMPT_TEMPLATE
 
 
 class PromptVersion(BaseModel):
@@ -72,23 +69,9 @@ def list_prompts() -> list[str]:
 register_prompt(
     PromptVersion(
         name="vibe_v1",
-        version="1.0.0",
+        version="1.1.0",
         description="Vibe extraction with single-page enforcement",
-        template="""\
-You are an expert data labeler. Read the input text with (Page N) markers and \
-return ONLY valid JSON that matches the schema exactly. Follow these rules strictly:
-- vibe_index starts at 0 and increments by 1 in output order.
-- text_page is a SINGLE integer (0-based page number). You MUST process ONE page at a time. \
-Page ranges are FORBIDDEN. If content spans pages, create SEPARATE vibe objects for each page.
-- character_name uses real names when present; otherwise use labels like 'anonymous', 'stranger 1', or '3rd person'.
-- character_perceived_vibes and scene_vibes use the 5-level descriptor ladder.
-- tags are atomic concepts (1-3 words each), lowercase when possible.
-- Keep every string concise: <=1000 chars for vibe fields, <=100 chars for short fields.
-
-Schema:
-{schema}
-
-Return JSON only. No prose, no extra keys. ONE page per vibe object.""",
+        template=VIBE_EXTRACTION_PROMPT_TEMPLATE,
     )
 )
 
@@ -96,24 +79,9 @@ Return JSON only. No prose, no extra keys. ONE page per vibe object.""",
 register_prompt(
     PromptVersion(
         name="config_v1",
-        version="1.0.0",
-        description="Config generation with palette requirements",
-        template=f"""\
-{ROLE_SOUND_DESIGNER}
-Convert the given vibe text into a config payload that matches the schema exactly.
-
-Rules:
-- Return ONLY valid JSON matching the schema; no extra keys.
-- Use only the allowed label values from the schema enums.
-- Keep the justification concise (1-3 sentences, <=1000 chars).
-- Prefer ambient textures (pads, drones, subtle rhythm); avoid vocals or realistic instruments.
-
-{PALETTE_REQUIREMENTS}
-
-Schema:
-{{schema}}
-
-Return JSON only. No prose, no markdown.""",
+        version="1.1.0",
+        description="Unified config generation prompt",
+        template=CONFIG_GENERATION_PROMPT_TEMPLATE,
     )
 )
 
@@ -121,12 +89,9 @@ Return JSON only. No prose, no markdown.""",
 register_prompt(
     PromptVersion(
         name="system_v1",
-        version="1.0.0",
+        version="1.1.0",
         description="Default system prompt for SFT training",
-        template="""\
-You are a synthesizer configuration assistant. Given a vibe description, \
-output a JSON configuration for an ambient/electronic synthesizer. \
-Output ONLY valid JSON with no explanation.""",
+        template=CONFIG_GENERATION_PROMPT_TEMPLATE,
     )
 )
 

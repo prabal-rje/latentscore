@@ -19,6 +19,7 @@ if __package__ is None and __name__ == "__main__":
 
 from pydantic import BaseModel, Field, ValidationError
 
+from common.prompts import build_config_generation_prompt
 from data_work.lib.config_batcher import (
     ConfigBatcher,
     build_batch_prompt,
@@ -36,7 +37,6 @@ from data_work.lib.llm_client import (
     normalize_model_and_base,
     resolve_api_key_for_models,
 )
-from data_work.lib.music_prompt import build_music_prompt
 from data_work.lib.music_schema import MusicConfigPromptPayload
 from data_work.lib.music_schema import schema_hash as music_schema_hash
 from data_work.lib.record_builder import VibeRow, build_vibe_rows
@@ -1567,7 +1567,7 @@ async def main_async(args: argparse.Namespace) -> None:
     split_map = split_records(records, args.seed)
     target_splits = args.only_splits or [name for name, _ in SPLITS]
     system_prompt = build_vibe_prompt()
-    config_prompt = build_music_prompt()
+    config_prompt = build_config_generation_prompt(batch=args.config_batch_size > 1)
     cache = SqliteCache(args.cache_path)
     await cache.initialize()
 

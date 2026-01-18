@@ -60,29 +60,18 @@ from common.prompt_registry import (
     render_prompt,
 )
 from common.prompts import (
-    # Output requirements
-    OUTPUT_JSON_ONLY,
-    OUTPUT_MATCH_SCHEMA,
-    OUTPUT_USE_ENUMS,
-    OUTPUT_USE_EXAMPLE_KEYS,
-    # Palette requirements
-    PALETTE_REQUIREMENTS,
-    # Core role descriptions
-    ROLE_MUSIC_EXPERT,
-    ROLE_SOUND_DESIGNER,
-    # Style guidance
-    STYLE_AMBIENT,
-    STYLE_JUSTIFICATION_CONCISE,
-    # Task instructions
-    TASK_GENERATE_CONFIG,
-    TASK_JUSTIFICATION_FIRST,
-    TASK_USE_EXAMPLES,
-    # Builder functions
+    CONFIG_GENERATION_BATCH_SUFFIX,
+    CONFIG_GENERATION_PROMPT_TEMPLATE,
+    LLM_SCORING_PROMPT_TEMPLATE,
+    VIBE_EXTRACTION_PROMPT_TEMPLATE,
+    build_config_generation_prompt,
     build_expressive_prompt,
     build_inference_prompt,
     build_litellm_prompt,
+    build_llm_scoring_prompt,
     build_music_prompt,
     build_training_prompt,
+    build_vibe_extraction_prompt,
 )
 from common.reward_config import (
     DEFAULT_REWARD_CONFIG,
@@ -185,20 +174,15 @@ __all__ = [
     "repair_palette_duplicates",
     "schema_hash",
     "schema_signature",
-    # Prompt constants
-    "ROLE_MUSIC_EXPERT",
-    "ROLE_SOUND_DESIGNER",
-    "TASK_GENERATE_CONFIG",
-    "TASK_JUSTIFICATION_FIRST",
-    "TASK_USE_EXAMPLES",
-    "PALETTE_REQUIREMENTS",
-    "OUTPUT_JSON_ONLY",
-    "OUTPUT_MATCH_SCHEMA",
-    "OUTPUT_USE_ENUMS",
-    "OUTPUT_USE_EXAMPLE_KEYS",
-    "STYLE_AMBIENT",
-    "STYLE_JUSTIFICATION_CONCISE",
+    # Prompt templates
+    "CONFIG_GENERATION_PROMPT_TEMPLATE",
+    "CONFIG_GENERATION_BATCH_SUFFIX",
+    "VIBE_EXTRACTION_PROMPT_TEMPLATE",
+    "LLM_SCORING_PROMPT_TEMPLATE",
     # Prompt builders
+    "build_config_generation_prompt",
+    "build_vibe_extraction_prompt",
+    "build_llm_scoring_prompt",
     "build_expressive_prompt",
     "build_inference_prompt",
     "build_litellm_prompt",

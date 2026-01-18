@@ -79,3 +79,5 @@ data_work/.exports/
 TODO.md
 data_work/TODO.md
 data_work/.eval_results/
+data_work/.experiments/
+data_work/_experiments/

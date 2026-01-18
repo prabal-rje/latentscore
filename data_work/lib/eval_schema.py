@@ -112,7 +112,6 @@ class EvalResult(BaseModel):
     # LLM scorer metrics (if computed)
     llm_vibe_match: float | None = None
     llm_audio_quality: float | None = None
-    llm_coherence: float | None = None
     llm_creativity: float | None = None
     llm_justification: str | None = None
     llm_score: float | None = None  # Weighted overall score
@@ -153,7 +152,6 @@ class EvalSetMetrics(BaseModel):
     llm_score_std: float | None = None
     llm_vibe_match_mean: float | None = None
     llm_audio_quality_mean: float | None = None
-    llm_coherence_mean: float | None = None
     llm_creativity_mean: float | None = None
 
     # Error counts

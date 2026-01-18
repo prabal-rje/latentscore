@@ -1,13 +1,7 @@
 from pydantic import BaseModel
 
+from common import build_training_prompt
 from latentscore.models import FAST_EXAMPLES, build_expressive_prompt, build_litellm_prompt
-
-
-def test_expressive_prompt_contains_few_shots() -> None:
-    prompt = build_expressive_prompt()
-    assert "Few-shot examples:" in prompt
-    assert "Example 1:" in prompt
-    assert "Return only JSON" in prompt
 
 
 def test_fast_examples_are_pydantic_models() -> None:
@@ -18,16 +12,13 @@ def test_fast_examples_are_pydantic_models() -> None:
     assert "config" in payload
 
 
-def test_litellm_prompt_mentions_palettes() -> None:
-    prompt = build_litellm_prompt()
+def test_prompt_builders_match_common() -> None:
+    base_prompt = build_training_prompt()
+    assert build_litellm_prompt() == base_prompt
+    assert build_expressive_prompt() == base_prompt
+
+
+def test_prompt_mentions_palettes_and_schema() -> None:
+    prompt = build_training_prompt()
     assert "palettes" in prompt
-    assert "3" in prompt
-    assert "5" in prompt
-
-
-def test_expressive_prompt_mentions_palettes() -> None:
-    # Expressive prompt uses few-shot examples, which may not have palette text
-    # but the schema should mention palettes
-    prompt = build_expressive_prompt()
-    # For now, just verify the prompt is non-empty
-    assert len(prompt) > 0
+    assert "<schema>" in prompt

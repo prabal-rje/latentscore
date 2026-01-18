@@ -38,11 +38,9 @@ def build_batch_response_model(batch_size: int) -> type[BaseModel]:
 
 def build_batch_prompt(vibes: Sequence[str], keys: Sequence[str]) -> str:
     header = (
-        "Generate a JSON object with one entry per vibe input. "
-        "Use ONLY these keys: " + ", ".join(keys) + ".\n"
-        "Each value must match the MusicConfigPromptPayload schema.\n"
-        "Do not add extra keys or markdown.\n\n"
-        "Vibe inputs:"  # keep variable content at end for prompt caching
+        "Batch keys:\n"
+        + ", ".join(keys)
+        + "\n\nVibe inputs:"  # keep variable content at end for prompt caching
     )
     lines = [header]
     for index, vibe in enumerate(vibes):

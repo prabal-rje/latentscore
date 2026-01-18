@@ -10,6 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from common.prompts import build_config_generation_prompt
 from common.reward_config import RewardConfig
 
 # --- LoRA Configuration ---
@@ -196,11 +197,7 @@ class TrainingConfig(BaseModel):
 
     # System prompt (configurable for prompt ablations)
     system_prompt: str = Field(
-        default=(
-            "You are a synthesizer configuration assistant. "
-            "Given a vibe description, output a JSON configuration for an "
-            "ambient/electronic synthesizer. Output ONLY valid JSON with no explanation."
-        ),
+        default_factory=build_config_generation_prompt,
         description="System prompt for training",
     )
 
