@@ -127,10 +127,7 @@ def render_chat_prompt(
     except (TypeError, ValueError):
         return tokenizer.apply_chat_template(messages, **kwargs)
 
-    if not any(
-        param.kind == inspect.Parameter.VAR_KEYWORD
-        for param in sig.parameters.values()
-    ):
+    if not any(param.kind == inspect.Parameter.VAR_KEYWORD for param in sig.parameters.values()):
         allowed_kwargs = {
             name
             for name, param in sig.parameters.items()

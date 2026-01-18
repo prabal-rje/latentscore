@@ -11,12 +11,8 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal, Sequence
 
-try:
-    import modal
-except ModuleNotFoundError:  # pragma: no cover - handled in tests without Modal installed
-    modal = None
 from pydantic import BaseModel, ConfigDict
 
 from common.prompt_registry import list_prompts, render_config_prompt
@@ -27,6 +23,13 @@ from data_work.lib.llm_client import (
     render_chat_prompt,
     wrap_vibe_for_chat,
 )
+
+ModelFamily = Literal["gemma", "qwen"]
+
+try:
+    import modal
+except ModuleNotFoundError:  # pragma: no cover - handled in tests without Modal installed
+    modal = None
 
 if TYPE_CHECKING:
     from data_work.lib.rewards import RewardBreakdown
@@ -139,7 +142,7 @@ else:
         "torchvision",
         "torchaudio",
         "tqdm==4.67.1",
-        "transformers==4.54.0",
+        "transformers==4.54.1",
         "trl==0.19.1",
         "unsloth[cu128-torch270]==2025.7.8",
         "unsloth_zoo==2025.7.10",
@@ -584,7 +587,7 @@ def _ensure_lora_trainable(model: Any) -> None:
 def run_sft(config: dict[str, Any]) -> str:
     # isort: off
     import unsloth  # noqa: F401
-    from unsloth import FastLanguageModel
+    from unsloth import FastLanguageModel, FastModel
     # isort: on
 
     import datasets
@@ -608,32 +611,68 @@ def run_sft(config: dict[str, Any]) -> str:
         weave.init(sft.wandb_project)
         _log_wandb_run(wandb_run)
 
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=sft.base_model,
-        max_seq_length=sft.max_seq_length,
-        dtype=None,
-        load_in_4bit=False,
-        load_in_8bit=False,
-    )
-    normalize_tokenizer_for_model(tokenizer, sft.base_model)
+    def detect_model_family(model_key: str) -> ModelFamily:
+        lower = model_key.lower()
+        if "gemma" in lower:
+            return "gemma"
+        if "qwen" in lower:
+            return "qwen"
+        raise NotImplementedError(f"Unknown model family for: {model_key}. Supported: gemma, qwen")
 
-    model = FastLanguageModel.get_peft_model(
-        model,
-        r=sft.lora_r,
-        target_modules=[
-            "q_proj",
-            "k_proj",
-            "v_proj",
-            "o_proj",
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-        ],
-        lora_alpha=sft.lora_alpha,
-        lora_dropout=sft.lora_dropout,
-        bias=sft.lora_bias,
-        use_gradient_checkpointing="unsloth",
-    )
+    model_family: ModelFamily = detect_model_family(sft.base_model)
+    match model_family:
+        case "gemma":
+            model, tokenizer = FastModel.from_pretrained(
+                model_name=sft.base_model,
+                max_seq_length=sft.max_seq_length,
+                load_in_4bit=False,
+                load_in_8bit=False,
+                full_finetuning=False,
+            )
+            normalize_tokenizer_for_model(tokenizer, sft.base_model)
+            model = FastModel.get_peft_model(
+                model,
+                finetune_vision_layers=False,
+                finetune_language_layers=True,
+                finetune_attention_modules=True,
+                finetune_mlp_modules=True,
+                r=sft.lora_r,
+                lora_alpha=sft.lora_alpha,
+                lora_dropout=sft.lora_dropout,
+                bias=sft.lora_bias,
+                random_state=sft.seed,
+            )
+        case "qwen":
+            model, tokenizer = FastLanguageModel.from_pretrained(
+                model_name=sft.base_model,
+                max_seq_length=sft.max_seq_length,
+                dtype=None,
+                load_in_4bit=False,
+                load_in_8bit=False,
+            )
+            normalize_tokenizer_for_model(tokenizer, sft.base_model)
+            model = FastLanguageModel.get_peft_model(
+                model,
+                r=sft.lora_r,
+                target_modules=[
+                    "q_proj",
+                    "k_proj",
+                    "v_proj",
+                    "o_proj",
+                    "gate_proj",
+                    "up_proj",
+                    "down_proj",
+                ],
+                lora_alpha=sft.lora_alpha,
+                lora_dropout=sft.lora_dropout,
+                bias=sft.lora_bias,
+                use_gradient_checkpointing="unsloth",
+            )
+        case _:
+            raise NotImplementedError(
+                f"Model family '{model_family}' not supported. "
+                f"Supported families: gemma, qwen. Model key: {sft.base_model}"
+            )
 
     dataset = datasets.load_dataset("json", data_files=sft.data_file, split="train")
 
@@ -729,7 +768,7 @@ def run_sft(config: dict[str, Any]) -> str:
 def run_grpo(config: dict[str, Any]) -> str:
     # isort: off
     import unsloth  # noqa: F401
-    from unsloth import FastLanguageModel
+    from unsloth import FastLanguageModel, FastModel
     # isort: on
 
     import datasets
@@ -767,32 +806,68 @@ def run_grpo(config: dict[str, Any]) -> str:
         reward_config=grpo.reward_config,
     )
 
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=grpo.model_path,
-        max_seq_length=grpo.max_seq_length,
-        dtype=torch.float16 if torch.cuda.is_available() else None,
-        load_in_4bit=False,
-        load_in_8bit=False,
-    )
-    normalize_tokenizer_for_model(tokenizer, grpo.base_model)
+    def detect_model_family(model_key: str) -> ModelFamily:
+        lower = model_key.lower()
+        if "gemma" in lower:
+            return "gemma"
+        if "qwen" in lower:
+            return "qwen"
+        raise NotImplementedError(f"Unknown model family for: {model_key}. Supported: gemma, qwen")
 
-    model = FastLanguageModel.get_peft_model(
-        model,
-        r=grpo.lora_r,
-        target_modules=[
-            "q_proj",
-            "k_proj",
-            "v_proj",
-            "o_proj",
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-        ],
-        lora_alpha=grpo.lora_alpha,
-        lora_dropout=grpo.lora_dropout,
-        bias=grpo.lora_bias,
-        use_gradient_checkpointing="unsloth",
-    )
+    model_family: ModelFamily = detect_model_family(grpo.base_model)
+    match model_family:
+        case "gemma":
+            model, tokenizer = FastModel.from_pretrained(
+                model_name=grpo.model_path,
+                max_seq_length=grpo.max_seq_length,
+                load_in_4bit=False,
+                load_in_8bit=False,
+                full_finetuning=False,
+            )
+            normalize_tokenizer_for_model(tokenizer, grpo.base_model)
+            model = FastModel.get_peft_model(
+                model,
+                finetune_vision_layers=False,
+                finetune_language_layers=True,
+                finetune_attention_modules=True,
+                finetune_mlp_modules=True,
+                r=grpo.lora_r,
+                lora_alpha=grpo.lora_alpha,
+                lora_dropout=grpo.lora_dropout,
+                bias=grpo.lora_bias,
+                random_state=grpo.seed,
+            )
+        case "qwen":
+            model, tokenizer = FastLanguageModel.from_pretrained(
+                model_name=grpo.model_path,
+                max_seq_length=grpo.max_seq_length,
+                dtype=torch.float16 if torch.cuda.is_available() else None,
+                load_in_4bit=False,
+                load_in_8bit=False,
+            )
+            normalize_tokenizer_for_model(tokenizer, grpo.base_model)
+            model = FastLanguageModel.get_peft_model(
+                model,
+                r=grpo.lora_r,
+                target_modules=[
+                    "q_proj",
+                    "k_proj",
+                    "v_proj",
+                    "o_proj",
+                    "gate_proj",
+                    "up_proj",
+                    "down_proj",
+                ],
+                lora_alpha=grpo.lora_alpha,
+                lora_dropout=grpo.lora_dropout,
+                bias=grpo.lora_bias,
+                use_gradient_checkpointing="unsloth",
+            )
+        case _:
+            raise NotImplementedError(
+                f"Model family '{model_family}' not supported. "
+                f"Supported families: gemma, qwen. Model key: {grpo.base_model}"
+            )
     if grpo.init_adapter_dir:
         adapter_weights = load_peft_weights(grpo.init_adapter_dir, device=None)
         set_peft_model_state_dict(model, adapter_weights, adapter_name="default")
@@ -830,6 +905,10 @@ def run_grpo(config: dict[str, Any]) -> str:
     )
     _validate_max_seq_length(grpo.max_seq_length, observed_max_length)
 
+    # Gemma models use bf16 due to large activation values; other models use fp16
+    use_bf16 = model_family == "gemma" and torch.cuda.is_available()
+    use_fp16 = not use_bf16 and torch.cuda.is_available()
+
     training_kwargs = {
         "output_dir": grpo.output_dir,
         "per_device_train_batch_size": grpo.batch_size,
@@ -843,8 +922,8 @@ def run_grpo(config: dict[str, Any]) -> str:
         "logging_steps": 10,
         "save_strategy": "epoch",
         "seed": grpo.seed,
-        "bf16": False,
-        "fp16": torch.cuda.is_available(),
+        "bf16": use_bf16,
+        "fp16": use_fp16,
         "report_to": ["wandb"] if wandb_run else [],
         "max_completion_length": grpo.max_completion_length,
         "temperature": grpo.temperature,
