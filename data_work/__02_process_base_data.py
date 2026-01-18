@@ -9,7 +9,6 @@ import json
 import logging
 import random
 import sys
-from collections import defaultdict
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Iterable, Sequence
@@ -28,7 +27,7 @@ from data_work.lib.config_batcher import (
     parse_batch_response,
 )
 from data_work.lib.config_io import build_config_hash, load_config_file, write_config_file
-from data_work.lib.dedupe import dedupe_rows
+from data_work.lib.dedupe import dedupe_records, diversity_sample
 from data_work.lib.jsonl_io import iter_jsonl
 from data_work.lib.llm_cache import SqliteCache, cached_async
 from data_work.lib.llm_client import (
@@ -56,16 +55,16 @@ from data_work.lib.vibe_schema import (
     normalize_vibe_indices,
     paginate_text,
     schema_hash,
-    split_records,
+    split_records_with_diversity,
 )
 
 _LOGGER = logging.getLogger("data_work.process_base_data")
 
 REQUIRED_FIELDS = ("created", "metadata", "dataset", "id_in_dataset", "text")
 
-DEFAULT_MODEL = "openrouter/openai/gpt-oss-20b"
-DEFAULT_CONFIG_MODEL = "openrouter/openai/gpt-oss-20b"
-DEFAULT_OPENROUTER_CONTEXT_LIMIT = 131_072
+DEFAULT_MODEL = "openai/gpt-oss-20b"
+DEFAULT_CONFIG_MODEL = "openai/gpt-oss-20b"
+DEFAULT_CONTEXT_LIMIT = 131_072
 DEFAULT_CACHE_PATH = Path("data_work/.cache/vibe_cache.sqlite")
 DEFAULT_MAX_CONCURRENCY = 4
 DEFAULT_MAX_QPS = 2.0
@@ -181,10 +180,7 @@ def _build_parser(*, include_extra: bool, use_defaults: bool) -> argparse.Argume
         type=str,
         default=DEFAULT_MODEL,
         use_defaults=use_defaults,
-        help=(
-            "LiteLLM model string. For OpenRouter use openrouter/openai/gpt-oss-20b "
-            "or a full OpenRouter URL."
-        ),
+        help="LiteLLM model string (e.g., openai/gpt-oss-20b, anthropic/claude-sonnet-4-20250514).",
     )
     _add_arg(
         parser,
@@ -299,7 +295,7 @@ def _build_parser(*, include_extra: bool, use_defaults: bool) -> argparse.Argume
             parser,
             "--api-key-env",
             type=str,
-            default="OPENROUTER_API_KEY",
+            default="OPENAI_API_KEY",
             use_defaults=use_defaults,
             help="Environment variable for the API key.",
         )
@@ -485,7 +481,7 @@ def _default_config() -> dict[str, Any]:
         "api_base": None,
         "config_api_base": None,
         "api_key": None,
-        "api_key_env": "OPENROUTER_API_KEY",
+        "api_key_env": "OPENAI_API_KEY",
         "env_file": None,
         "max_input_tokens": DEFAULT_MAX_INPUT_TOKENS,
         "page_tokens": DEFAULT_PAGE_TOKENS,
@@ -820,12 +816,12 @@ def hash_text(text: str) -> str:
 
 
 def warn_if_context_limit(model: str, max_input_tokens: int) -> None:
-    if "gpt-oss-20b" in model and max_input_tokens > DEFAULT_OPENROUTER_CONTEXT_LIMIT:
+    if "gpt-oss-20b" in model and max_input_tokens > DEFAULT_CONTEXT_LIMIT:
         _LOGGER.warning(
             "Requested %s tokens exceeds OpenRouter GPT-OSS context limit (%s). "
             "Use --max-input-tokens to avoid 400 errors.",
             max_input_tokens,
-            DEFAULT_OPENROUTER_CONTEXT_LIMIT,
+            DEFAULT_CONTEXT_LIMIT,
         )
 
 
@@ -1265,8 +1261,6 @@ async def process_split(
     ewma_alpha: float,
     ewma_threshold: float,
     ewma_min_samples: int,
-    dedupe_model: str,
-    dedupe_threshold: float,
     output_path: Path,
     overwrite: bool,
     resume: bool,
@@ -1446,53 +1440,26 @@ async def process_split(
         if batcher is not None:
             await batcher.aclose()
 
-    rows_by_dataset: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for row in good_rows:
-        dataset = str(row.get("dataset", "unknown"))
-        rows_by_dataset[dataset].append(row)
+    # NOTE: Dedupe now happens globally BEFORE split (in main_async) to prevent
+    # train/test leakage. Per-split dedupe removed as of 2026-01-18.
+    final_rows = good_rows
 
-    deduped_rows: list[dict[str, Any]] = []
-    total_removed = 0
-    for dataset, dataset_rows in rows_by_dataset.items():
-        kept, removed = dedupe_rows(
-            dataset_rows,
-            threshold=dedupe_threshold,
-            model_name=dedupe_model,
-        )
-        total_removed += removed
-        _LOGGER.info(
-            "Split %s dataset %s: kept=%s deduped=%s",
-            split_name,
-            dataset,
-            len(kept),
-            removed,
-        )
-        deduped_rows.extend(kept)
-
-    if good_rows:
-        _LOGGER.info(
-            "Split %s rows=%s deduped_total=%s",
-            split_name,
-            len(good_rows),
-            total_removed,
-        )
-
-    if error_rate > 0 and deduped_rows:
-        noisy_rows = sum(1 for row in deduped_rows if _row_is_noisy(row))
+    if error_rate > 0 and final_rows:
+        noisy_rows = sum(1 for row in final_rows if _row_is_noisy(row))
         if noisy_rows == 0:
             _LOGGER.warning(
                 "Split %s produced no noisy rows; forcing noise on one row.",
                 split_name,
             )
             _force_noise_row(
-                deduped_rows,
+                final_rows,
                 error_seed=error_seed,
                 dataset_hash=dataset_hash,
             )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("a", encoding="utf-8") as handle:
-        for row in deduped_rows + error_rows:
+        for row in final_rows + error_rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
@@ -1564,7 +1531,39 @@ async def main_async(args: argparse.Namespace) -> None:
     records = load_records(jsonl_paths)
     dataset_hash = hash_paths(jsonl_paths)
 
-    split_map = split_records(records, args.seed)
+    # Global dedupe BEFORE split to prevent train/test leakage
+    original_count = len(records)
+    records, removed_count = dedupe_records(
+        records,
+        threshold=args.dedupe_threshold,
+        model_name=args.dedupe_model,
+    )
+    _LOGGER.info(
+        "Global dedupe: kept=%d removed=%d (threshold=%.2f)",
+        len(records),
+        removed_count,
+        args.dedupe_threshold,
+    )
+    if removed_count > 0:
+        _LOGGER.info(
+            "Dedupe reduction: %.1f%% of records removed",
+            100.0 * removed_count / original_count,
+        )
+
+    # Use diversity sampling for GRPO split to maximize coverage
+    def _diversity_fn(recs: list[BaseRecord], n: int) -> tuple[list[BaseRecord], list[int]]:
+        return diversity_sample(
+            recs,
+            n,
+            model_name=args.dedupe_model,
+            seed=args.seed,
+        )
+
+    split_map = split_records_with_diversity(
+        records,
+        args.seed,
+        diversity_sample_fn=_diversity_fn,
+    )
     target_splits = args.only_splits or [name for name, _ in SPLITS]
     system_prompt = build_vibe_prompt()
     config_prompt = build_config_generation_prompt(batch=args.config_batch_size > 1)
@@ -1608,8 +1607,6 @@ async def main_async(args: argparse.Namespace) -> None:
             ewma_alpha=args.ewma_alpha,
             ewma_threshold=args.ewma_threshold,
             ewma_min_samples=args.ewma_min_samples,
-            dedupe_model=args.dedupe_model,
-            dedupe_threshold=args.dedupe_threshold,
             output_path=output_dir / f"{split_name}.jsonl",
             overwrite=args.overwrite,
             resume=args.resume,
@@ -1623,6 +1620,15 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     args = parse_args()
+
+    _LOGGER.warning(
+        "Seed=%d provides partial reproducibility. External LLM calls (vibe extraction, "
+        "config generation) are non-deterministic due to API load balancing and model "
+        "variability. Seed controls: split assignment, noise injection, diversity sampling. "
+        "SQLite cache ensures re-runs with same inputs produce identical outputs.",
+        args.seed,
+    )
+
     try:
         import uvloop  # type: ignore[import]
 

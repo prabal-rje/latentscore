@@ -5,7 +5,9 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+from data_work.lib.scoring_types import ScoreResult
 
 
 class EvalCategory(str, Enum):
@@ -89,7 +91,10 @@ class EvalPrompt(BaseModel):
 
 
 class EvalResult(BaseModel):
-    """Result from evaluating a single prompt."""
+    """Result from evaluating a single prompt.
+
+    Implements ScoreResult protocol via final_score property.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -126,6 +131,38 @@ class EvalResult(BaseModel):
     # Timing
     inference_time_ms: float | None = None
     synth_time_ms: float | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def final_score(self) -> float:
+        """Return the best available score implementing ScoreResult protocol.
+
+        Priority: llm_score > clap_score > schema validity > 0.0
+        """
+        if self.llm_score is not None:
+            return self.llm_score
+        if self.clap_score is not None:
+            return self.clap_score
+        if self.schema_valid:
+            return 0.5  # Schema valid but no audio score
+        if self.json_valid:
+            return 0.25  # JSON valid but schema invalid
+        return 0.0
+
+
+# Runtime check that EvalResult implements ScoreResult
+def _check_eval_protocol() -> None:
+    """Verify EvalResult implements ScoreResult at import time."""
+    assert isinstance(
+        EvalResult(
+            prompt_id="test",
+            source_label="test",
+        ),
+        ScoreResult,
+    ), "EvalResult must implement ScoreResult protocol"
+
+
+_check_eval_protocol()
 
 
 class EvalSetMetrics(BaseModel):

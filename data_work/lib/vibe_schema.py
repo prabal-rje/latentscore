@@ -6,7 +6,7 @@ import hashlib
 import json
 import random
 import re
-from typing import Any, Iterable, Sequence, TypeVar
+from typing import Any, Callable, Iterable, Sequence, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -17,10 +17,14 @@ MAX_SHORT_FIELD_CHARS = 100
 DEFAULT_MAX_INPUT_TOKENS = 100_000
 DEFAULT_PAGE_TOKENS = 1_000
 
+# Split ratios for independent SFT/GRPO data (scientifically cleaner).
+# - TEST: Random sample, held out for final evaluation
+# - GRPO: Diversity-sampled for maximum coverage during RL (independent from SFT)
+# - SFT-Train/Val: Remaining data for supervised learning
 SPLITS: tuple[tuple[str, float], ...] = (
-    ("SFT-Train", 0.60),
-    ("SFT-Val", 0.10),
-    ("GRPO", 0.15),
+    ("SFT-Train", 0.55),
+    ("SFT-Val", 0.05),
+    ("GRPO", 0.25),  # Diversity-sampled, NOT random
     ("TEST", 0.15),
 )
 
@@ -54,6 +58,7 @@ def paginate_text(text: str, max_tokens: int, page_tokens: int) -> str:
 
 
 def split_records(records: Sequence[T], seed: int) -> dict[str, list[T]]:
+    """Simple random split (legacy). See split_records_with_diversity for GRPO."""
     rng = random.Random(seed)
     indices = list(range(len(records)))
     rng.shuffle(indices)
@@ -74,6 +79,88 @@ def split_records(records: Sequence[T], seed: int) -> dict[str, list[T]]:
             split_map[name].append(records[idx])
         cursor += count
     return split_map
+
+
+def split_records_with_diversity(
+    records: Sequence[T],
+    seed: int,
+    *,
+    diversity_sample_fn: Callable[[Sequence[T], int], tuple[list[T], list[int]]] | None = None,
+) -> dict[str, list[T]]:
+    """Split records with diversity sampling for GRPO.
+
+    Splitting strategy (order matters for scientific validity):
+    1. TEST (15%): Random sample - held out for final evaluation
+    2. SFT-Val (5%): Random sample - must predict TEST performance
+    3. GRPO (25%): Diversity-sampled from remaining - maximizes coverage for RL
+    4. SFT-Train (55%): Leftovers after evaluation and GRPO selection
+
+    Why this order:
+    - Evaluation sets (TEST, VAL) must be random to represent true distribution
+    - They're sampled BEFORE any optimization-driven selection (diversity)
+    - GRPO then gets diversity sampling from what remains
+    - SFT-Train gets the rest (fine for supervised learning)
+
+    Args:
+        records: Full dataset (already deduped)
+        seed: Random seed for reproducibility
+        diversity_sample_fn: Function(records, n) -> (selected, indices).
+                            If None, falls back to random sampling for GRPO.
+    """
+    if not records:
+        return {name: [] for name, _ in SPLITS}
+
+    rng = random.Random(seed)
+    n_total = len(records)
+    records_list = list(records)
+
+    # Calculate counts for each split
+    split_counts = {name: int(n_total * ratio) for name, ratio in SPLITS}
+
+    # Ensure we use all records (assign remainder to SFT-Train)
+    assigned = sum(split_counts.values())
+    if assigned < n_total:
+        split_counts["SFT-Train"] += n_total - assigned
+
+    # Step 1: Random sample for TEST (evaluation - must be representative)
+    indices = list(range(n_total))
+    rng.shuffle(indices)
+
+    test_count = split_counts["TEST"]
+    test_indices = set(indices[:test_count])
+    test_records = [records_list[i] for i in sorted(test_indices)]
+
+    # Step 2: Random sample for SFT-Val (evaluation - must predict TEST)
+    remaining_after_test = [i for i in indices if i not in test_indices]
+    val_count = split_counts["SFT-Val"]
+    val_indices = set(remaining_after_test[:val_count])
+    val_records = [records_list[i] for i in sorted(val_indices)]
+
+    # Pool for training (after removing evaluation sets)
+    train_pool_indices = [i for i in remaining_after_test if i not in val_indices]
+    train_pool = [records_list[i] for i in train_pool_indices]
+
+    # Step 3: Diversity sample for GRPO (from training pool)
+    grpo_count = split_counts["GRPO"]
+
+    if diversity_sample_fn is not None and grpo_count > 0:
+        grpo_records, grpo_local_indices = diversity_sample_fn(train_pool, grpo_count)
+        grpo_indices_set = set(grpo_local_indices)
+    else:
+        # Fallback to random sampling if no diversity function provided
+        grpo_local_indices = list(range(min(grpo_count, len(train_pool))))
+        grpo_records = [train_pool[i] for i in grpo_local_indices]
+        grpo_indices_set = set(grpo_local_indices)
+
+    # Step 4: SFT-Train gets the leftovers
+    train_records = [r for i, r in enumerate(train_pool) if i not in grpo_indices_set]
+
+    return {
+        "SFT-Train": train_records,
+        "SFT-Val": val_records,
+        "GRPO": grpo_records,
+        "TEST": test_records,
+    }
 
 
 class VibeDescriptor(BaseModel):

@@ -8,9 +8,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from common.prompts import build_llm_scoring_prompt
+from data_work.lib.scoring_types import ScoreResult
 from data_work.lib.clap_scorer import ClapScore, ClapScorerProtocol
 from latentscore.audio import write_wav
 from latentscore.config import MusicConfig, MusicConfigPrompt
@@ -45,6 +46,36 @@ class LLMScoreResult(BaseModel):
         max_length=500,
         description="Brief explanation of the scores",
     )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def final_score(self) -> float:
+        """Return weighted final score implementing ScoreResult protocol.
+
+        Weights: vibe_match=0.6, audio_quality=0.25, creativity=0.15
+        """
+        return (
+            self.vibe_match * 0.6
+            + self.audio_quality * 0.25
+            + self.creativity * 0.15
+        )
+
+
+# Runtime check that LLMScoreResult implements ScoreResult
+def _check_llm_protocol() -> None:
+    """Verify LLMScoreResult implements ScoreResult at import time."""
+    assert isinstance(
+        LLMScoreResult(
+            vibe_match=0.5,
+            audio_quality=0.5,
+            creativity=0.5,
+            justification="test",
+        ),
+        ScoreResult,
+    ), "LLMScoreResult must implement ScoreResult protocol"
+
+
+_check_llm_protocol()
 
 
 def _encode_audio_base64(audio_path: str) -> str:

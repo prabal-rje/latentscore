@@ -6,15 +6,21 @@ import tempfile
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, computed_field
 
 from latentscore.audio import write_wav
 from latentscore.config import MusicConfig, MusicConfigPrompt
 from latentscore.synth import assemble
 
+# Import ScoreResult protocol for type checking
+from data_work.lib.scoring_types import ScoreResult
+
 
 class ClapScore(BaseModel):
-    """CLAP scoring result for a single vibe-audio pair."""
+    """CLAP scoring result for a single vibe-audio pair.
+
+    Implements ScoreResult protocol via final_score property.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -25,6 +31,35 @@ class ClapScore(BaseModel):
     penalty: float
     raw_score: float
     final_reward: float
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def final_score(self) -> float:
+        """Return final_reward as the canonical final_score.
+
+        This implements the ScoreResult protocol requirement.
+        """
+        return self.final_reward
+
+
+# Runtime check that ClapScore implements ScoreResult
+def _check_protocol() -> None:
+    """Verify ClapScore implements ScoreResult at import time."""
+    assert isinstance(
+        ClapScore(
+            audio_text_similarity=0.0,
+            audio_bad_similarity=0.0,
+            text_bad_similarity=0.0,
+            excess_badness=0.0,
+            penalty=0.0,
+            raw_score=0.0,
+            final_reward=0.0,
+        ),
+        ScoreResult,
+    ), "ClapScore must implement ScoreResult protocol"
+
+
+_check_protocol()
 
 
 class ClapScorerProtocol(Protocol):

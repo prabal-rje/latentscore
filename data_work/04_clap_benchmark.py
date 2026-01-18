@@ -34,6 +34,9 @@ from latentscore.audio import write_wav
 from latentscore.config import MusicConfig, MusicConfigPrompt
 from latentscore.synth import assemble
 
+# Import shared ClapScore (implements ScoreResult protocol)
+from data_work.lib.clap_scorer import ClapScore
+
 LOGGER = logging.getLogger("data_work.clap_benchmark")
 
 DEFAULT_SYSTEM_PROMPT = build_music_prompt()
@@ -73,20 +76,6 @@ class BenchmarkSource(BaseModel):
     model: str | None = None
     field: str | None = None
     api_base: str | None = None
-
-
-class ClapScore(BaseModel):
-    """CLAP scoring result for a single vibe-audio pair."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    audio_text_similarity: float
-    audio_bad_similarity: float
-    text_bad_similarity: float
-    excess_badness: float
-    penalty: float
-    raw_score: float
-    final_reward: float
 
 
 class BenchmarkResult(BaseModel):

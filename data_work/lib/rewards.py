@@ -8,9 +8,10 @@ import re
 from collections.abc import Sequence
 from typing import Any, Callable, Mapping
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from common.reward_config import DEFAULT_REWARD_CONFIG, RewardConfig
+from data_work.lib.scoring_types import ScoreResult
 
 LOGGER = logging.getLogger(__name__)
 
@@ -135,7 +136,10 @@ class SynthConfig(BaseModel):
 
 
 class RewardBreakdown(BaseModel):
-    """Structured reward output for logging/analysis."""
+    """Structured reward output for logging/analysis.
+
+    Implements ScoreResult protocol via final_score property.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -144,6 +148,33 @@ class RewardBreakdown(BaseModel):
     schema: float
     audio: float
     field_errors: dict[str, list[str]]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def final_score(self) -> float:
+        """Return total as the canonical final_score.
+
+        This implements the ScoreResult protocol requirement.
+        """
+        return self.total
+
+
+# Runtime check that RewardBreakdown implements ScoreResult
+def _check_reward_protocol() -> None:
+    """Verify RewardBreakdown implements ScoreResult at import time."""
+    assert isinstance(
+        RewardBreakdown(
+            total=0.5,
+            format=1.0,
+            schema=0.5,
+            audio=0.0,
+            field_errors={},
+        ),
+        ScoreResult,
+    ), "RewardBreakdown must implement ScoreResult protocol"
+
+
+_check_reward_protocol()
 
 
 def _parse_json(output: str) -> Mapping[str, Any] | None:

@@ -311,7 +311,26 @@ async def litellm_structured_completion(
     api_base: str | None,
     model_kwargs: Mapping[str, Any],
     temperature: float = 0.0,
+    cache_control_injection_points: Sequence[Mapping[str, str]] | None = None,
 ) -> T:
+    """Make a structured LLM completion call via LiteLLM.
+
+    Args:
+        model: LiteLLM model string (e.g., "anthropic/claude-opus-4-5-20251101")
+        messages: Chat messages in OpenAI format
+        response_model: Pydantic model for structured output
+        api_key: Optional API key override
+        api_base: Optional API base URL override
+        model_kwargs: Additional kwargs passed to acompletion
+        temperature: Sampling temperature (default 0.0)
+        cache_control_injection_points: LiteLLM cache control config for Anthropic prompt caching.
+            Example: [{"location": "message", "role": "system"}] caches the system prompt.
+            This reduces input token costs by ~90% for repeated calls with the same system prompt.
+            See: https://docs.litellm.ai/docs/tutorials/prompt_caching
+
+    Returns:
+        Validated instance of response_model
+    """
     try:
         import litellm  # type: ignore[import]
         from litellm import acompletion  # type: ignore[import]
@@ -334,6 +353,8 @@ async def litellm_structured_completion(
         request["api_key"] = api_key
     if api_base:
         request["api_base"] = api_base
+    if cache_control_injection_points:
+        request["cache_control_injection_points"] = list(cache_control_injection_points)
 
     response = await acompletion(**request)
     content = _extract_litellm_content(response)

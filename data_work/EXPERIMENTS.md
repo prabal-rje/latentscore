@@ -23,6 +23,13 @@ Notes:
 - Run notes reflect prior tiny-run validation; re-verify for IRL.
 - Run notes are stale after chat-template + adapter-init alignment; re-run before relying on them.
 
+**Data pipeline note (2026-01-18):** The data processing pipeline has been refactored into two scripts:
+- `02a_extract_vibes` - Vibe extraction only (cheap model: gpt-oss-20b), dedupes on vibe content
+- `02b_generate_configs` - Best-of-N config generation (SOTA model: Claude Opus)
+
+The old `02_process_base_data` is deprecated. Experiments below using the old script should be
+migrated to the new two-step pipeline when re-running. See METHODOLOGY.md for details.
+
 ## Core ablations
 
 ### SFT vs SFT + GRPO comparison
@@ -223,7 +230,44 @@ Run notes (2026-01-17):
 
 ### Vibe representation ablation (raw text, scene vs character, level subsets)
 
-Commands:
+**New pipeline (02a + 02b):**
+```bash
+# base extraction for ablation (run once; reused by filters below)
+# Step 1: Extract vibes
+conda run -n latentscore-data python -m data_work.02a_extract_vibes \
+  --input-dir data_work/.outputs \
+  --output-dir data_work/.experiments/vibe_base_vibes \
+  --overwrite
+
+# Step 2: Generate configs
+conda run -n latentscore-data python -m data_work.02b_generate_configs \
+  --input-dir data_work/.experiments/vibe_base_vibes \
+  --output-dir data_work/.experiments/vibe_base \
+  --overwrite
+
+# For ablations that filter vibes (scene_only, xl_only, etc.), apply jq filtering:
+# scene_only
+jq -c 'select(.vibe_scope == "scene")' \
+  data_work/.experiments/vibe_base/SFT-Train.jsonl \
+  > data_work/.experiments/vibe_scene_only/SFT-Train.jsonl
+
+# character_only
+jq -c 'select(.vibe_scope == "character")' \
+  data_work/.experiments/vibe_base/SFT-Train.jsonl \
+  > data_work/.experiments/vibe_character_only/SFT-Train.jsonl
+
+# xl_only
+jq -c 'select(.vibe_level == "xl")' \
+  data_work/.experiments/vibe_base/SFT-Train.jsonl \
+  > data_work/.experiments/vibe_xl_only/SFT-Train.jsonl
+
+# xs_only
+jq -c 'select(.vibe_level == "xs")' \
+  data_work/.experiments/vibe_base/SFT-Train.jsonl \
+  > data_work/.experiments/vibe_xs_only/SFT-Train.jsonl
+```
+
+**Legacy pipeline (deprecated):**
 ```bash
 # base extraction for ablation (run once; reused by filters below)
 conda run -n latentscore-data python -m data_work.02_process_base_data \
@@ -407,7 +451,55 @@ Run notes (2026-01-17):
 
 ### Noise injection sweep (error_rate)
 
-Commands:
+**New pipeline (02a + 02b):**
+```bash
+# Noise injection is controlled in 02a (vibe extraction)
+# error_rate 0.0
+conda run -n latentscore-data python -m data_work.02a_extract_vibes \
+  --input-dir data_work/.outputs \
+  --output-dir data_work/.experiments/noise_0_0_vibes \
+  --error-rate 0.0 \
+  --overwrite
+conda run -n latentscore-data python -m data_work.02b_generate_configs \
+  --input-dir data_work/.experiments/noise_0_0_vibes \
+  --output-dir data_work/.experiments/noise_0_0 \
+  --overwrite
+
+# error_rate 0.05
+conda run -n latentscore-data python -m data_work.02a_extract_vibes \
+  --input-dir data_work/.outputs \
+  --output-dir data_work/.experiments/noise_0_05_vibes \
+  --error-rate 0.05 \
+  --overwrite
+conda run -n latentscore-data python -m data_work.02b_generate_configs \
+  --input-dir data_work/.experiments/noise_0_05_vibes \
+  --output-dir data_work/.experiments/noise_0_05 \
+  --overwrite
+
+# error_rate 0.15
+conda run -n latentscore-data python -m data_work.02a_extract_vibes \
+  --input-dir data_work/.outputs \
+  --output-dir data_work/.experiments/noise_0_15_vibes \
+  --error-rate 0.15 \
+  --overwrite
+conda run -n latentscore-data python -m data_work.02b_generate_configs \
+  --input-dir data_work/.experiments/noise_0_15_vibes \
+  --output-dir data_work/.experiments/noise_0_15 \
+  --overwrite
+
+# error_rate 0.30
+conda run -n latentscore-data python -m data_work.02a_extract_vibes \
+  --input-dir data_work/.outputs \
+  --output-dir data_work/.experiments/noise_0_30_vibes \
+  --error-rate 0.30 \
+  --overwrite
+conda run -n latentscore-data python -m data_work.02b_generate_configs \
+  --input-dir data_work/.experiments/noise_0_30_vibes \
+  --output-dir data_work/.experiments/noise_0_30 \
+  --overwrite
+```
+
+**Legacy pipeline (deprecated):**
 ```bash
 conda run -n latentscore-data python -m data_work.02_process_base_data \
   --input-dir data_work/.outputs \
@@ -815,7 +907,56 @@ Run notes (2026-01-17):
 
 ### Dedupe threshold sweep
 
-Commands:
+**Note:** With the new pipeline, dedupe happens on vibe content (not raw text) in 02a.
+
+**New pipeline (02a + 02b):**
+```bash
+# threshold 0.90
+conda run -n latentscore-data python -m data_work.02a_extract_vibes \
+  --input-dir data_work/.outputs \
+  --output-dir data_work/.experiments/dedupe_0_90_vibes \
+  --dedupe-threshold 0.90 \
+  --overwrite
+conda run -n latentscore-data python -m data_work.02b_generate_configs \
+  --input-dir data_work/.experiments/dedupe_0_90_vibes \
+  --output-dir data_work/.experiments/dedupe_0_90 \
+  --overwrite
+
+# threshold 0.95 (default)
+conda run -n latentscore-data python -m data_work.02a_extract_vibes \
+  --input-dir data_work/.outputs \
+  --output-dir data_work/.experiments/dedupe_0_95_vibes \
+  --dedupe-threshold 0.95 \
+  --overwrite
+conda run -n latentscore-data python -m data_work.02b_generate_configs \
+  --input-dir data_work/.experiments/dedupe_0_95_vibes \
+  --output-dir data_work/.experiments/dedupe_0_95 \
+  --overwrite
+
+# threshold 0.98
+conda run -n latentscore-data python -m data_work.02a_extract_vibes \
+  --input-dir data_work/.outputs \
+  --output-dir data_work/.experiments/dedupe_0_98_vibes \
+  --dedupe-threshold 0.98 \
+  --overwrite
+conda run -n latentscore-data python -m data_work.02b_generate_configs \
+  --input-dir data_work/.experiments/dedupe_0_98_vibes \
+  --output-dir data_work/.experiments/dedupe_0_98 \
+  --overwrite
+
+# threshold 1.0 (no dedupe)
+conda run -n latentscore-data python -m data_work.02a_extract_vibes \
+  --input-dir data_work/.outputs \
+  --output-dir data_work/.experiments/dedupe_1_0_vibes \
+  --dedupe-threshold 1.0 \
+  --overwrite
+conda run -n latentscore-data python -m data_work.02b_generate_configs \
+  --input-dir data_work/.experiments/dedupe_1_0_vibes \
+  --output-dir data_work/.experiments/dedupe_1_0 \
+  --overwrite
+```
+
+**Legacy pipeline (deprecated):**
 ```bash
 conda run -n latentscore-data python -m data_work.02_process_base_data \
   --input-dir data_work/.outputs \
