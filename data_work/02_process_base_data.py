@@ -10,8 +10,8 @@ import logging
 import random
 import sys
 from collections import defaultdict
-from pathlib import Path
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Iterable, Sequence
 
 if __package__ is None and __name__ == "__main__":
@@ -86,6 +86,8 @@ DEFAULT_CONFIG_BATCH_WAIT_MS = 200
 DEFAULT_DEDUPE_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_DEDUPE_THRESHOLD = 0.97
 RUN_CONFIG_NAME = "run_config.json"
+VIBE_SCOPE_FILTER_CHOICES = ("scene", "character")
+VIBE_LEVEL_FILTER_CHOICES = ("xl", "lg", "m", "sm", "xs")
 
 
 class BaseRecord(BaseModel):
@@ -159,6 +161,14 @@ def _build_parser(*, include_extra: bool, use_defaults: bool) -> argparse.Argume
     )
     _add_arg(
         parser,
+        "--source-dir",
+        type=Path,
+        default=None,
+        use_defaults=use_defaults,
+        help="Optional directory of processed split JSONLs to transform (skips LLM extraction).",
+    )
+    _add_arg(
+        parser,
         "--seed",
         type=int,
         default=0,
@@ -227,11 +237,37 @@ def _build_parser(*, include_extra: bool, use_defaults: bool) -> argparse.Argume
     )
     _add_arg(
         parser,
+        "--filter-vibe-scope",
+        nargs="*",
+        choices=list(VIBE_SCOPE_FILTER_CHOICES),
+        default=None,
+        use_defaults=use_defaults,
+        help="Optional vibe_scope filter when transforming existing outputs.",
+    )
+    _add_arg(
+        parser,
+        "--filter-vibe-level",
+        nargs="*",
+        choices=list(VIBE_LEVEL_FILTER_CHOICES),
+        default=None,
+        use_defaults=use_defaults,
+        help="Optional vibe_level filter when transforming existing outputs.",
+    )
+    _add_arg(
+        parser,
         "--overwrite",
         action="store_true",
         default=False,
         use_defaults=use_defaults,
         help="Overwrite existing split files instead of resuming.",
+    )
+    _add_arg(
+        parser,
+        "--raw-text-direct",
+        action="store_true",
+        default=False,
+        use_defaults=use_defaults,
+        help="Replace vibe text with raw input text when transforming existing outputs.",
     )
     _add_arg(
         parser,
@@ -442,6 +478,7 @@ def _default_config() -> dict[str, Any]:
     return {
         "input_dir": None,
         "output_dir": None,
+        "source_dir": None,
         "seed": 0,
         "model": DEFAULT_MODEL,
         "config_model": DEFAULT_CONFIG_MODEL,
@@ -459,9 +496,12 @@ def _default_config() -> dict[str, Any]:
         "ewma_min_samples": DEFAULT_EWMA_MIN_SAMPLES,
         "limit_per_split": 0,
         "only_splits": None,
+        "filter_vibe_scopes": None,
+        "filter_vibe_levels": None,
         "cache_path": DEFAULT_CACHE_PATH,
         "overwrite": False,
         "resume": True,
+        "raw_text_direct": False,
         "max_concurrency": DEFAULT_MAX_CONCURRENCY,
         "max_qps": DEFAULT_MAX_QPS,
         "max_retries": DEFAULT_MAX_RETRIES,
@@ -500,6 +540,28 @@ def _coerce_only_splits(value: Any) -> list[str] | None:
             return [value]
         case _:
             return [str(item) for item in value]
+
+
+def _coerce_filter_list(value: Any) -> list[str] | None:
+    """Coerce various input types to list of strings, flattening nested lists."""
+    match value:
+        case None:
+            return None
+        case str():
+            return [value]
+        case list():
+            flattened: list[str] = []
+            for item in value:
+                match item:
+                    case None:
+                        continue
+                    case list():
+                        flattened.extend(str(inner) for inner in item)
+                    case _:
+                        flattened.append(str(item))
+            return flattened or None
+        case _:
+            return [str(value)]
 
 
 def _parse_model_kwargs(value: Any, *, label: str) -> dict[str, Any]:
@@ -548,10 +610,13 @@ def _merge_config(
     merged = {**defaults, **config_values, **cli_values}
     merged["input_dir"] = _coerce_path(merged["input_dir"])
     merged["output_dir"] = _coerce_path(merged["output_dir"])
+    merged["source_dir"] = _coerce_path(merged["source_dir"])
     merged["env_file"] = _coerce_path(merged["env_file"])
     merged["cache_path"] = _coerce_path(merged["cache_path"])
     merged["config_file"] = _coerce_path(merged["config_file"])
     merged["only_splits"] = _coerce_only_splits(merged["only_splits"])
+    merged["filter_vibe_scopes"] = _coerce_filter_list(merged["filter_vibe_scopes"])
+    merged["filter_vibe_levels"] = _coerce_filter_list(merged["filter_vibe_levels"])
     merged["model_kwargs"] = _sanitize_model_kwargs(
         _parse_model_kwargs(merged.get("model_kwargs"), label="--model-kwargs"),
         label="--model-kwargs",
@@ -561,8 +626,14 @@ def _merge_config(
         label="--config-model-kwargs",
     )
 
-    if merged["input_dir"] is None or merged["output_dir"] is None:
-        raise SystemExit("--input-dir and --output-dir are required (or set in --config-file).")
+    if merged["source_dir"] is None:
+        if merged["input_dir"] is None or merged["output_dir"] is None:
+            raise SystemExit("--input-dir and --output-dir are required (or set in --config-file).")
+    else:
+        if merged["output_dir"] is None:
+            raise SystemExit("--output-dir is required (or set in --config-file).")
+        if merged["raw_text_direct"] and merged["input_dir"] is None:
+            raise SystemExit("--input-dir is required for --raw-text-direct.")
 
     allowed_splits = {name for name, _ in SPLITS}
     match merged["only_splits"]:
@@ -572,6 +643,24 @@ def _merge_config(
             invalid = [item for item in splits if item not in allowed_splits]
             if invalid:
                 raise SystemExit(f"Invalid splits: {', '.join(invalid)}")
+
+    if merged["filter_vibe_scopes"] is not None:
+        invalid = [
+            scope
+            for scope in merged["filter_vibe_scopes"]
+            if scope not in VIBE_SCOPE_FILTER_CHOICES
+        ]
+        if invalid:
+            raise SystemExit(f"Invalid vibe scopes: {', '.join(invalid)}")
+
+    if merged["filter_vibe_levels"] is not None:
+        invalid = [
+            level
+            for level in merged["filter_vibe_levels"]
+            if level not in VIBE_LEVEL_FILTER_CHOICES
+        ]
+        if invalid:
+            raise SystemExit(f"Invalid vibe levels: {', '.join(invalid)}")
 
     return merged
 
@@ -644,6 +733,73 @@ def load_records(paths: Sequence[Path]) -> list[BaseRecord]:
         for row in iter_jsonl(path):
             records.append(BaseRecord.model_validate(row))
     return records
+
+
+def load_raw_text_map(input_dir: Path) -> dict[tuple[str, str], str]:
+    if not input_dir.is_dir():
+        raise SystemExit(f"Input directory not found: {input_dir}")
+    jsonl_paths = sorted(input_dir.glob("*.jsonl"))
+    if not jsonl_paths:
+        raise SystemExit(f"No JSONL files found in {input_dir}")
+    text_map: dict[tuple[str, str], str] = {}
+    for path in jsonl_paths:
+        for row in iter_jsonl(path):
+            try:
+                record = BaseRecord.model_validate(row)
+            except ValidationError as exc:
+                raise SystemExit(f"Invalid record in {path}: {exc}") from exc
+            key = (record.dataset, str(record.id_in_dataset))
+            text_map[key] = record.text
+    return text_map
+
+
+def transform_processed_splits(
+    *,
+    source_dir: Path,
+    output_dir: Path,
+    input_dir: Path | None,
+    only_splits: Sequence[str] | None,
+    filter_vibe_scopes: Sequence[str] | None,
+    filter_vibe_levels: Sequence[str] | None,
+    raw_text_direct: bool,
+    overwrite: bool,
+) -> None:
+    if not source_dir.is_dir():
+        raise SystemExit(f"Source directory not found: {source_dir}")
+
+    scope_filter = set(filter_vibe_scopes) if filter_vibe_scopes else None
+    level_filter = set(filter_vibe_levels) if filter_vibe_levels else None
+    raw_text_map = None
+    if raw_text_direct:
+        if input_dir is None:
+            raise SystemExit("--input-dir is required for --raw-text-direct.")
+        raw_text_map = load_raw_text_map(input_dir)
+
+    target_splits = only_splits or [name for name, _ in SPLITS]
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for split_name in target_splits:
+        source_path = source_dir / f"{split_name}.jsonl"
+        if not source_path.exists():
+            raise SystemExit(f"Source split not found: {source_path}")
+        output_path = output_dir / f"{split_name}.jsonl"
+        if output_path.exists() and not overwrite:
+            raise SystemExit(
+                f"Output path already exists: {output_path}. Use --overwrite to replace."
+            )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", encoding="utf-8") as handle:
+            for row in iter_jsonl(source_path):
+                if scope_filter and row.get("vibe_scope") not in scope_filter:
+                    continue
+                if level_filter and row.get("vibe_level") not in level_filter:
+                    continue
+                if raw_text_map is not None:
+                    key = (str(row.get("dataset", "")), str(row.get("id_in_dataset", "")))
+                    raw_text = raw_text_map.get(key, "")
+                    row["vibe_original"] = raw_text
+                    row["vibe_noisy"] = raw_text
+                    row["vibe_scope"] = "raw_text"
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 def hash_paths(paths: Sequence[Path]) -> str:
@@ -1341,8 +1497,26 @@ async def process_split(
 
 
 async def main_async(args: argparse.Namespace) -> None:
-    input_dir = args.input_dir
     output_dir = args.output_dir
+    if args.source_dir is not None:
+        run_config = build_run_config(args)
+        config_hash = build_config_hash(run_config)
+        _LOGGER.info("Using configuration hash: %s", config_hash)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        write_config_file(output_dir / RUN_CONFIG_NAME, run_config)
+        transform_processed_splits(
+            source_dir=args.source_dir,
+            output_dir=output_dir,
+            input_dir=args.input_dir,
+            only_splits=args.only_splits,
+            filter_vibe_scopes=args.filter_vibe_scopes,
+            filter_vibe_levels=args.filter_vibe_levels,
+            raw_text_direct=args.raw_text_direct,
+            overwrite=args.overwrite,
+        )
+        return
+
+    input_dir = args.input_dir
     if not input_dir.is_dir():
         raise SystemExit(f"Input directory not found: {input_dir}")
 

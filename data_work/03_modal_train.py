@@ -75,8 +75,9 @@ DEFAULT_GRPO_BETA = 0.04
 BASE_MODELS = {
     "smollm2-135m": "HuggingFaceTB/SmolLM2-135M-Instruct",
     "gemma3-270m": "unsloth/gemma-3-270m-it",
-    "qwen3-600m": "unsloth/Qwen3-600M",
+    "qwen3-600m": "unsloth/Qwen3-0.6B",
 }
+
 
 class _ModalStubRun:
     def __enter__(self) -> None:
@@ -87,7 +88,9 @@ class _ModalStubRun:
 
 
 class _ModalStubApp:
-    def function(self, *args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def function(
+        self, *args: Any, **kwargs: Any
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             return func
 
@@ -103,6 +106,22 @@ if modal is None:
     TRAIN_IMAGE = None
     app = _ModalStubApp()
 else:
+    TRAIN_IMAGE_PACKAGES = (
+        "accelerate==1.9.0",
+        "datasets==3.6.0",
+        "hf-transfer==0.1.9",
+        "huggingface_hub==0.34.2",
+        "peft==0.16.0",
+        "transformers==4.54.0",
+        "trl==0.19.1",
+        "unsloth[cu128-torch270]==2025.7.8",
+        "unsloth_zoo==2025.7.10",
+        "pydantic==2.7.4",
+        "soundfile==0.13.1",
+        "scipy==1.15.3",
+        "wandb==0.21.0",
+        "weave==0.50.0",
+    )
     RETRY_POLICY = modal.Retries(
         max_retries=MAX_RETRIES,
         backoff_coefficient=DEFAULT_RETRY_BACKOFF,
@@ -112,20 +131,7 @@ else:
     OUTPUTS_VOLUME = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
     TRAIN_IMAGE = (
         modal.Image.debian_slim(python_version="3.11")
-        .uv_pip_install(
-            "accelerate==1.9.0",
-            "datasets==3.6.0",
-            "hf-transfer==0.1.9",
-            "huggingface_hub==0.34.2",
-            "peft==0.16.0",
-            "transformers==4.54.0",
-            "trl==0.19.1",
-            "unsloth[cu128-torch270]==2025.7.8",
-            "unsloth_zoo==2025.7.10",
-            "pydantic==2.7.4",
-            "wandb==0.21.0",
-            "weave==0.50.0",
-        )
+        .uv_pip_install(*TRAIN_IMAGE_PACKAGES)
         .add_local_python_source("data_work", copy=True)
         .env({"HF_HOME": "/model_cache", "PYTHONPATH": REMOTE_REPO_PATH})
         .add_local_dir(REPO_ROOT, remote_path=REMOTE_REPO_PATH, copy=True)

@@ -1,13 +1,14 @@
 # data_work EXPERIMENTS
 
-This document lists academic experiments, with explicit commands and run notes for trivial-data runs.
-All commands use the conda environment `latentscore-data`.
+This document lists academic experiments with IRL parameters. Use `--limit`/`--limit-per-split`
+for smoke tests. All commands use the conda environment `latentscore-data`.
 
 ## Shared setup
 
-Minimal datasets used here:
-- Training: `data_work/.experiments/mini_train.jsonl`
-- Base input for processing: `data_work/.experiments/base_input/base.jsonl`
+IRL datasets used here:
+- Training (SFT): `data_work/.processed/SFT-Train.jsonl`
+- Training (GRPO): `data_work/.processed/GRPO.jsonl`
+- Base input for processing: `data_work/.outputs`
 - Data scaling: `data_work/.experiments/data_scaling/size_*.jsonl`
 
 Output directories:
@@ -15,8 +16,9 @@ Output directories:
 - Eval outputs: `data_work/.experiments/eval_results`
 
 Notes:
-- Training defaults to `--max-seq-length 1024` to avoid Unsloth length assertions.
+- Training commands use `--max-seq-length 2048` (~2k tokens).
 - GRPO `--model` should point at `/outputs/<name>` (bare names resolve to `/outputs/<name>`).
+- Run notes reflect prior tiny-run validation; re-verify for IRL.
 
 ## Core ablations
 
@@ -25,30 +27,29 @@ Notes:
 Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-baseline \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/GRPO.jsonl \
   --model /outputs/exp-sft-baseline \
   --output exp-grpo-baseline \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
-  --num-generations 2 \
+  --max-seq-length 2048 \
+  --num-generations 4 \
   --beta 0.04 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.06_eval_suite \
   --eval-set short_prompts \
   --baseline random \
-  --limit 1 \
   --output-dir data_work/.experiments/eval_results/sft_vs_grpo
 ```
 
@@ -64,52 +65,52 @@ Run notes (2026-01-17):
 Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train --advanced grpo \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/GRPO.jsonl \
   --model /outputs/exp-sft-baseline \
   --output exp-grpo-weights-0_1-0_4-0_5 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --format-weight 0.1 \
   --schema-weight 0.4 \
   --audio-weight 0.5 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train --advanced grpo \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/GRPO.jsonl \
   --model /outputs/exp-sft-baseline \
   --output exp-grpo-weights-0_2-0_3-0_5 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --format-weight 0.2 \
   --schema-weight 0.3 \
   --audio-weight 0.5 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train --advanced grpo \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/GRPO.jsonl \
   --model /outputs/exp-sft-baseline \
   --output exp-grpo-weights-0_3-0_2-0_5 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --format-weight 0.3 \
   --schema-weight 0.2 \
   --audio-weight 0.5 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train --advanced grpo \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/GRPO.jsonl \
   --model /outputs/exp-sft-baseline \
   --output exp-grpo-weights-0_4-0_3-0_3 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --format-weight 0.4 \
   --schema-weight 0.3 \
   --audio-weight 0.3 \
@@ -130,19 +131,70 @@ Commands:
 ```bash
 # base extraction for ablation (run once; reused by filters below)
 conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.experiments/base_input \
+  --input-dir data_work/.outputs \
   --output-dir data_work/.experiments/vibe_base \
-  --limit-per-split 1 \
-  --only-splits SFT-Train \
   --overwrite
 
+# raw_text_direct (no vibe extraction; reuse configs, replace vibe text with raw input text)
+conda run -n latentscore-data python -m data_work.02_process_base_data \
+  --source-dir data_work/.experiments/vibe_base \
+  --input-dir data_work/.outputs \
+  --output-dir data_work/.experiments/vibe_raw_text \
+  --raw-text-direct \
+  --overwrite
+
+# scene_only
+conda run -n latentscore-data python -m data_work.02_process_base_data \
+  --source-dir data_work/.experiments/vibe_base \
+  --output-dir data_work/.experiments/vibe_scene_only \
+  --filter-vibe-scope scene \
+  --overwrite
+
+# character_only
+conda run -n latentscore-data python -m data_work.02_process_base_data \
+  --source-dir data_work/.experiments/vibe_base \
+  --output-dir data_work/.experiments/vibe_character_only \
+  --filter-vibe-scope character \
+  --overwrite
+
+# both_scopes
+conda run -n latentscore-data python -m data_work.02_process_base_data \
+  --source-dir data_work/.experiments/vibe_base \
+  --output-dir data_work/.experiments/vibe_both_scopes \
+  --overwrite
+
+# xl_only
+conda run -n latentscore-data python -m data_work.02_process_base_data \
+  --source-dir data_work/.experiments/vibe_base \
+  --output-dir data_work/.experiments/vibe_xl_only \
+  --filter-vibe-level xl \
+  --overwrite
+
+# xs_only
+conda run -n latentscore-data python -m data_work.02_process_base_data \
+  --source-dir data_work/.experiments/vibe_base \
+  --output-dir data_work/.experiments/vibe_xs_only \
+  --filter-vibe-level xs \
+  --overwrite
+
+# all_levels
+conda run -n latentscore-data python -m data_work.02_process_base_data \
+  --source-dir data_work/.experiments/vibe_base \
+  --output-dir data_work/.experiments/vibe_all_levels \
+  --overwrite
+```
+
+<!--
+Legacy Python fallback (kept for reuse):
+
+```bash
 # raw_text_direct (no vibe extraction; reuse configs, replace vibe text with raw input text)
 python3 - <<'PY'
 import json
 from pathlib import Path
 import shutil
 
-base_input = Path("data_work/.experiments/base_input/base.jsonl")
+base_input = Path("data_work/.outputs/base.jsonl")
 src = Path("data_work/.experiments/vibe_base/SFT-Train.jsonl")
 dst_dir = Path("data_work/.experiments/vibe_raw_text")
 dst_dir.mkdir(parents=True, exist_ok=True)
@@ -243,6 +295,7 @@ PY
 # all_levels
 cp -a data_work/.experiments/vibe_base data_work/.experiments/vibe_all_levels
 ```
+-->
 
 Run notes (2026-01-17):
 - vibe_base: OK (`data_work/.experiments/vibe_base`)
@@ -261,35 +314,27 @@ Run notes (2026-01-17):
 Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.experiments/base_input \
+  --input-dir data_work/.outputs \
   --output-dir data_work/.experiments/noise_0_0 \
   --error-rate 0.0 \
-  --limit-per-split 1 \
-  --only-splits SFT-Train \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.experiments/base_input \
+  --input-dir data_work/.outputs \
   --output-dir data_work/.experiments/noise_0_05 \
   --error-rate 0.05 \
-  --limit-per-split 1 \
-  --only-splits SFT-Train \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.experiments/base_input \
+  --input-dir data_work/.outputs \
   --output-dir data_work/.experiments/noise_0_15 \
   --error-rate 0.15 \
-  --limit-per-split 1 \
-  --only-splits SFT-Train \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.experiments/base_input \
+  --input-dir data_work/.outputs \
   --output-dir data_work/.experiments/noise_0_30 \
   --error-rate 0.30 \
-  --limit-per-split 1 \
-  --only-splits SFT-Train \
   --overwrite
 ```
 
@@ -309,7 +354,7 @@ conda run -n latentscore-data python -m data_work.07_human_eval_pack generate \
   --model-a exp-sft-baseline \
   --model-b exp-grpo-baseline \
   --eval-set short_prompts \
-  --n-samples 1 \
+  --n-samples 100 \
   --output-dir data_work/.experiments/human_eval/sft_vs_grpo
 
 conda run -n latentscore-data python -m data_work.07_human_eval_pack analyze \
@@ -317,8 +362,8 @@ conda run -n latentscore-data python -m data_work.07_human_eval_pack analyze \
 ```
 
 Run notes (2026-01-17):
-- generate: FAILED (missing `data_work.07_human_eval_pack`)
-- analyze: FAILED (missing `data_work.07_human_eval_pack`)
+- generate: NOT IMPLEMENTED (`data_work.07_human_eval_pack` stub)
+- analyze: NOT IMPLEMENTED (`data_work.07_human_eval_pack` stub)
 
 ---
 
@@ -329,57 +374,57 @@ Run notes (2026-01-17):
 Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/GRPO.jsonl \
   --model /outputs/exp-sft-baseline \
   --output exp-grpo-beta-0_01 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --beta 0.01 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/GRPO.jsonl \
   --model /outputs/exp-sft-baseline \
   --output exp-grpo-beta-0_02 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --beta 0.02 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/GRPO.jsonl \
   --model /outputs/exp-sft-baseline \
   --output exp-grpo-beta-0_04 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --beta 0.04 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/GRPO.jsonl \
   --model /outputs/exp-sft-baseline \
   --output exp-grpo-beta-0_08 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --beta 0.08 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/GRPO.jsonl \
   --model /outputs/exp-sft-baseline \
   --output exp-grpo-beta-0_16 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --beta 0.16 \
   --overwrite
 ```
@@ -398,52 +443,52 @@ Run notes (2026-01-17):
 Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-lora-r4 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --lora-r 4 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-lora-r8 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --lora-r 8 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-lora-r16 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --lora-r 16 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-lora-r32 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --lora-r 32 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-lora-r64 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --lora-r 64 \
   --overwrite
 ```
@@ -462,52 +507,52 @@ Run notes (2026-01-17):
 Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-lr-1e-5 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --lr 1e-5 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-lr-5e-5 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --lr 5e-5 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-lr-1e-4 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --lr 1e-4 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-lr-2e-4 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --lr 2e-4 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-lr-5e-4 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --lr 5e-4 \
   --overwrite
 ```
@@ -526,39 +571,39 @@ Run notes (2026-01-17):
 Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-bs-4 \
-  --epochs 1 \
+  --epochs 3 \
   --batch-size 4 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-bs-8 \
-  --epochs 1 \
+  --epochs 3 \
   --batch-size 8 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-bs-16 \
-  --epochs 1 \
+  --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-bs-32 \
-  --epochs 1 \
+  --epochs 3 \
   --batch-size 32 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --overwrite
 ```
 
@@ -575,46 +620,46 @@ Run notes (2026-01-17):
 Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/GRPO.jsonl \
   --model /outputs/exp-sft-baseline \
   --output exp-grpo-ngen-2 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --num-generations 2 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/GRPO.jsonl \
   --model /outputs/exp-sft-baseline \
   --output exp-grpo-ngen-4 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --num-generations 4 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/GRPO.jsonl \
   --model /outputs/exp-sft-baseline \
   --output exp-grpo-ngen-6 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --num-generations 6 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/GRPO.jsonl \
   --model /outputs/exp-sft-baseline \
   --output exp-grpo-ngen-8 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --num-generations 8 \
   --overwrite
 ```
@@ -632,35 +677,27 @@ Run notes (2026-01-17):
 Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.experiments/base_input \
+  --input-dir data_work/.outputs \
   --output-dir data_work/.experiments/dedupe_0_90 \
   --dedupe-threshold 0.90 \
-  --limit-per-split 1 \
-  --only-splits SFT-Train \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.experiments/base_input \
+  --input-dir data_work/.outputs \
   --output-dir data_work/.experiments/dedupe_0_95 \
   --dedupe-threshold 0.95 \
-  --limit-per-split 1 \
-  --only-splits SFT-Train \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.experiments/base_input \
+  --input-dir data_work/.outputs \
   --output-dir data_work/.experiments/dedupe_0_98 \
   --dedupe-threshold 0.98 \
-  --limit-per-split 1 \
-  --only-splits SFT-Train \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.experiments/base_input \
+  --input-dir data_work/.outputs \
   --output-dir data_work/.experiments/dedupe_1_0 \
   --dedupe-threshold 1.0 \
-  --limit-per-split 1 \
-  --only-splits SFT-Train \
   --overwrite
 ```
 
@@ -677,42 +714,42 @@ Run notes (2026-01-17):
 Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-warmup-0_0 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --warmup-ratio 0.0 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-warmup-0_06 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --warmup-ratio 0.06 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-warmup-0_1 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --warmup-ratio 0.1 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-warmup-0_2 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --warmup-ratio 0.2 \
   --overwrite
 ```
@@ -730,32 +767,32 @@ Run notes (2026-01-17):
 Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-lora-dropout-0_0 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --lora-dropout 0.0 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-lora-dropout-0_05 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --lora-dropout 0.05 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-lora-dropout-0_1 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --lora-dropout 0.1 \
   --overwrite
 ```
@@ -772,32 +809,32 @@ Run notes (2026-01-17):
 Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-weight-decay-0_0 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --weight-decay 0.0 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-weight-decay-0_01 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --weight-decay 0.01 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-weight-decay-0_1 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --weight-decay 0.1 \
   --overwrite
 ```
@@ -814,37 +851,37 @@ Run notes (2026-01-17):
 Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-max-seq-256 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
   --max-seq-length 256 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-max-seq-512 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
   --max-seq-length 512 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
-  --output exp-sft-max-seq-1024 \
-  --epochs 1 \
-  --batch-size 1 \
+  --data data_work/.processed/SFT-Train.jsonl \
+  --output exp-sft-max-seq-2048 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --overwrite
 ```
 
 Run notes (2026-01-17):
 - max_seq_length 256: FAILED (sequence length too small; Unsloth assertion)
 - max_seq_length 512: FAILED (sequence length too small; Unsloth assertion)
-- max_seq_length 1024: OK (`/outputs/exp-sft-max-seq-1024`)
+- max_seq_length 2048: OK (`/outputs/exp-sft-max-seq-2048`)
 
 ---
 
@@ -853,32 +890,32 @@ Run notes (2026-01-17):
 Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-lora-alpha-8 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --lora-alpha 8 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-lora-alpha-16 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --lora-alpha 16 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-lora-alpha-32 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --lora-alpha 32 \
   --overwrite
 ```
@@ -895,32 +932,32 @@ Run notes (2026-01-17):
 Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-base-smollm2-135m \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --base-model smollm2-135m \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-base-gemma3-270m \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --base-model gemma3-270m \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-base-qwen3-600m \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --base-model qwen3-600m \
   --overwrite
 ```
@@ -928,7 +965,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
 Run notes (2026-01-17):
 - base_model smollm2-135m: OK (`/outputs/exp-sft-base-smollm2-135m`)
 - base_model gemma3-270m: OK (`/outputs/exp-sft-base-gemma3-270m`)
-- base_model qwen3-600m: FAILED (HF repo missing: `unsloth/Qwen3-600M`)
+- base_model qwen3-600m: OK (smoke run; output `/outputs/exp-sft-base-qwen3-600m-smoke`)
 
 ---
 
@@ -941,37 +978,37 @@ Commands:
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --data data_work/.experiments/data_scaling/size_1.jsonl \
   --output exp-sft-scale-1 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --data data_work/.experiments/data_scaling/size_5.jsonl \
   --output exp-sft-scale-5 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --data data_work/.experiments/data_scaling/size_20.jsonl \
   --output exp-sft-scale-20 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --data data_work/.experiments/data_scaling/size_100.jsonl \
   --output exp-sft-scale-100 \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --overwrite
 ```
 
@@ -992,31 +1029,26 @@ Commands:
 conda run -n latentscore-data python -m data_work.06_eval_suite \
   --eval-set controllability/tempo_prompts \
   --baseline random \
-  --limit 1 \
   --output-dir data_work/.experiments/eval_results/ctrl_tempo
 
 conda run -n latentscore-data python -m data_work.06_eval_suite \
   --eval-set controllability/mode_prompts \
   --baseline random \
-  --limit 1 \
   --output-dir data_work/.experiments/eval_results/ctrl_mode
 
 conda run -n latentscore-data python -m data_work.06_eval_suite \
   --eval-set controllability/brightness_prompts \
   --baseline random \
-  --limit 1 \
   --output-dir data_work/.experiments/eval_results/ctrl_brightness
 
 conda run -n latentscore-data python -m data_work.06_eval_suite \
   --eval-set controllability/rhythm_prompts \
   --baseline random \
-  --limit 1 \
   --output-dir data_work/.experiments/eval_results/ctrl_rhythm
 
 conda run -n latentscore-data python -m data_work.06_eval_suite \
   --eval-set controllability/texture_prompts \
   --baseline random \
-  --limit 1 \
   --output-dir data_work/.experiments/eval_results/ctrl_texture
 ```
 
@@ -1024,8 +1056,8 @@ Run notes (2026-01-17):
 - tempo: OK (`data_work/.experiments/eval_results/ctrl_tempo`)
 - mode: OK (`data_work/.experiments/eval_results/ctrl_mode`)
 - brightness: OK (`data_work/.experiments/eval_results/ctrl_brightness`)
-- rhythm: FAILED (missing `data_work/eval_sets/controllability/rhythm_prompts.jsonl`)
-- texture: FAILED (missing `data_work/eval_sets/controllability/texture_prompts.jsonl`)
+- rhythm: OK (`data_work/.experiments/eval_results/ctrl_rhythm/controllability_rhythm_prompts/random`)
+- texture: OK (`data_work/.experiments/eval_results/ctrl_texture/controllability_texture_prompts/random`)
 
 ---
 
@@ -1033,14 +1065,14 @@ Run notes (2026-01-17):
 
 Commands:
 ```bash
-conda run -n latentscore-data python -m data_work.09_synth_sensitivity \
-  --input data_work/.experiments/mini_train.jsonl \
+conda run -n latentscore-data python -m data_work.08_synth_sensitivity \
+  --input data_work/.experiments/mini_configs.jsonl \
   --limit 1 \
   --output-dir data_work/.experiments/synth_sensitivity
 ```
 
 Run notes (2026-01-17):
-- synth sensitivity: FAILED (missing `data_work.09_synth_sensitivity`)
+- synth sensitivity: OK (`data_work/.experiments/synth_sensitivity/synth_sensitivity.jsonl`, smoke input: `data_work/.experiments/mini_configs.jsonl`)
 
 ---
 
@@ -1048,33 +1080,18 @@ Run notes (2026-01-17):
 
 Commands:
 ```bash
-conda run -n latentscore-data python -m data_work.10_field_usage \
-  --input data_work/.experiments/mini_train.jsonl \
+conda run -n latentscore-data python -m data_work.09_field_usage \
+  --input data_work/.experiments/mini_configs.jsonl \
   --limit 1 \
   --output-dir data_work/.experiments/field_usage
 ```
 
 Run notes (2026-01-17):
-- field usage: PENDING
+- field usage: OK (`data_work/.experiments/field_usage/field_usage.jsonl`, smoke input: `data_work/.experiments/mini_configs.jsonl`)
 
 ---
 
 ## Differentiation experiments
-
-### Story coherence / multi-page continuity
-
-Commands:
-```bash
-conda run -n latentscore-data python -m data_work.11_story_coherence \
-  --input data_work/.experiments/mini_train.jsonl \
-  --limit 1 \
-  --output-dir data_work/.experiments/story_coherence
-```
-
-Run notes (2026-01-17):
-- story coherence: PENDING
-
----
 
 ### Teacher dependence study
 
@@ -1082,33 +1099,32 @@ Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.06_eval_suite \
   --eval-set short_prompts \
-  --litellm-model openai/gpt-4o-mini:gpt4 \
-  --limit 1 \
-  --output-dir data_work/.experiments/eval_results/teacher_gpt4
+  --litellm-model gemini/gemini-3-flash-preview \
+  --api-key-env GEMINI_API_KEY \
+  --output-dir data_work/.experiments/eval_results/teacher_gemini_flash
 
 conda run -n latentscore-data python -m data_work.06_eval_suite \
   --eval-set short_prompts \
-  --litellm-model openai/gpt-3.5-turbo:gpt35 \
-  --limit 1 \
-  --output-dir data_work/.experiments/eval_results/teacher_gpt35
+  --litellm-model gemini/gemini-3-pro-preview \
+  --api-key-env GEMINI_API_KEY \
+  --output-dir data_work/.experiments/eval_results/teacher_gemini_pro
 
 conda run -n latentscore-data python -m data_work.06_eval_suite \
   --eval-set short_prompts \
-  --litellm-model mistral/mistral-7b-instruct:mixtral7b \
-  --limit 1 \
-  --output-dir data_work/.experiments/eval_results/teacher_mistral
+  --litellm-model anthropic/claude-opus-4-5-20251101 \
+  --api-key-env ANTHROPIC_API_KEY \
+  --output-dir data_work/.experiments/eval_results/teacher_claude_opus
 
 conda run -n latentscore-data python -m data_work.06_eval_suite \
   --eval-set short_prompts \
   --baseline rule_based \
-  --limit 1 \
   --output-dir data_work/.experiments/eval_results/teacher_rule_based
 ```
 
 Run notes (2026-01-17):
-- GPT-4: OK (0% JSON validity; `data_work/.experiments/eval_results/teacher_gpt4/short_prompts/gpt4`)
-- GPT-3.5: OK (0% JSON validity; `data_work/.experiments/eval_results/teacher_gpt35/short_prompts/gpt35`)
-- Mistral-7B: OK (0% JSON validity; `data_work/.experiments/eval_results/teacher_mistral/short_prompts/mixtral7b`)
+- Gemini Flash: OK (100% JSON validity; `--limit 1`; `data_work/.experiments/eval_results/teacher_gemini_flash/short_prompts/gemini/gemini-3-flash-preview`; litellm async cleanup warnings)
+- Gemini Pro: OK (100% JSON validity; `--limit 1`; `data_work/.experiments/eval_results/teacher_gemini_pro/short_prompts/gemini/gemini-3-pro-preview`; litellm async cleanup warnings)
+- Claude Opus: OK (100% JSON validity; `--limit 1`; `data_work/.experiments/eval_results/teacher_claude_opus/short_prompts/anthropic/claude-opus-4-5-20251101`; litellm async cleanup warnings)
 - rule_based: OK (`data_work/.experiments/eval_results/teacher_rule_based/short_prompts/rule_based`)
 
 ---
@@ -1124,12 +1140,12 @@ conda run -n latentscore-data python -m data_work.06_eval_suite \
   --baseline random \
   --include-clap \
   --llm-scorer mistral/voxtral-small-latest \
-  --limit 1 \
+  --api-key-env MISTRAL_API_KEY \
   --output-dir data_work/.experiments/eval_results/clap_vs_llm
 ```
 
 Run notes (2026-01-17):
-- clap vs llm: PENDING
+- clap vs llm: OK (explicit `--api-key` from `.env`; `--limit 1`; output `data_work/.experiments/eval_results/clap_vs_llm/short_prompts/random`)
 
 ---
 
@@ -1141,28 +1157,28 @@ conda run -n latentscore-data python -m data_work.06_eval_suite \
   --eval-set short_prompts \
   --baseline random \
   --llm-scorer gemini/gemini-3-flash-preview \
-  --limit 1 \
+  --api-key-env GEMINI_API_KEY \
   --output-dir data_work/.experiments/eval_results/llm_gemini_flash
 
 conda run -n latentscore-data python -m data_work.06_eval_suite \
   --eval-set short_prompts \
   --baseline random \
   --llm-scorer gemini/gemini-3-pro-preview \
-  --limit 1 \
+  --api-key-env GEMINI_API_KEY \
   --output-dir data_work/.experiments/eval_results/llm_gemini_pro
 
 conda run -n latentscore-data python -m data_work.06_eval_suite \
   --eval-set short_prompts \
   --baseline random \
   --llm-scorer mistral/voxtral-small-latest \
-  --limit 1 \
+  --api-key-env MISTRAL_API_KEY \
   --output-dir data_work/.experiments/eval_results/llm_voxtral
 ```
 
 Run notes (2026-01-17):
-- gemini flash: PENDING
-- gemini pro: PENDING
-- voxtral: PENDING
+- gemini flash: OK (explicit `--api-key` from `.env`; `--limit 1`; output `data_work/.experiments/eval_results/llm_gemini_flash/short_prompts/random`; litellm async cleanup warnings)
+- gemini pro: OK (explicit `--api-key` from `.env`; `--limit 1`; output `data_work/.experiments/eval_results/llm_gemini_pro/short_prompts/random`; litellm async cleanup warnings)
+- voxtral: OK (explicit `--api-key` from `.env`; `--limit 1`; output `data_work/.experiments/eval_results/llm_voxtral/short_prompts/random`; litellm async cleanup warnings)
 
 ---
 
@@ -1171,19 +1187,19 @@ Run notes (2026-01-17):
 Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train --advanced grpo \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/GRPO.jsonl \
   --model /outputs/exp-sft-baseline \
   --output exp-grpo-llm-reward \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --audio-reward data_work.lib.llm_scorer:score_config_with_llm \
   --overwrite
 ```
 
 Run notes (2026-01-17):
-- grpo llm reward: PENDING
+- grpo llm reward: OK (smoke run; output `/outputs/exp-grpo-llm-reward-smoke`)
 
 ---
 
@@ -1194,25 +1210,25 @@ Run notes (2026-01-17):
 Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-prompt-default \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.experiments/mini_train.jsonl \
+  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-prompt-detailed \
-  --epochs 1 \
-  --batch-size 1 \
+  --epochs 3 \
+  --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 1024 \
+  --max-seq-length 2048 \
   --system-prompt "You are an expert sound designer. Return only JSON matching the schema." \
   --overwrite
 ```
 
 Run notes (2026-01-17):
-- default prompt: PENDING
-- detailed prompt: PENDING
+- default prompt: OK (smoke run; output `/outputs/exp-sft-prompt-default-smoke`)
+- detailed prompt: OK (smoke run; output `/outputs/exp-sft-prompt-detailed-smoke`)

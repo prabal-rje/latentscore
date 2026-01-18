@@ -274,9 +274,9 @@ async def evaluate_source(
 
         if llm_scorer is not None and config is not None and schema_valid:
             try:
-                from data_work.lib.llm_scorer import score_config_with_llm_detailed
+                from data_work.lib.llm_scorer import score_config_with_llm_detailed_async
 
-                llm_detailed = score_config_with_llm_detailed(
+                llm_detailed = await score_config_with_llm_detailed_async(
                     vibe=prompt.prompt,
                     config=config,
                     scorer=llm_scorer,

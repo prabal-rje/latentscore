@@ -324,6 +324,19 @@ def score_config_with_llm_detailed(
         return scorer.score_detailed(vibe, audio_path)
 
 
+async def score_config_with_llm_detailed_async(
+    *,
+    vibe: str,
+    config: dict[str, Any],
+    scorer: LLMScorer,
+    duration: float = 12.0,
+) -> LLMScoreResult:
+    """Async version of score_config_with_llm_detailed()."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_path = _config_to_audio_path(config, duration, tmpdir)
+        return await scorer.score_detailed_async(vibe, audio_path)
+
+
 # Type alias for scorer protocol compliance
 LLMScorerProtocol = ClapScorerProtocol
 

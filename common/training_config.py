@@ -158,7 +158,7 @@ class InfraConfig(BaseModel):
 BASE_MODELS: dict[str, str] = {
     "smollm2-135m": "HuggingFaceTB/SmolLM2-135M-Instruct",
     "gemma3-270m": "unsloth/gemma-3-270m-it",
-    "qwen3-600m": "unsloth/Qwen3-600M",
+    "qwen3-600m": "unsloth/Qwen3-0.6B",
 }
 
 

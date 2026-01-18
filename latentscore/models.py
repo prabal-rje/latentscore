@@ -622,13 +622,15 @@ class ExpressiveMlxModel:
                 )
             self._download_expressive(model_dir)
 
-        loaded = mlx_lm.load(str(model_dir))
+        mlx_lm_any: Any = mlx_lm
+        loaded = cast(tuple[Any, ...], mlx_lm_any.load(str(model_dir)))
         model, tokenizer, *_ = loaded
         assert model is not None
         assert tokenizer is not None
         model_any: Any = model
         tokenizer_any: Any = tokenizer
-        return outlines.from_mlxlm(model_any, tokenizer_any)
+        outlines_any: Any = outlines
+        return outlines_any.from_mlxlm(model_any, tokenizer_any)
 
     def _build_prompt(self, vibe: str) -> str:
         return (

@@ -1,0 +1,3 @@
+{"id":"texture_001","prompt":"shimmering sparkle in the highs","category":"controllability","subcategory":"texture","expected_fields":{"texture":"shimmer"},"difficulty":"easy","source":"manual","paraphrase_group":null,"notes":null}
+{"id":"texture_002","prompt":"vintage vinyl crackle ambience","category":"controllability","subcategory":"texture","expected_fields":{"texture":"vinyl_crackle"},"difficulty":"easy","source":"manual","paraphrase_group":null,"notes":null}
+{"id":"texture_003","prompt":"glitchy digital stutters","category":"controllability","subcategory":"texture","expected_fields":{"texture":"glitch"},"difficulty":"easy","source":"manual","paraphrase_group":null,"notes":null}

@@ -125,14 +125,29 @@ def test_resolve_model_path_defaults_to_outputs():
 
     assert modal_train._resolve_model_path("exp-sft-baseline") == "/outputs/exp-sft-baseline"
     assert (
-        modal_train._resolve_model_path("/outputs/exp-sft-baseline")
-        == "/outputs/exp-sft-baseline"
+        modal_train._resolve_model_path("/outputs/exp-sft-baseline") == "/outputs/exp-sft-baseline"
     )
     assert (
-        modal_train._resolve_model_path("outputs/exp-sft-baseline")
-        == "/outputs/exp-sft-baseline"
+        modal_train._resolve_model_path("outputs/exp-sft-baseline") == "/outputs/exp-sft-baseline"
     )
     assert modal_train._resolve_model_path("org/model") == "org/model"
+
+
+def test_base_model_alias_qwen3_600m():
+    """Qwen3-600m alias should point to the correct HF repo."""
+    import importlib
+
+    modal_train = importlib.import_module("data_work.03_modal_train")
+
+    assert modal_train.BASE_MODELS["qwen3-600m"] == "unsloth/Qwen3-0.6B"
+
+
+def test_training_config_resolves_qwen3_600m():
+    """TrainingConfig should resolve qwen3-600m to the correct HF repo."""
+    from common.training_config import TrainingConfig
+
+    config = TrainingConfig(base_model="qwen3-600m")
+    assert config.resolve_base_model() == "unsloth/Qwen3-0.6B"
 
 
 class _DummyTokenizer:

@@ -1,0 +1,3 @@
+{"id":"rhythm_001","prompt":"soft heartbeat pulse","category":"controllability","subcategory":"rhythm","expected_fields":{"rhythm":"heartbeat"},"difficulty":"easy","source":"manual","paraphrase_group":null,"notes":null}
+{"id":"rhythm_002","prompt":"steady four on the floor groove","category":"controllability","subcategory":"rhythm","expected_fields":{"rhythm":"soft_four"},"difficulty":"easy","source":"manual","paraphrase_group":null,"notes":null}
+{"id":"rhythm_003","prompt":"gentle brush percussion","category":"controllability","subcategory":"rhythm","expected_fields":{"rhythm":"brush"},"difficulty":"easy","source":"manual","paraphrase_group":null,"notes":null}
