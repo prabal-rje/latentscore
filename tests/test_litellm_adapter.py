@@ -55,7 +55,7 @@ def _payload_json(overrides: dict[str, object] | None = None) -> str:
     if overrides:
         config.update(overrides)
     payload = {
-        "justification": "Sound choices explained.",
+        "thinking": "Sound choices explained.",
         "config": config,
         "palettes": _sample_palettes(),
     }
@@ -156,7 +156,7 @@ async def test_litellm_adapter_repairs_json(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_acompletion(**kwargs: object) -> object:
-        message = SimpleNamespace(content='{"justification":"ok","config":{"tempo":"slow"},}')
+        message = SimpleNamespace(content='{"thinking":"ok","config":{"tempo":"slow"},}')
         choice = SimpleNamespace(message=message)
         return SimpleNamespace(choices=[choice])
 

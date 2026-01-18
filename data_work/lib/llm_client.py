@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import os
@@ -14,6 +15,8 @@ from pydantic import BaseModel
 LOGGER = logging.getLogger("data_work.llm_client")
 
 DEFAULT_OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
+
+GEMMA_CHAT_TEMPLATE = """{% for message in messages %}{% if message['role'] == 'user' %}{{ '<start_of_turn>user\\n' + message['content'] + '<end_of_turn>\\n' }}{% elif message['role'] == 'system' %}{{ '<start_of_turn>system\\n' + message['content'] + '<end_of_turn>\\n' }}{% elif message['role'] == 'assistant' %}{{ '<start_of_turn>model\\n' + message['content'] + '<end_of_turn>\\n' }}{% endif %}{% endfor %}{% if add_generation_prompt %}{{ '<start_of_turn>model\\n' }}{% endif %}"""
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -68,6 +71,87 @@ def mask_api_key(value: str) -> str:
     if len(cleaned) <= 8:
         return f"{cleaned[:1]}...{cleaned[-1:]}"
     return f"{cleaned[:4]}...{cleaned[-4:]}"
+
+
+def is_qwen3_model(model_name: str) -> bool:
+    return "qwen3" in model_name.lower()
+
+
+def is_gemma_model(model_name: str) -> bool:
+    return "gemma" in model_name.lower()
+
+
+def normalize_tokenizer_for_model(tokenizer: Any, model_name: str) -> None:
+    if (
+        getattr(tokenizer, "pad_token_id", None) is None
+        and getattr(tokenizer, "eos_token_id", None) is not None
+    ):
+        eos_token = getattr(tokenizer, "eos_token", None)
+        if eos_token is not None:
+            tokenizer.pad_token = eos_token
+        else:
+            tokenizer.pad_token_id = tokenizer.eos_token_id
+    tokenizer.padding_side = "right"
+    if is_gemma_model(model_name):
+        tokenizer.chat_template = GEMMA_CHAT_TEMPLATE
+
+
+def wrap_vibe_for_chat(vibe: str) -> str:
+    return f"<vibe>{vibe}</vibe>"
+
+
+def render_chat_prompt(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    tokenizer: Any,
+    model_name: str,
+    add_generation_prompt: bool,
+    assistant: str | None = None,
+) -> str:
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    if assistant is not None:
+        messages.append({"role": "assistant", "content": assistant})
+
+    kwargs: dict[str, Any] = {
+        "tokenize": False,
+        "add_generation_prompt": add_generation_prompt,
+    }
+    if is_qwen3_model(model_name):
+        kwargs["enable_thinking"] = False
+    try:
+        sig = inspect.signature(tokenizer.apply_chat_template)
+    except (TypeError, ValueError):
+        return tokenizer.apply_chat_template(messages, **kwargs)
+
+    if not any(
+        param.kind == inspect.Parameter.VAR_KEYWORD
+        for param in sig.parameters.values()
+    ):
+        allowed_kwargs = {
+            name
+            for name, param in sig.parameters.items()
+            if param.kind
+            in (inspect.Parameter.KEYWORD_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        }
+        kwargs = {key: value for key, value in kwargs.items() if key in allowed_kwargs}
+
+    if "conversation" in sig.parameters:
+        param = sig.parameters["conversation"]
+        if param.kind == inspect.Parameter.POSITIONAL_ONLY:
+            return tokenizer.apply_chat_template(messages, **kwargs)
+        kwargs["conversation"] = messages
+        return tokenizer.apply_chat_template(**kwargs)
+    if "messages" in sig.parameters:
+        param = sig.parameters["messages"]
+        if param.kind == inspect.Parameter.POSITIONAL_ONLY:
+            return tokenizer.apply_chat_template(messages, **kwargs)
+        kwargs["messages"] = messages
+        return tokenizer.apply_chat_template(**kwargs)
+    return tokenizer.apply_chat_template(messages, **kwargs)
 
 
 def resolve_api_key_for_models(
@@ -285,9 +369,9 @@ class LocalHFClient:
             ) from exc
 
         self._device = torch.device(device) if device else None
+        self._model_name = model_path
         self._tokenizer = AutoTokenizer.from_pretrained(model_path)
-        if self._tokenizer.pad_token_id is None:
-            self._tokenizer.pad_token = self._tokenizer.eos_token
+        normalize_tokenizer_for_model(self._tokenizer, model_path)
         model = AutoModelForCausalLM.from_pretrained(model_path)
         if self._device is not None:
             model = model.to(self._device)
@@ -295,17 +379,34 @@ class LocalHFClient:
         self._max_new_tokens = max_new_tokens
         self._temperature = temperature
 
-    def generate_text(self, prompt: str) -> str:
+    def format_chat_prompt(self, *, system_prompt: str, user_prompt: str) -> str:
+        return render_chat_prompt(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            tokenizer=self._tokenizer,
+            model_name=self._model_name,
+            add_generation_prompt=True,
+        )
+
+    def generate_text(
+        self,
+        prompt: str,
+        *,
+        max_new_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> str:
         inputs = self._tokenizer(prompt, return_tensors="pt")
         if self._device is not None:
             inputs = {key: value.to(self._device) for key, value in inputs.items()}
         prompt_len = int(inputs["input_ids"].shape[1])
-        do_sample = self._temperature > 0
+        effective_max_new_tokens = max_new_tokens or self._max_new_tokens
+        effective_temperature = self._temperature if temperature is None else temperature
+        do_sample = effective_temperature > 0
         outputs = self._model.generate(
             **inputs,
-            max_new_tokens=self._max_new_tokens,
+            max_new_tokens=effective_max_new_tokens,
             do_sample=do_sample,
-            temperature=self._temperature if do_sample else 1.0,
+            temperature=effective_temperature if do_sample else 1.0,
             pad_token_id=self._tokenizer.eos_token_id,
         )
         generated_ids = outputs[0][prompt_len:]

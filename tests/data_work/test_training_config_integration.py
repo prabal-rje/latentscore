@@ -109,12 +109,12 @@ def test_config_file_none():
     assert result is None
 
 
-def test_default_max_seq_length_is_1024():
+def test_default_max_seq_length_is_4096():
     """Default max sequence length should be large enough for training samples."""
     from common.training_config import TrainingConfig
 
     config = TrainingConfig()
-    assert config.data.max_seq_length == 1024
+    assert config.data.max_seq_length == 4096
 
 
 def test_resolve_model_path_defaults_to_outputs():
@@ -131,6 +131,29 @@ def test_resolve_model_path_defaults_to_outputs():
         modal_train._resolve_model_path("outputs/exp-sft-baseline") == "/outputs/exp-sft-baseline"
     )
     assert modal_train._resolve_model_path("org/model") == "org/model"
+
+
+def test_base_model_registry_contains_only_gemma_qwen():
+    """TrainingConfig should only advertise Gemma3 and Qwen3 aliases."""
+    from common.training_config import BASE_MODELS
+
+    assert set(BASE_MODELS.keys()) == {"gemma3-270m", "qwen3-600m"}
+
+
+def test_default_base_model_is_gemma3():
+    """Default training config should use Gemma3 as the base model."""
+    from common.training_config import TrainingConfig
+
+    config = TrainingConfig()
+    assert config.base_model == "gemma3-270m"
+
+
+def test_modal_base_models_only_gemma_qwen():
+    """Modal training aliases should match Gemma3/Qwen3 only."""
+    import importlib
+
+    modal_train = importlib.import_module("data_work.03_modal_train")
+    assert set(modal_train.BASE_MODELS.keys()) == {"gemma3-270m", "qwen3-600m"}
 
 
 def test_base_model_alias_qwen3_600m():

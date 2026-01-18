@@ -14,7 +14,7 @@ PALETTE_DUPLICATE_PENALTY_WEIGHT = DEFAULT_REWARD_CONFIG.weights.palette_duplica
 def test_palette_duplicate_penalty_applies() -> None:
     """Verify that duplicate hex colors within palettes reduce the reward."""
     payload = {
-        "justification": "ok",
+        "thinking": "ok",
         "config": {
             "tempo": "slow",
             "root": "d",
@@ -62,7 +62,7 @@ def test_palette_duplicate_penalty_applies() -> None:
 def test_no_penalty_for_unique_colors() -> None:
     """Verify no penalty when all colors are unique."""
     payload = {
-        "justification": "ok",
+        "thinking": "ok",
         "config": {
             "tempo": "slow",
             "root": "d",
@@ -107,7 +107,7 @@ def test_no_penalty_for_unique_colors() -> None:
 def test_compute_partial_reward_custom_weights() -> None:
     """Verify custom reward weights are applied."""
     valid_payload = {
-        "justification": "test",
+        "thinking": "test",
         "config": {
             "tempo": "medium",
             "root": "c",

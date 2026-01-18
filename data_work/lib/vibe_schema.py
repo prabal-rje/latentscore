@@ -8,8 +8,9 @@ import random
 import re
 from typing import Any, Iterable, Sequence, TypeVar
 
-from common.prompts import build_vibe_extraction_prompt
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from common.prompts import build_vibe_extraction_prompt
 
 MAX_LONG_FIELD_CHARS = 1_000
 MAX_SHORT_FIELD_CHARS = 100

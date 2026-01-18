@@ -6,8 +6,8 @@ from typing import Any, Callable, Literal, Mapping, Optional, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-# Import shared types from common
-from common import (
+# Import shared types from common.music_schema
+from common.music_schema import (
     MAX_LONG_FIELD_CHARS,
     PALETTES_DESC,
     PROMPT_DESC,
@@ -518,12 +518,13 @@ class MusicConfigPrompt(BaseModel):
 
 
 class MusicConfigPromptPayload(BaseModel):
-    """LLM payload that includes a justification, config, and palettes."""
+    """LLM payload that includes a thinking field, config, and palettes."""
 
-    justification: str = Field(
+    thinking: str = Field(
         ...,
         max_length=MAX_LONG_FIELD_CHARS,
-        description=_PROMPT_DESC["justification"],
+        description=_PROMPT_DESC["thinking"],
+        alias="justification",
     )
     config: MusicConfigPrompt = Field(description=_PROMPT_DESC["config"])
     palettes: list[Palette] = Field(
@@ -533,7 +534,7 @@ class MusicConfigPromptPayload(BaseModel):
         description=PALETTES_DESC,
     )
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
 def _assert_prompt_schema_parity() -> None:

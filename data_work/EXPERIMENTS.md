@@ -16,9 +16,12 @@ Output directories:
 - Eval outputs: `data_work/.experiments/eval_results`
 
 Notes:
-- Training commands use `--max-seq-length 2048` (~2k tokens).
-- GRPO `--model` should point at `/outputs/<name>` (bare names resolve to `/outputs/<name>`).
+- Training commands use `--max-seq-length 4096` (~2k tokens).
+- System prompts default to prompt registry `config_v1` unless overridden.
+- GRPO `--model` should point at the base HF repo (not the SFT adapter).
+- GRPO `--init-adapter-dir` should point at the SFT LoRA adapter in `/outputs/<name>`.
 - Run notes reflect prior tiny-run validation; re-verify for IRL.
+- Run notes are stale after chat-template + adapter-init alignment; re-run before relying on them.
 
 ## Core ablations
 
@@ -32,19 +35,25 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
+  --base-model gemma3-270m \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/exp-sft-baseline \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir exp-sft-baseline \
   --output exp-grpo-baseline \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
+  --max-completion-length 2048 \
   --num-generations 4 \
   --beta 0.04 \
+  --temperature 0.8 \
+  --top-p 0.95 \
+  --top-k 64 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.06_eval_suite \
@@ -53,10 +62,77 @@ conda run -n latentscore-data python -m data_work.06_eval_suite \
   --output-dir data_work/.experiments/eval_results/sft_vs_grpo
 ```
 
+Note: Gemma3 sampling follows Unsloth model guidance.
+
 Run notes (2026-01-17):
 - SFT command: OK (Modal output: `/outputs/exp-sft-baseline`)
 - GRPO command: OK (Modal output: `/outputs/exp-grpo-baseline`)
 - Eval command: OK (`data_work/.experiments/eval_results/sft_vs_grpo/short_prompts/random`)
+
+---
+
+### Model-specific baseline runs (Gemma3, Qwen3)
+
+Use the base-model sweep outputs if available; otherwise run the SFT commands below first.
+
+Commands:
+```bash
+# Gemma3-270M-IT (Unsloth sampling guidance)
+conda run -n latentscore-data python -m data_work.03_modal_train sft \
+  --data data_work/.processed/SFT-Train.jsonl \
+  --output exp-sft-base-gemma3-270m \
+  --epochs 3 \
+  --batch-size 16 \
+  --grad-accum 1 \
+  --max-seq-length 4096 \
+  --base-model gemma3-270m \
+  --overwrite
+
+conda run -n latentscore-data python -m data_work.03_modal_train grpo \
+  --data data_work/.processed/GRPO.jsonl \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir exp-sft-base-gemma3-270m \
+  --output exp-grpo-base-gemma3-270m \
+  --epochs 3 \
+  --batch-size 16 \
+  --grad-accum 1 \
+  --max-seq-length 4096 \
+  --max-completion-length 2048 \
+  --temperature 0.8 \
+  --top-p 0.95 \
+  --top-k 64 \
+  --overwrite
+
+# Qwen3-0.6B (disable thinking mode via chat template)
+conda run -n latentscore-data python -m data_work.03_modal_train sft \
+  --data data_work/.processed/SFT-Train.jsonl \
+  --output exp-sft-base-qwen3-600m \
+  --epochs 3 \
+  --batch-size 16 \
+  --grad-accum 1 \
+  --max-seq-length 4096 \
+  --base-model qwen3-600m \
+  --overwrite
+
+conda run -n latentscore-data python -m data_work.03_modal_train grpo \
+  --data data_work/.processed/GRPO.jsonl \
+  --model unsloth/Qwen3-0.6B \
+  --init-adapter-dir exp-sft-base-qwen3-600m \
+  --output exp-grpo-base-qwen3-600m \
+  --epochs 3 \
+  --batch-size 16 \
+  --grad-accum 1 \
+  --max-seq-length 4096 \
+  --max-completion-length 2048 \
+  --temperature 0.7 \
+  --top-p 0.8 \
+  --top-k 20 \
+  --overwrite
+```
+
+Notes:
+- Gemma3 sampling follows Unsloth model docs.
+- Qwen3 sampling follows HF card non-thinking recommendations.
 
 ---
 
@@ -66,12 +142,17 @@ Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train --advanced grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/exp-sft-baseline \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir exp-sft-baseline \
   --output exp-grpo-weights-0_1-0_4-0_5 \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
+  --max-completion-length 2048 \
+  --temperature 0.8 \
+  --top-p 0.95 \
+  --top-k 64 \
   --format-weight 0.1 \
   --schema-weight 0.4 \
   --audio-weight 0.5 \
@@ -79,12 +160,17 @@ conda run -n latentscore-data python -m data_work.03_modal_train --advanced grpo
 
 conda run -n latentscore-data python -m data_work.03_modal_train --advanced grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/exp-sft-baseline \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir exp-sft-baseline \
   --output exp-grpo-weights-0_2-0_3-0_5 \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
+  --max-completion-length 2048 \
+  --temperature 0.8 \
+  --top-p 0.95 \
+  --top-k 64 \
   --format-weight 0.2 \
   --schema-weight 0.3 \
   --audio-weight 0.5 \
@@ -92,12 +178,17 @@ conda run -n latentscore-data python -m data_work.03_modal_train --advanced grpo
 
 conda run -n latentscore-data python -m data_work.03_modal_train --advanced grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/exp-sft-baseline \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir exp-sft-baseline \
   --output exp-grpo-weights-0_3-0_2-0_5 \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
+  --max-completion-length 2048 \
+  --temperature 0.8 \
+  --top-p 0.95 \
+  --top-k 64 \
   --format-weight 0.3 \
   --schema-weight 0.2 \
   --audio-weight 0.5 \
@@ -105,12 +196,17 @@ conda run -n latentscore-data python -m data_work.03_modal_train --advanced grpo
 
 conda run -n latentscore-data python -m data_work.03_modal_train --advanced grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/exp-sft-baseline \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir exp-sft-baseline \
   --output exp-grpo-weights-0_4-0_3-0_3 \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
+  --max-completion-length 2048 \
+  --temperature 0.8 \
+  --top-p 0.95 \
+  --top-k 64 \
   --format-weight 0.4 \
   --schema-weight 0.3 \
   --audio-weight 0.3 \
@@ -375,56 +471,81 @@ Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/exp-sft-baseline \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir exp-sft-baseline \
   --output exp-grpo-beta-0_01 \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
+  --max-completion-length 2048 \
+  --temperature 0.8 \
+  --top-p 0.95 \
+  --top-k 64 \
   --beta 0.01 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/exp-sft-baseline \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir exp-sft-baseline \
   --output exp-grpo-beta-0_02 \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
+  --max-completion-length 2048 \
+  --temperature 0.8 \
+  --top-p 0.95 \
+  --top-k 64 \
   --beta 0.02 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/exp-sft-baseline \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir exp-sft-baseline \
   --output exp-grpo-beta-0_04 \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
+  --max-completion-length 2048 \
+  --temperature 0.8 \
+  --top-p 0.95 \
+  --top-k 64 \
   --beta 0.04 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/exp-sft-baseline \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir exp-sft-baseline \
   --output exp-grpo-beta-0_08 \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
+  --max-completion-length 2048 \
+  --temperature 0.8 \
+  --top-p 0.95 \
+  --top-k 64 \
   --beta 0.08 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/exp-sft-baseline \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir exp-sft-baseline \
   --output exp-grpo-beta-0_16 \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
+  --max-completion-length 2048 \
+  --temperature 0.8 \
+  --top-p 0.95 \
+  --top-k 64 \
   --beta 0.16 \
   --overwrite
 ```
@@ -448,7 +569,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --lora-r 4 \
   --overwrite
 
@@ -458,7 +579,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --lora-r 8 \
   --overwrite
 
@@ -468,7 +589,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --lora-r 16 \
   --overwrite
 
@@ -478,7 +599,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --lora-r 32 \
   --overwrite
 
@@ -488,7 +609,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --lora-r 64 \
   --overwrite
 ```
@@ -512,7 +633,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --lr 1e-5 \
   --overwrite
 
@@ -522,7 +643,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --lr 5e-5 \
   --overwrite
 
@@ -532,7 +653,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --lr 1e-4 \
   --overwrite
 
@@ -542,7 +663,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --lr 2e-4 \
   --overwrite
 
@@ -552,7 +673,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --lr 5e-4 \
   --overwrite
 ```
@@ -576,7 +697,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 4 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
@@ -585,7 +706,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 8 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
@@ -594,7 +715,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
@@ -603,7 +724,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 32 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --overwrite
 ```
 
@@ -621,45 +742,65 @@ Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/exp-sft-baseline \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir exp-sft-baseline \
   --output exp-grpo-ngen-2 \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
+  --max-completion-length 2048 \
+  --temperature 0.8 \
+  --top-p 0.95 \
+  --top-k 64 \
   --num-generations 2 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/exp-sft-baseline \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir exp-sft-baseline \
   --output exp-grpo-ngen-4 \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
+  --max-completion-length 2048 \
+  --temperature 0.8 \
+  --top-p 0.95 \
+  --top-k 64 \
   --num-generations 4 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/exp-sft-baseline \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir exp-sft-baseline \
   --output exp-grpo-ngen-6 \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
+  --max-completion-length 2048 \
+  --temperature 0.8 \
+  --top-p 0.95 \
+  --top-k 64 \
   --num-generations 6 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/exp-sft-baseline \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir exp-sft-baseline \
   --output exp-grpo-ngen-8 \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
+  --max-completion-length 2048 \
+  --temperature 0.8 \
+  --top-p 0.95 \
+  --top-k 64 \
   --num-generations 8 \
   --overwrite
 ```
@@ -719,7 +860,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --warmup-ratio 0.0 \
   --overwrite
 
@@ -729,7 +870,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --warmup-ratio 0.06 \
   --overwrite
 
@@ -739,7 +880,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --warmup-ratio 0.1 \
   --overwrite
 
@@ -749,7 +890,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --warmup-ratio 0.2 \
   --overwrite
 ```
@@ -772,7 +913,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --lora-dropout 0.0 \
   --overwrite
 
@@ -782,7 +923,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --lora-dropout 0.05 \
   --overwrite
 
@@ -792,7 +933,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --lora-dropout 0.1 \
   --overwrite
 ```
@@ -814,7 +955,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --weight-decay 0.0 \
   --overwrite
 
@@ -824,7 +965,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --weight-decay 0.01 \
   --overwrite
 
@@ -834,7 +975,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --weight-decay 0.1 \
   --overwrite
 ```
@@ -870,18 +1011,18 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --data data_work/.processed/SFT-Train.jsonl \
-  --output exp-sft-max-seq-2048 \
+  --output exp-sft-max-seq-4096 \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --overwrite
 ```
 
 Run notes (2026-01-17):
 - max_seq_length 256: FAILED (sequence length too small; Unsloth assertion)
 - max_seq_length 512: FAILED (sequence length too small; Unsloth assertion)
-- max_seq_length 2048: OK (`/outputs/exp-sft-max-seq-2048`)
+- max_seq_length 4096: PENDING (rerun after prompt update)
 
 ---
 
@@ -895,7 +1036,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --lora-alpha 8 \
   --overwrite
 
@@ -905,7 +1046,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --lora-alpha 16 \
   --overwrite
 
@@ -915,7 +1056,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --lora-alpha 32 \
   --overwrite
 ```
@@ -933,21 +1074,11 @@ Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --data data_work/.processed/SFT-Train.jsonl \
-  --output exp-sft-base-smollm2-135m \
-  --epochs 3 \
-  --batch-size 16 \
-  --grad-accum 1 \
-  --max-seq-length 2048 \
-  --base-model smollm2-135m \
-  --overwrite
-
-conda run -n latentscore-data python -m data_work.03_modal_train sft \
-  --data data_work/.processed/SFT-Train.jsonl \
   --output exp-sft-base-gemma3-270m \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --base-model gemma3-270m \
   --overwrite
 
@@ -957,13 +1088,12 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --base-model qwen3-600m \
   --overwrite
 ```
 
 Run notes (2026-01-17):
-- base_model smollm2-135m: OK (`/outputs/exp-sft-base-smollm2-135m`)
 - base_model gemma3-270m: OK (`/outputs/exp-sft-base-gemma3-270m`)
 - base_model qwen3-600m: OK (smoke run; output `/outputs/exp-sft-base-qwen3-600m-smoke`)
 
@@ -981,7 +1111,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
@@ -990,7 +1120,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
@@ -999,7 +1129,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
@@ -1008,7 +1138,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --overwrite
 ```
 
@@ -1139,8 +1269,8 @@ conda run -n latentscore-data python -m data_work.06_eval_suite \
   --eval-set short_prompts \
   --baseline random \
   --include-clap \
-  --llm-scorer mistral/voxtral-small-latest \
-  --api-key-env MISTRAL_API_KEY \
+  --llm-scorer gemini/gemini-3-flash-preview \
+  --api-key-env GEMINI_API_KEY \
   --output-dir data_work/.experiments/eval_results/clap_vs_llm
 ```
 
@@ -1170,15 +1300,15 @@ conda run -n latentscore-data python -m data_work.06_eval_suite \
 conda run -n latentscore-data python -m data_work.06_eval_suite \
   --eval-set short_prompts \
   --baseline random \
-  --llm-scorer mistral/voxtral-small-latest \
-  --api-key-env MISTRAL_API_KEY \
-  --output-dir data_work/.experiments/eval_results/llm_voxtral
+  --llm-scorer anthropic/claude-opus-4-5-20251101 \
+  --api-key-env ANTHROPIC_API_KEY \
+  --output-dir data_work/.experiments/eval_results/llm_claude_opus
 ```
 
 Run notes (2026-01-17):
 - gemini flash: OK (explicit `--api-key` from `.env`; `--limit 1`; output `data_work/.experiments/eval_results/llm_gemini_flash/short_prompts/random`; litellm async cleanup warnings)
 - gemini pro: OK (explicit `--api-key` from `.env`; `--limit 1`; output `data_work/.experiments/eval_results/llm_gemini_pro/short_prompts/random`; litellm async cleanup warnings)
-- voxtral: OK (explicit `--api-key` from `.env`; `--limit 1`; output `data_work/.experiments/eval_results/llm_voxtral/short_prompts/random`; litellm async cleanup warnings)
+- claude opus: OK (explicit `--api-key` from `.env`; `--limit 1`; output `data_work/.experiments/eval_results/llm_claude_opus/short_prompts/random`; litellm async cleanup warnings)
 
 ---
 
@@ -1188,12 +1318,17 @@ Commands:
 ```bash
 conda run -n latentscore-data python -m data_work.03_modal_train --advanced grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/exp-sft-baseline \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir exp-sft-baseline \
   --output exp-grpo-llm-reward \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
+  --max-completion-length 2048 \
+  --temperature 0.8 \
+  --top-p 0.95 \
+  --top-k 64 \
   --audio-reward data_work.lib.llm_scorer:score_config_with_llm \
   --overwrite
 ```
@@ -1215,7 +1350,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --overwrite
 
 conda run -n latentscore-data python -m data_work.03_modal_train sft \
@@ -1224,7 +1359,7 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --epochs 3 \
   --batch-size 16 \
   --grad-accum 1 \
-  --max-seq-length 2048 \
+  --max-seq-length 4096 \
   --system-prompt "You are an expert sound designer. Return only JSON matching the schema." \
   --overwrite
 ```

@@ -128,7 +128,7 @@ PALETTES_DESC = "Three ranked palettes matching the vibe."
 
 # Prompt field descriptions (shared between latentscore and data_work)
 PROMPT_DESC: dict[str, str] = {
-    "justification": (
+    "thinking": (
         "Explain the sonic reasoning for the choices. Mention vibe decomposition, sonic "
         "translation, coherence check, and which examples guided the selection."
     ),
@@ -250,14 +250,15 @@ class MusicConfigPrompt(BaseModel):
 
 
 class MusicConfigPromptPayload(BaseModel):
-    """LLM payload that includes a justification, config, and palettes."""
+    """LLM payload that includes a thinking field, config, and palettes."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    justification: str = Field(
+    thinking: str = Field(
         ...,
+        alias="justification",
         max_length=MAX_LONG_FIELD_CHARS,
-        description=PROMPT_DESC["justification"],
+        description=PROMPT_DESC["thinking"],
     )
     config: MusicConfigPrompt = Field(..., description=PROMPT_DESC["config"])
     palettes: list[Palette] = Field(

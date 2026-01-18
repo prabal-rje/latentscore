@@ -132,10 +132,10 @@ the noisy vibe column (`vibe_noisy`) and full config payload (`config_payload`),
 so the model learns to handle corrupted inputs while inference remains clean.
 Training outputs are LoRA adapter directories; use `data_work.05_export_models`
 to merge adapters into full-precision checkpoints when needed.
-For GRPO, `--model` can point at the SFT adapter directory because the adapter
-metadata records the base model name. If the base model is private or only
-available locally, merge the adapter first and pass the merged checkpoint path
-instead so Modal can resolve it.
+For GRPO, `--model` should point at the base HF repo (e.g. `unsloth/gemma-3-270m-it`),
+and `--init-adapter-dir` should point at the SFT LoRA adapter. If the base model
+is private or only available locally, merge the adapter first and pass the merged
+checkpoint path instead so Modal can resolve it.
 
 If `--download-dir` is set, outputs are downloaded into `<download-dir>/<output>`.
 Use `--delete-remote` to remove the Modal volume output after a successful download.
@@ -151,7 +151,7 @@ override them via CLI flags, config files, or ablation presets.
 python -m data_work.03_modal_train sft \
   --config-file my_config.json \
   --data data_work/.processed/SFT-Train.jsonl \
-  --output smollm2-sft \
+  --output gemma3-sft \
   --epochs 1
 ```
 
@@ -160,8 +160,9 @@ python -m data_work.03_modal_train sft \
 ```bash
 python -m data_work.03_modal_train --advanced grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/smollm2-sft \
-  --output smollm2-grpo-beta02 \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir gemma3-sft \
+  --output gemma3-grpo-beta02 \
   --epochs 1 \
   --ablation-preset grpo_beta:beta0.02
 ```
@@ -174,8 +175,9 @@ Available presets: `lora_rank:{r4,r8,r16,r32,r64}`, `learning_rate:{lr1e-05,...}
 ```bash
 python -m data_work.03_modal_train --advanced grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/smollm2-sft \
-  --output smollm2-grpo-custom \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir gemma3-sft \
+  --output gemma3-grpo-custom \
   --epochs 1 \
   --format-weight 0.3 \
   --schema-weight 0.4 \
@@ -193,8 +195,9 @@ python -m data_work.03_modal_train check-imports
 ```bash
 python -m data_work.03_modal_train sft \
   --data data_work/.processed/SFT-Train.jsonl \
-  --output smollm2-sft \
+  --output gemma3-sft \
   --epochs 1 \
+  --max-seq-length 4096 \
   --download-dir data_work/.modal_outputs \
   --delete-remote
 ```
@@ -202,9 +205,11 @@ python -m data_work.03_modal_train sft \
 ```bash
 python -m data_work.03_modal_train grpo \
   --data data_work/.processed/GRPO.jsonl \
-  --model /outputs/smollm2-sft \
-  --output smollm2-grpo \
+  --model unsloth/gemma-3-270m-it \
+  --init-adapter-dir gemma3-sft \
+  --output gemma3-grpo \
   --epochs 1 \
+  --max-seq-length 4096 \
   --download-dir data_work/.modal_outputs \
   --delete-remote
 ```

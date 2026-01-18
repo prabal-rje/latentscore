@@ -98,6 +98,7 @@ ModelSpec = ModelChoice | ExternalModelSpec | ModelForGeneratingMusicConfig
 def _is_model(obj: object) -> TypeGuard[ModelForGeneratingMusicConfig]:
     return hasattr(obj, "generate")
 
+
 def build_expressive_prompt() -> str:
     return build_config_generation_prompt()
 

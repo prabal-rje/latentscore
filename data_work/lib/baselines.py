@@ -195,7 +195,7 @@ class RandomConfigBaseline(ConfigBaseline):
         """Generate a random MusicConfigPromptPayload (ignores vibe)."""
         _ = vibe  # Intentionally ignored
         return MusicConfigPromptPayload(
-            justification="Random baseline config for evaluation purposes.",
+            thinking="Random baseline config for evaluation purposes.",
             config=self._random_config(),
             palettes=[self._random_palette() for _ in range(3)],
         )
@@ -359,7 +359,7 @@ class RuleBasedBaseline(ConfigBaseline):
         )
 
         return MusicConfigPromptPayload(
-            justification=f"Rule-based config for vibe: {vibe[:50]}...",
+            thinking=f"Rule-based config for vibe: {vibe[:50]}...",
             config=new_config,
             palettes=payload.palettes,
         )
@@ -417,7 +417,7 @@ class ModeConfigBaseline(ConfigBaseline):
         )
 
         return MusicConfigPromptPayload(
-            justification="Mode baseline using most common values.",
+            thinking="Mode baseline using most common values.",
             config=new_config,
             palettes=payload.palettes,
         )

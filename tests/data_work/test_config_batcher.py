@@ -11,7 +11,7 @@ from data_work.lib.config_batcher import (
 def _payload_for(vibe: str):
     baseline = get_baseline("random")
     payload = baseline.generate(vibe)
-    return payload.model_copy(update={"justification": f"just:{vibe}"})
+    return payload.model_copy(update={"thinking": f"just:{vibe}"})
 
 
 def test_build_batch_response_model_fields():
@@ -23,8 +23,8 @@ def test_build_batch_response_model_fields():
         "generated_config_2": payloads[2].model_dump(),
     }
     parsed = response_model.model_validate(data)
-    assert parsed.generated_config_0.justification == "just:a"
-    assert parsed.generated_config_2.justification == "just:c"
+    assert parsed.generated_config_0.thinking == "just:a"
+    assert parsed.generated_config_2.thinking == "just:c"
 
 
 def test_config_batcher_batches_in_order():
@@ -45,7 +45,7 @@ def test_config_batcher_batches_in_order():
         return results
 
     results = asyncio.run(run())
-    assert [r.justification for r in results] == ["just:one", "just:two", "just:three"]
+    assert [r.thinking for r in results] == ["just:one", "just:two", "just:three"]
     assert calls[0] == ["one", "two"]
     assert calls[1] == ["three"]
 

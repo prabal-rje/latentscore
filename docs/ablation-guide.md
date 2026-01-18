@@ -35,7 +35,7 @@ for name, config in ABLATION_PRESETS["lora_rank"].items():
 | `optimizer.weight_decay` | 0.01 | 0.0-0.1 | L2 regularization |
 | `grpo.num_generations` | 4 | 2-8 | Candidates per prompt |
 | `batch.batch_size` | 16 | 4-32 | Per-device batch |
-| `data.max_seq_length` | 512 | 256-1024 | Context window |
+| `data.max_seq_length` | 4096 | 256-4096 | Context window |
 
 ### Lower Priority (Architecture)
 
@@ -43,7 +43,7 @@ for name, config in ABLATION_PRESETS["lora_rank"].items():
 |-----------|---------|-------|--------|
 | `lora.alpha` | 16 | 8-32 | LoRA scaling |
 | `lora.dropout` | 0.0 | 0.0-0.1 | Regularization |
-| `base_model` | smollm2-135m | see registry | Model capacity |
+| `base_model` | gemma3-270m | see registry | Model capacity |
 
 ## Running Ablations
 
@@ -145,7 +145,7 @@ Create a JSON file with TrainingConfig structure:
 
 ```json
 {
-  "base_model": "smollm2-135m",
+  "base_model": "gemma3-270m",
   "epochs": 3,
   "seed": 42,
   "lora": {
@@ -204,7 +204,7 @@ config = TrainingConfig(
 - `PromptConfig.config_generation` - Config generation prompt version
 
 ### Models
-- `TrainingConfig.base_model` - Base model (smollm2-135m, gemma3-270m, qwen3-600m, or HF path)
+- `TrainingConfig.base_model` - Base model (gemma3-270m, qwen3-600m, or HF path)
 - `LoRAConfig.*` - All LoRA hyperparameters
 
 ### Rewards

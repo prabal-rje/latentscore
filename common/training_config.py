@@ -102,7 +102,7 @@ class DataConfig(BaseModel):
 
     prompt_field: str = Field(default="vibe_noisy", description="Input field name")
     response_field: str = Field(default="config_payload", description="Output field name")
-    max_seq_length: int = Field(default=1024, ge=64, description="Maximum sequence length")
+    max_seq_length: int = Field(default=4096, ge=64, description="Maximum sequence length")
 
 
 # --- Noise Injection Configuration ---
@@ -157,7 +157,6 @@ class InfraConfig(BaseModel):
 # --- Base Model Registry ---
 
 BASE_MODELS: dict[str, str] = {
-    "smollm2-135m": "HuggingFaceTB/SmolLM2-135M-Instruct",
     "gemma3-270m": "unsloth/gemma-3-270m-it",
     "qwen3-600m": "unsloth/Qwen3-0.6B",
 }
@@ -191,7 +190,7 @@ class TrainingConfig(BaseModel):
 
     # Model selection
     base_model: str = Field(
-        default="smollm2-135m",
+        default="gemma3-270m",
         description="Base model key from BASE_MODELS or HuggingFace path",
     )
 

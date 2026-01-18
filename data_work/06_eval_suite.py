@@ -29,9 +29,9 @@ from data_work.lib.eval_schema import (
 from data_work.lib.jsonl_io import iter_jsonl
 from data_work.lib.llm_client import (
     LocalHFClient,
-    format_prompt_json,
     litellm_structured_completion,
     load_env_file,
+    wrap_vibe_for_chat,
 )
 from data_work.lib.music_prompt import build_music_prompt
 from data_work.lib.music_schema import MusicConfigPromptPayload
@@ -101,7 +101,7 @@ async def run_litellm_inference(
     start = time.perf_counter()
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": prompt},
+        {"role": "user", "content": wrap_vibe_for_chat(prompt)},
     ]
     try:
         result = await litellm_structured_completion(
@@ -130,8 +130,11 @@ def run_local_inference(
     """Run inference with a local HF model. Returns (config, error, time_ms)."""
     start = time.perf_counter()
     try:
-        formatted = format_prompt_json(system_prompt, prompt)
-        output = client.generate(
+        formatted = client.format_chat_prompt(
+            system_prompt=system_prompt,
+            user_prompt=wrap_vibe_for_chat(prompt),
+        )
+        output = client.generate_text(
             formatted,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
@@ -288,9 +291,7 @@ async def evaluate_source(
 
                 # Compute weighted overall score
                 llm_score_value = (
-                    llm_vibe_match * 0.6
-                    + llm_audio_quality * 0.25
-                    + llm_creativity * 0.15
+                    llm_vibe_match * 0.6 + llm_audio_quality * 0.25 + llm_creativity * 0.15
                 )
             except ValidationError as exc:
                 llm_error = f"SchemaError: {exc}"

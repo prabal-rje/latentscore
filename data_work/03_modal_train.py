@@ -7,6 +7,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -18,8 +19,14 @@ except ModuleNotFoundError:  # pragma: no cover - handled in tests without Modal
     modal = None
 from pydantic import BaseModel, ConfigDict
 
+from common.prompt_registry import list_prompts, render_config_prompt
 from common.reward_config import DEFAULT_REWARD_CONFIG, RewardConfig
 from common.training_config import TrainingConfig
+from data_work.lib.llm_client import (
+    normalize_tokenizer_for_model,
+    render_chat_prompt,
+    wrap_vibe_for_chat,
+)
 
 if TYPE_CHECKING:
     from data_work.lib.rewards import RewardBreakdown
@@ -36,6 +43,8 @@ LOGGER = logging.getLogger(__name__)
 
 DEFAULT_MODAL_BUILD_VALIDATION = "ignore"
 os.environ.setdefault("MODAL_BUILD_VALIDATION", DEFAULT_MODAL_BUILD_VALIDATION)
+if modal is not None:
+    modal.enable_output()
 
 APP_NAME = "latentscore-modal-train"
 GPU_TYPE = "L40S"
@@ -48,15 +57,22 @@ REMOTE_OUTPUT_PATH = "/outputs"
 VOLUME_NAME = "latentscore-training-outputs"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-DEFAULT_SYSTEM_PROMPT = (
-    "You are a synthesizer configuration assistant. "
-    "Given a vibe description, output a JSON configuration for an "
-    "ambient/electronic synthesizer. Output ONLY valid JSON with no explanation."
-)
+DEFAULT_PROMPT_VERSION = "config_v1"
+DEFAULT_SYSTEM_PROMPT = render_config_prompt(DEFAULT_PROMPT_VERSION)
 DEFAULT_DATASET_TEXT_FIELD = "text"
 DEFAULT_PROMPT_FIELD = "vibe_noisy"
 DEFAULT_RESPONSE_FIELD = "config_payload"
-DEFAULT_MAX_SEQ_LEN = 1024
+DEFAULT_MAX_SEQ_LEN = 4096
+
+DEFAULT_GRPO_MAX_COMPLETION_LENGTH = 2048
+DEFAULT_GRPO_TEMPERATURE = 0.7
+DEFAULT_GRPO_TOP_P = 0.8
+DEFAULT_GRPO_TOP_K = 20
+
+PROMPT_REGISTRY_NAMES = list_prompts()
+PROMPT_REGISTRY_HELP = ", ".join(sorted(PROMPT_REGISTRY_NAMES))
+
+PYTORCH_CU128_INDEX = "https://download.pytorch.org/whl/cu128"
 
 DEFAULT_LORA_R = 16
 DEFAULT_LORA_ALPHA = 16
@@ -73,10 +89,10 @@ DEFAULT_GRPO_NUM_GENERATIONS = 4
 DEFAULT_GRPO_BETA = 0.04
 
 BASE_MODELS = {
-    "smollm2-135m": "HuggingFaceTB/SmolLM2-135M-Instruct",
     "gemma3-270m": "unsloth/gemma-3-270m-it",
     "qwen3-600m": "unsloth/Qwen3-0.6B",
 }
+DEFAULT_BASE_MODEL_KEY = "gemma3-270m"
 
 
 class _ModalStubRun:
@@ -107,18 +123,26 @@ if modal is None:
     app = _ModalStubApp()
 else:
     TRAIN_IMAGE_PACKAGES = (
-        "accelerate==1.9.0",
-        "datasets==3.6.0",
-        "hf-transfer==0.1.9",
-        "huggingface_hub==0.34.2",
-        "peft==0.16.0",
+        "accelerate==1.5.2",
+        "bitsandbytes==0.46.0",
+        "datasets==3.5.1",
+        "hf_transfer==0.1.9",
+        "huggingface_hub==0.34.4",
+        "laion-clap",
+        "numpy==2.2.6",
+        "peft==0.17.1",
+        "protobuf==5.29.5",
+        "pydantic==2.11.7",
+        "scipy==1.16.1",
+        "sentencepiece==0.2.0",
+        "soundfile",
+        "torchvision",
+        "torchaudio",
+        "tqdm==4.67.1",
         "transformers==4.54.0",
         "trl==0.19.1",
         "unsloth[cu128-torch270]==2025.7.8",
         "unsloth_zoo==2025.7.10",
-        "pydantic==2.7.4",
-        "soundfile==0.13.1",
-        "scipy==1.15.3",
         "wandb==0.21.0",
         "weave==0.50.0",
     )
@@ -131,7 +155,12 @@ else:
     OUTPUTS_VOLUME = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
     TRAIN_IMAGE = (
         modal.Image.debian_slim(python_version="3.11")
-        .uv_pip_install(*TRAIN_IMAGE_PACKAGES)
+        .apt_install("git", "ffmpeg", "libsndfile1")
+        .uv_pip_install(
+            *TRAIN_IMAGE_PACKAGES,
+            extra_index_url=PYTORCH_CU128_INDEX,
+            extra_options="--index-strategy unsafe-best-match",
+        )
         .add_local_python_source("data_work", copy=True)
         .env({"HF_HOME": "/model_cache", "PYTHONPATH": REMOTE_REPO_PATH})
         .add_local_dir(REPO_ROOT, remote_path=REMOTE_REPO_PATH, copy=True)
@@ -176,12 +205,15 @@ class GrpoConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model_path: str
+    base_model: str
+    init_adapter_dir: str | None
     data_file: str
     output_dir: str
     system_prompt: str
     prompt_field: str
     response_field: str
     max_seq_length: int
+    max_completion_length: int
     lora_r: int
     lora_alpha: int
     lora_dropout: float
@@ -196,7 +228,11 @@ class GrpoConfig(BaseModel):
     epochs: int
     num_generations: int
     beta: float
+    temperature: float
+    top_p: float
+    top_k: int
     reward_type: str
+    reward_config: RewardConfig
     audio_reward: str | None
     seed: int
     overwrite: bool
@@ -205,15 +241,16 @@ class GrpoConfig(BaseModel):
     wandb_run_name: str | None
 
 
-def _format_prompt(system_prompt: str, prompt: str, response: str) -> str:
-    return json.dumps(
-        {
-            "system": system_prompt,
-            "user": prompt,
-            "assistant": response,
-        },
-        ensure_ascii=False,
-    )
+_VIBE_TAG_RE = re.compile(r"<vibe>(.*?)</vibe>", re.DOTALL)
+
+
+def _clean_completion(text: str) -> str:
+    cleaned = text.strip()
+    if "<|im_end|>" in cleaned:
+        cleaned = cleaned.split("<|im_end|>", 1)[0]
+    if "<think>" in cleaned and "</think>" in cleaned:
+        cleaned = cleaned.split("</think>", 1)[1]
+    return cleaned.strip()
 
 
 def _ensure_output_dir(path: Path, overwrite: bool) -> None:
@@ -413,7 +450,7 @@ def _create_reward_fn(
     audio_scorer: Callable[[str, dict[str, Any]], float] | None,
     wandb_run: Any,
     reward_config: RewardConfig | None = None,
-) -> Callable[[Sequence[str], Sequence[str]], list[float]]:
+) -> Callable[..., list[float]]:
     """Create a reward function for GRPO training.
 
     Args:
@@ -433,18 +470,21 @@ def _create_reward_fn(
     def reward_fn(
         prompts: Sequence[str],
         completions: Sequence[str],
+        vibe: Sequence[str] | None = None,
         **_: Any,
     ) -> list[float]:
         rewards: list[float] = []
         breakdowns: list[RewardBreakdown] = []
-        for prompt, completion in zip(prompts, completions):
-            vibe = prompt
-            parsed_prompt = _parse_prompt_json(prompt)
-            if parsed_prompt is not None:
-                vibe = parsed_prompt.get("user", prompt)
+        for idx, completion in enumerate(completions):
+            if vibe is not None:
+                vibe_text = vibe[idx] if idx < len(vibe) else ""
+            else:
+                prompt = prompts[idx] if idx < len(prompts) else ""
+                vibe_text = _extract_vibe_from_prompt(prompt)
+            cleaned = _clean_completion(completion)
             breakdown = compute_partial_reward(
-                vibe=vibe,
-                output=completion,
+                vibe=vibe_text,
+                output=cleaned,
                 audio_scorer=audio_scorer,
                 config=reward_config,
             )
@@ -488,6 +528,52 @@ def _parse_prompt_json(prompt: str) -> dict[str, Any] | None:
             return None
 
 
+def _extract_vibe_from_prompt(prompt: str) -> str:
+    parsed_prompt = _parse_prompt_json(prompt)
+    if parsed_prompt is not None:
+        return str(parsed_prompt.get("user", prompt))
+    match = _VIBE_TAG_RE.search(prompt)
+    if match:
+        return match.group(1).strip()
+    return prompt
+
+
+def _ensure_gradient_checkpointing(model: Any) -> None:
+    if hasattr(model, "gradient_checkpointing_enable"):
+        model.gradient_checkpointing_enable()
+    try:
+        import torch
+    except Exception:
+        return
+    for module in model.modules():
+        if getattr(module, "gradient_checkpointing", False) and not hasattr(
+            module, "_gradient_checkpointing_func"
+        ):
+            module._gradient_checkpointing_func = torch.utils.checkpoint.checkpoint
+
+
+def _configure_torch_dynamo() -> None:
+    try:
+        import torch._dynamo as dynamo
+    except Exception:
+        return
+    if hasattr(dynamo.config, "cache_size_limit"):
+        dynamo.config.cache_size_limit = max(dynamo.config.cache_size_limit, 64)
+    if hasattr(dynamo.config, "fail_on_recompile_limit_hit"):
+        dynamo.config.fail_on_recompile_limit_hit = False
+
+
+def _ensure_lora_trainable(model: Any) -> None:
+    trainable = 0
+    for name, param in model.named_parameters():
+        if "lora" in name:
+            if not param.requires_grad:
+                param.requires_grad = True
+            trainable += param.numel()
+    if trainable == 0:
+        LOGGER.warning("No LoRA parameters marked trainable; GRPO gradients may be empty.")
+
+
 @app.function(
     image=TRAIN_IMAGE,
     gpu=GPU_TYPE,
@@ -529,6 +615,7 @@ def run_sft(config: dict[str, Any]) -> str:
         load_in_4bit=False,
         load_in_8bit=False,
     )
+    normalize_tokenizer_for_model(tokenizer, sft.base_model)
 
     model = FastLanguageModel.get_peft_model(
         model,
@@ -562,7 +649,14 @@ def run_sft(config: dict[str, Any]) -> str:
     def format_example(example: dict[str, Any]) -> dict[str, str]:
         prompt = str(example[sft.prompt_field])
         response = json.dumps(example[sft.response_field], ensure_ascii=False)
-        text = _format_prompt(sft.system_prompt, prompt, response)
+        text = render_chat_prompt(
+            system_prompt=sft.system_prompt,
+            user_prompt=wrap_vibe_for_chat(prompt),
+            tokenizer=tokenizer,
+            model_name=sft.base_model,
+            add_generation_prompt=False,
+            assistant=response,
+        )
         return {DEFAULT_DATASET_TEXT_FIELD: text}
 
     dataset = dataset.map(format_example, remove_columns=dataset.column_names)
@@ -573,6 +667,7 @@ def run_sft(config: dict[str, Any]) -> str:
     )
     _validate_max_seq_length(sft.max_seq_length, observed_max_length)
 
+    supports_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
     training_args = TrainingArguments(
         output_dir=sft.output_dir,
         per_device_train_batch_size=sft.batch_size,
@@ -586,8 +681,8 @@ def run_sft(config: dict[str, Any]) -> str:
         logging_steps=10,
         save_strategy="epoch",
         seed=sft.seed,
-        bf16=torch.cuda.is_available(),
-        fp16=not torch.cuda.is_available(),
+        bf16=supports_bf16,
+        fp16=torch.cuda.is_available() and not supports_bf16,
         report_to=["wandb"] if wandb_run else [],
     )
 
@@ -641,6 +736,7 @@ def run_grpo(config: dict[str, Any]) -> str:
     import torch
     import wandb
     import weave
+    from peft.utils import load_peft_weights, set_peft_model_state_dict
     from transformers import TrainingArguments
     from trl import GRPOTrainer
 
@@ -664,15 +760,21 @@ def run_grpo(config: dict[str, Any]) -> str:
         _log_wandb_run(wandb_run)
 
     audio_scorer = _parse_audio_scorer(grpo.audio_reward)
-    reward_fn = _create_reward_fn(grpo.reward_type, audio_scorer, wandb_run)
+    reward_fn = _create_reward_fn(
+        grpo.reward_type,
+        audio_scorer,
+        wandb_run,
+        reward_config=grpo.reward_config,
+    )
 
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=grpo.model_path,
         max_seq_length=grpo.max_seq_length,
-        dtype=None,
+        dtype=torch.float16 if torch.cuda.is_available() else None,
         load_in_4bit=False,
         load_in_8bit=False,
     )
+    normalize_tokenizer_for_model(tokenizer, grpo.base_model)
 
     model = FastLanguageModel.get_peft_model(
         model,
@@ -691,6 +793,16 @@ def run_grpo(config: dict[str, Any]) -> str:
         bias=grpo.lora_bias,
         use_gradient_checkpointing="unsloth",
     )
+    if grpo.init_adapter_dir:
+        adapter_weights = load_peft_weights(grpo.init_adapter_dir, device=None)
+        set_peft_model_state_dict(model, adapter_weights, adapter_name="default")
+        try:
+            model.set_adapter("default")
+        except Exception:
+            pass
+    _ensure_gradient_checkpointing(model)
+    _ensure_lora_trainable(model)
+    _configure_torch_dynamo()
 
     dataset = datasets.load_dataset("json", data_files=grpo.data_file, split="train")
 
@@ -700,9 +812,15 @@ def run_grpo(config: dict[str, Any]) -> str:
     dataset = dataset.filter(has_prompt)
 
     def format_prompts(example: dict[str, Any]) -> dict[str, str]:
-        prompt = str(example[grpo.prompt_field])
-        text = _format_prompt(grpo.system_prompt, prompt, "")
-        return {"prompt": text}
+        vibe = str(example[grpo.prompt_field])
+        text = render_chat_prompt(
+            system_prompt=grpo.system_prompt,
+            user_prompt=wrap_vibe_for_chat(vibe),
+            tokenizer=tokenizer,
+            model_name=grpo.base_model,
+            add_generation_prompt=True,
+        )
+        return {"prompt": text, "vibe": vibe}
 
     dataset = dataset.map(format_prompts, remove_columns=dataset.column_names)
 
@@ -725,9 +843,13 @@ def run_grpo(config: dict[str, Any]) -> str:
         "logging_steps": 10,
         "save_strategy": "epoch",
         "seed": grpo.seed,
-        "bf16": torch.cuda.is_available(),
-        "fp16": not torch.cuda.is_available(),
+        "bf16": False,
+        "fp16": torch.cuda.is_available(),
         "report_to": ["wandb"] if wandb_run else [],
+        "max_completion_length": grpo.max_completion_length,
+        "temperature": grpo.temperature,
+        "top_p": grpo.top_p,
+        "top_k": grpo.top_k,
     }
     training_cls = GRPOConfig or TrainingArguments
     training_args = training_cls(**_filter_kwargs_for_callable(training_cls, training_kwargs))
@@ -839,8 +961,20 @@ def _build_parser(show_advanced: bool) -> argparse.ArgumentParser:
         subparser.add_argument(
             "--system-prompt",
             type=str,
-            default=DEFAULT_SYSTEM_PROMPT,
-            help="System prompt used to format training samples.",
+            default=None,
+            help=(
+                "Override system prompt used to format training samples. "
+                "Defaults to --prompt-version."
+            ),
+        )
+        subparser.add_argument(
+            "--prompt-version",
+            type=str,
+            default=DEFAULT_PROMPT_VERSION,
+            help=(
+                "Prompt registry key for config generation prompts. "
+                f"Available: {PROMPT_REGISTRY_HELP}"
+            ),
         )
         subparser.add_argument(
             "--prompt-field",
@@ -976,7 +1110,7 @@ def _build_parser(show_advanced: bool) -> argparse.ArgumentParser:
     sft.add_argument(
         "--base-model",
         type=str,
-        default=BASE_MODELS["smollm2-135m"],
+        default=BASE_MODELS[DEFAULT_BASE_MODEL_KEY],
         help="Base HF model name or alias.",
     )
 
@@ -991,7 +1125,13 @@ def _build_parser(show_advanced: bool) -> argparse.ArgumentParser:
         "--model",
         type=str,
         required=True,
-        help="Path to the SFT model/adapters (Modal volume path or HF repo).",
+        help="Base model path or HF repo (used to initialize GRPO policy).",
+    )
+    grpo.add_argument(
+        "--init-adapter-dir",
+        type=str,
+        default=None,
+        help="Optional path to SFT LoRA adapter to initialize GRPO from.",
     )
     grpo.add_argument(
         "--reward-type",
@@ -1021,6 +1161,30 @@ def _build_parser(show_advanced: bool) -> argparse.ArgumentParser:
         type=float,
         default=DEFAULT_GRPO_BETA,
         help="KL penalty beta for GRPO.",
+    )
+    grpo.add_argument(
+        "--max-completion-length",
+        type=int,
+        default=DEFAULT_GRPO_MAX_COMPLETION_LENGTH,
+        help="Maximum completion length for GRPO sampling.",
+    )
+    grpo.add_argument(
+        "--temperature",
+        type=float,
+        default=DEFAULT_GRPO_TEMPERATURE,
+        help="Sampling temperature for GRPO generations.",
+    )
+    grpo.add_argument(
+        "--top-p",
+        type=float,
+        default=DEFAULT_GRPO_TOP_P,
+        help="Top-p nucleus sampling for GRPO generations.",
+    )
+    grpo.add_argument(
+        "--top-k",
+        type=int,
+        default=DEFAULT_GRPO_TOP_K,
+        help="Top-k sampling for GRPO generations.",
     )
     grpo.add_argument(
         "--ablation-preset",
@@ -1165,12 +1329,15 @@ def _resolve_training_config(args: argparse.Namespace) -> TrainingConfig:
     updates: dict[str, Any] = {}
 
     # Base model
-    if hasattr(args, "base_model") and args.base_model != BASE_MODELS.get("smollm2-135m"):
+    if hasattr(args, "base_model") and args.base_model != BASE_MODELS.get(DEFAULT_BASE_MODEL_KEY):
         updates["base_model"] = args.base_model
 
     # System prompt
-    if args.system_prompt != DEFAULT_SYSTEM_PROMPT:
-        updates["system_prompt"] = args.system_prompt
+    system_prompt = render_config_prompt(args.prompt_version)
+    if args.system_prompt is not None:
+        system_prompt = args.system_prompt
+    if system_prompt != base_config.system_prompt:
+        updates["system_prompt"] = system_prompt
 
     # LoRA config - check if any CLI args differ from config
     lora_updates: dict[str, Any] = {}
@@ -1312,12 +1479,19 @@ def main(argv: Sequence[str] | None = None) -> None:
                     assert training_config is not None
                     config = GrpoConfig(
                         model_path=_resolve_model_path(args.model),
+                        base_model=training_config.resolve_base_model(),
+                        init_adapter_dir=(
+                            _resolve_model_path(args.init_adapter_dir)
+                            if args.init_adapter_dir
+                            else None
+                        ),
                         data_file=str(remote_data_file),
                         output_dir=str(output_dir),
                         system_prompt=training_config.system_prompt,
                         prompt_field=training_config.data.prompt_field,
                         response_field=training_config.data.response_field,
                         max_seq_length=training_config.data.max_seq_length,
+                        max_completion_length=args.max_completion_length,
                         lora_r=training_config.lora.r,
                         lora_alpha=training_config.lora.alpha,
                         lora_dropout=training_config.lora.dropout,
@@ -1332,7 +1506,11 @@ def main(argv: Sequence[str] | None = None) -> None:
                         epochs=training_config.epochs,
                         num_generations=training_config.grpo.num_generations,
                         beta=training_config.grpo.beta,
+                        temperature=args.temperature,
+                        top_p=args.top_p,
+                        top_k=args.top_k,
                         reward_type=args.reward_type,
+                        reward_config=training_config.grpo.reward,
                         audio_reward=getattr(args, "audio_reward", None),
                         seed=training_config.seed,
                         overwrite=args.overwrite,

@@ -19,9 +19,9 @@ Convert the next user message (the vibe description) into ONE JSON object that m
 1. Output ONLY JSON. No markdown, no extra prose.
 2. The JSON must match the schema exactly: required keys only, no extra keys.
 3. Use only allowed label values from the schema enums.
-4. The top-level object must include: "justification", "config", and "palettes".
-5. Place "justification" before "config" in the object.
-6. Keep justification concise (1-3 sentences, <=1000 chars) and focused on sonic rationale.
+4. The top-level object must include: "thinking", "config", and "palettes".
+5. Place "thinking" before "config" in the object.
+6. Keep thinking concise (1-3 sentences, <=1000 chars) and focused on sonic rationale.
 7. Prefer ambient/electronic textures; avoid vocals or realistic instruments.
 8. Palettes: include exactly 3 palettes, each with exactly 5 colors.
 9. Each color needs hex (#RRGGBB) and weight (xs, sm, md, lg, xl, xxl).

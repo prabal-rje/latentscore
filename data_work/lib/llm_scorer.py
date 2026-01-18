@@ -178,11 +178,11 @@ class LLMScorer:
         )
 
         LOGGER.debug(
-        "LLM score for '%s': vibe=%.2f quality=%.2f creativity=%.2f",
-        vibe[:30],
-        result.vibe_match,
-        result.audio_quality,
-        result.creativity,
+            "LLM score for '%s': vibe=%.2f quality=%.2f creativity=%.2f",
+            vibe[:30],
+            result.vibe_match,
+            result.audio_quality,
+            result.creativity,
         )
 
         return _llm_score_to_clap_score(result)
