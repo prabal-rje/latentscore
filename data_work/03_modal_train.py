@@ -540,6 +540,12 @@ def _create_reward_fn(
                         "reward/format_mean": sum(b.format for b in breakdowns) / len(breakdowns),
                         "reward/schema_mean": sum(b.schema for b in breakdowns) / len(breakdowns),
                         "reward/audio_mean": sum(b.audio for b in breakdowns) / len(breakdowns),
+                        "reward/title_similarity_mean": sum(b.title_similarity for b in breakdowns)
+                        / len(breakdowns),
+                        "reward/title_penalty_mean": sum(b.title_length_penalty for b in breakdowns)
+                        / len(breakdowns),
+                        "reward/title_score_mean": sum(b.title_score for b in breakdowns)
+                        / len(breakdowns),
                         "reward/total_mean": sum(b.total for b in breakdowns) / len(breakdowns),
                     }
                 )
@@ -1390,6 +1396,26 @@ def _build_parser(show_advanced: bool) -> argparse.ArgumentParser:
         default=None,
         help="Override reward audio weight (0.0-1.0)." if show_advanced else argparse.SUPPRESS,
     )
+    grpo.add_argument(
+        "--title-similarity-weight",
+        type=float,
+        default=None,
+        help=(
+            "Override reward title similarity weight (0.0-1.0)."
+            if show_advanced
+            else argparse.SUPPRESS
+        ),
+    )
+    grpo.add_argument(
+        "--title-length-penalty-weight",
+        type=float,
+        default=None,
+        help=(
+            "Override reward title length penalty weight (0.0-1.0)."
+            if show_advanced
+            else argparse.SUPPRESS
+        ),
+    )
 
     return parser
 
@@ -1453,8 +1479,19 @@ def _build_reward_config_from_args(args: argparse.Namespace) -> RewardConfig | N
     format_weight = getattr(args, "format_weight", None)
     schema_weight = getattr(args, "schema_weight", None)
     audio_weight = getattr(args, "audio_weight", None)
+    title_similarity_weight = getattr(args, "title_similarity_weight", None)
+    title_length_penalty_weight = getattr(args, "title_length_penalty_weight", None)
 
-    if all(w is None for w in [format_weight, schema_weight, audio_weight]):
+    if all(
+        w is None
+        for w in [
+            format_weight,
+            schema_weight,
+            audio_weight,
+            title_similarity_weight,
+            title_length_penalty_weight,
+        ]
+    ):
         return None
 
     # Start with defaults, override specified values
@@ -1465,6 +1502,10 @@ def _build_reward_config_from_args(args: argparse.Namespace) -> RewardConfig | N
         weights_dict["schema_weight"] = schema_weight
     if audio_weight is not None:
         weights_dict["audio_weight"] = audio_weight
+    if title_similarity_weight is not None:
+        weights_dict["title_similarity_weight"] = title_similarity_weight
+    if title_length_penalty_weight is not None:
+        weights_dict["title_length_penalty_weight"] = title_length_penalty_weight
 
     return RewardConfig(weights=RewardWeights(**weights_dict))
 

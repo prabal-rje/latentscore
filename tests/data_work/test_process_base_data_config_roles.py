@@ -16,6 +16,7 @@ async def test_call_llm_for_config_uses_vibe_tag_and_cache(
         return types.SimpleNamespace(
             model_dump=lambda *args, **_kwargs: {
                 "thinking": "",
+                "title": "Foggy Night",
                 "config": {},
                 "palettes": [],
             }

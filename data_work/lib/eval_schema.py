@@ -245,7 +245,9 @@ def compute_field_distributions(results: list[EvalResult]) -> dict[str, dict[str
             config = config["config"]
         else:
             config = {
-                key: value for key, value in config.items() if key not in {"palettes", "thinking"}
+                key: value
+                for key, value in config.items()
+                if key not in {"palettes", "thinking", "title"}
             }
 
         for field, value in config.items():

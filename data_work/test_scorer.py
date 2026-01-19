@@ -14,14 +14,16 @@ def simple_score(vibe: str, config: dict[str, Any]) -> dict[str, Any]:
         Dict with internal scores and final_score
     """
     has_thinking = "thinking" in config
+    has_title = "title" in config
     has_config = "config" in config
     has_palettes = "palettes" in config
 
     # Count how many required keys are present
-    score = sum([has_thinking, has_config, has_palettes]) / 3.0
+    score = sum([has_thinking, has_title, has_config, has_palettes]) / 4.0
 
     return {
         "has_thinking": int(has_thinking),
+        "has_title": int(has_title),
         "has_config": int(has_config),
         "has_palettes": int(has_palettes),
         "final_score": score,

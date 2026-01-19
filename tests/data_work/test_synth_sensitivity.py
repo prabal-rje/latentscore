@@ -12,7 +12,14 @@ def test_build_variant_clamps_float() -> None:
 
 
 def test_extract_config_payload_prefers_config_key() -> None:
-    row = {"config_payload": {"config": {"tempo": "medium"}}}
+    row = {
+        "config_payload": {
+            "thinking": "ok",
+            "title": "Tempo Mid",
+            "config": {"tempo": "medium"},
+            "palettes": [],
+        }
+    }
     payload = MODULE.extract_config_payload(row)
     assert payload is not None
     assert payload["tempo"] == "medium"
@@ -21,7 +28,18 @@ def test_extract_config_payload_prefers_config_key() -> None:
 def test_run_sensitivity_writes_outputs(tmp_path: Path) -> None:
     input_path = tmp_path / "input.jsonl"
     input_path.write_text(
-        json.dumps({"config_payload": {"tempo": "medium"}}) + "\n", encoding="utf-8"
+        json.dumps(
+            {
+                "config_payload": {
+                    "thinking": "ok",
+                    "title": "Tempo Mid",
+                    "config": {"tempo": "medium"},
+                    "palettes": [],
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
     )
     output_dir = tmp_path / "out"
     MODULE.run_sensitivity(

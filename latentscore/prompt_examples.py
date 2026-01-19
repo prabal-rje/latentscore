@@ -8,6 +8,7 @@ Output:
 ```json
 {
   "thinking": "VIBE DECOMPOSITION: Melancholy but beautiful = bittersweet duality. Wet pavement = reflective, shimmering surfaces. Neon = synthetic, slightly harsh color against organic rain. Tokyo = urban density, isolation in crowds, futuristic yet lonely. Night = dark but illuminated. Rain = steady, rhythmic, enveloping. SONIC TRANSLATION: Bittersweet \u2192 minor mode but with brightness (neon glow). Reflective surfaces \u2192 reverb + delay creating mirror-like echoes. Synthetic neon \u2192 gritty grain, electronic textures. Urban isolation \u2192 medium density (not empty, not overwhelming). Rain rhythm \u2192 soft steady pulse, not aggressive. Enveloping \u2192 wide stereo, immersive space. COHERENCE CHECK: Minor mode + medium brightness + gritty grain + shimmer texture all reinforce the neon-noir aesthetic. Large space + echo creates the wet reflective quality. Non-negotiables: (1) minor mode for melancholy, (2) shimmer texture for rain/neon reflections, (3) gritty grain for urban synthetic feel. REFERENCE: This needs the electronic intimacy of a lo-fi beat but with more spatial depth and cinematic weight.",
+  "title": "Neon Rainy Tokyo Pavement",
   "config": {
     "tempo": "slow",
     "root": "d#",
@@ -54,6 +55,7 @@ Output:
 ```json
 {
   "thinking": "VIBE DECOMPOSITION: Ancient = old, weathered, deep history, pre-modern. Temple = sacred geometry, spiritual resonance, stone/wood acoustics. Sunrise = gradual awakening, golden light emerging, hope after darkness. Sacred = reverent, meditative, connected to something larger. Peaceful = calm, no tension, accepting. Timeless = unchanging, eternal, beyond trend. SONIC TRANSLATION: Ancient \u2192 dorian mode (medieval/mystical association), warm grain (organic, not digital). Temple acoustics \u2192 vast reverb (stone chambers), long decay. Sunrise = rising melodic motion, gradual brightening (start dark, end brighter). Sacred = drone bass (om-like foundation), soft attacks (no violence). Peaceful = very slow tempo, minimal rhythm (no urgency). Timeless = simple harmonies (triads), no modern production tricks. COHERENCE CHECK: Dorian + drone + vast space + soft attack all support meditative temple feeling. Rising melody + warm grain capture sunrise warmth. Non-negotiables: (1) vast reverb for temple acoustics, (2) drone bass for sacred foundation, (3) very slow tempo for timelessness. REFERENCE: Think Gregorian chant meets ambient meditation music - the space IS the instrument.",
+  "title": "Ancient Temple Sunrise Calm",
   "config": {
     "tempo": "very_slow",
     "root": "d",
@@ -100,6 +102,7 @@ Output:
 ```json
 {
   "thinking": "VIBE DECOMPOSITION: Chase = fast movement, urgency, escape/pursuit. Adrenaline = heart pounding, fight-or-flight, heightened senses. Neon = harsh synthetic colors, futuristic urban. Danger = tension, minor mode, dissonance. Synthetic = artificial, digital, machine-made. Cyberpunk = dystopian future, tech-noir, Blade Runner aesthetic. SONIC TRANSLATION: Chase/adrenaline \u2192 very fast tempo, sharp attacks, pulsing bass (heartbeat). Neon/synthetic \u2192 gritty grain, electronic rhythm, clean digital textures. Danger \u2192 minor mode, chaotic motion (unpredictable modulation). Cyberpunk \u2192 arp melody (classic synth trope), electronic drums, narrow stereo (focused intensity). COHERENCE CHECK: Fast tempo + sharp attack + pulsing bass + electronic rhythm = chase energy. Minor + gritty + chaotic motion = danger/dystopia. These reinforce each other perfectly. Non-negotiables: (1) very fast tempo for chase urgency, (2) sharp attack for adrenaline punch, (3) pulsing bass for heartbeat tension. REFERENCE: Think Vangelis meets industrial - that relentless synthetic pursuit energy.",
+  "title": "Neon Cyberpunk Chase Pulse",
   "config": {
     "tempo": "very_fast",
     "root": "a",
@@ -146,6 +149,7 @@ Output:
 ```json
 {
   "thinking": "VIBE DECOMPOSITION: Grandmother = old, wise, comforting, safe. Kitchen = domestic warmth, activity, nourishment. Warm = cozy, soft edges, golden tones. Nostalgic = memory, slightly hazy, bittersweet longing for past. Sunday morning = relaxed, unhurried, light streaming in. Cookies baking = sweet, anticipation, sensory comfort. SONIC TRANSLATION: Warm/cozy \u2192 warm grain, major mode, medium-dark brightness (golden, not harsh). Nostalgic/hazy \u2192 vinyl crackle texture (old recordings), soft attack, echo (memory reverb). Sunday relaxed \u2192 slow tempo, minimal rhythm. Domestic/safe \u2192 small intimate space (not vast cathedral). Sweet anticipation \u2192 rising melody hints, gentle motion. COHERENCE CHECK: Warm grain + vinyl crackle + soft attack + small space = intimate nostalgic memory. Major mode + slow tempo + minimal rhythm = peaceful Sunday. Non-negotiables: (1) vinyl crackle for nostalgia, (2) warm grain for coziness, (3) small space for domestic intimacy. REFERENCE: This is lo-fi hip-hop territory but slower and more acoustic - the warmth of memory, not the coolness of a beat tape.",
+  "title": "Grandmother Kitchen Sunday Morning",
   "config": {
     "tempo": "slow",
     "root": "f",
@@ -192,6 +196,7 @@ Output:
 ```json
 {
   "thinking": "VIBE DECOMPOSITION: Deep space = infinite void, no atmosphere, absolute silence yet somehow presence. Vast emptiness = maximum space, minimal content, negative space as feature. Wonder = awe, discovery, the sublime. Isolation = alone, small against immensity. Stars = distant points of light, countless, ancient light. SONIC TRANSLATION: Vast emptiness \u2192 vast reverb, sparse density (2), very slow tempo (time stretches in space). Wonder/sublime \u2192 major mode but mysterious (mixolydian has that hopeful-mysterious quality), rising melodic hints. Isolation \u2192 wide stereo (emphasizes smallness in bigness), thin high pad (distant, cold). Stars \u2192 shimmer slow texture (twinkling), bells accent (crystalline points of light). Cold void \u2192 clean grain (digital, inhuman), bright but not warm. COHERENCE CHECK: Vast space + sparse density + very slow tempo = emptiness. Wide stereo + thin high pad + shimmer = isolation among stars. Mixolydian + rising melody + bells = wonder. Non-negotiables: (1) vast reverb for space itself, (2) density 2 for emptiness, (3) shimmer for stars. REFERENCE: Think 2001: A Space Odyssey - the terrifying beauty of infinite nothing.",
+  "title": "Deep Space Wonder Isolation",
   "config": {
     "tempo": "very_slow",
     "root": "e",

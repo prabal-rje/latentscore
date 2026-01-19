@@ -15,6 +15,7 @@ def test_palette_duplicate_penalty_applies() -> None:
     """Verify that duplicate hex colors within palettes reduce the reward."""
     payload = {
         "thinking": "ok",
+        "title": "Test vibe",
         "config": {
             "tempo": "slow",
             "root": "d",
@@ -49,7 +50,19 @@ def test_palette_duplicate_penalty_applies() -> None:
         ]
         * 3,
     }
-    breakdown = compute_partial_reward(vibe="test", output=json.dumps(payload))
+    reward_config = RewardConfig(
+        weights=RewardWeights(
+            format_weight=FORMAT_WEIGHT,
+            schema_weight=SCHEMA_WEIGHT,
+            audio_weight=0.0,
+            title_similarity_weight=0.0,
+            title_length_penalty_weight=0.0,
+            palette_duplicate_penalty=PALETTE_DUPLICATE_PENALTY_WEIGHT,
+        )
+    )
+    breakdown = compute_partial_reward(
+        vibe="test", output=json.dumps(payload), config=reward_config
+    )
 
     # With 3 duplicates out of 5 colors per palette, penalty fraction is 2/5 = 0.4
     # Base total = FORMAT_WEIGHT * 1.0 + SCHEMA_WEIGHT * 1.0 = 0.2 + 0.3 = 0.5
@@ -59,10 +72,44 @@ def test_palette_duplicate_penalty_applies() -> None:
     assert abs(breakdown.total - expected) < 0.01
 
 
+def test_title_similarity_and_length_penalty() -> None:
+    payload = {
+        "thinking": "ok",
+        "title": "neon rain city",
+        "config": {
+            "tempo": "slow",
+            "root": "d",
+            "mode": "minor",
+            "brightness": "dark",
+            "space": "large",
+            "density": 3,
+            "bass": "drone",
+            "pad": "ambient_drift",
+            "melody": "minimal",
+            "rhythm": "none",
+            "texture": "shimmer",
+            "accent": "none",
+            "motion": "slow",
+            "attack": "soft",
+            "stereo": "wide",
+            "depth": True,
+            "echo": "subtle",
+            "human": "natural",
+            "grain": "warm",
+        },
+        "palettes": [],
+    }
+    breakdown = compute_partial_reward(vibe="neon rain", output=json.dumps(payload))
+    assert breakdown.title_similarity is not None
+    assert breakdown.title_similarity > 0.0
+    assert breakdown.title_length_penalty == 0.0
+
+
 def test_no_penalty_for_unique_colors() -> None:
     """Verify no penalty when all colors are unique."""
     payload = {
         "thinking": "ok",
+        "title": "Test vibe",
         "config": {
             "tempo": "slow",
             "root": "d",
@@ -97,7 +144,19 @@ def test_no_penalty_for_unique_colors() -> None:
         ]
         * 3,
     }
-    breakdown = compute_partial_reward(vibe="test", output=json.dumps(payload))
+    reward_config = RewardConfig(
+        weights=RewardWeights(
+            format_weight=FORMAT_WEIGHT,
+            schema_weight=SCHEMA_WEIGHT,
+            audio_weight=0.0,
+            title_similarity_weight=0.0,
+            title_length_penalty_weight=0.0,
+            palette_duplicate_penalty=PALETTE_DUPLICATE_PENALTY_WEIGHT,
+        )
+    )
+    breakdown = compute_partial_reward(
+        vibe="test", output=json.dumps(payload), config=reward_config
+    )
 
     # No duplicates, so no penalty
     base_total = FORMAT_WEIGHT * 1.0 + SCHEMA_WEIGHT * 1.0
@@ -108,6 +167,7 @@ def test_compute_partial_reward_custom_weights() -> None:
     """Verify custom reward weights are applied."""
     valid_payload = {
         "thinking": "test",
+        "title": "Test vibe",
         "config": {
             "tempo": "medium",
             "root": "c",
@@ -133,14 +193,16 @@ def test_compute_partial_reward_custom_weights() -> None:
     }
     valid_json = json.dumps(valid_payload)
 
-    # Default weights: format=0.2, schema=0.3, audio=0.5
+    # Default weights from config
     default_result = compute_partial_reward("test vibe", valid_json)
 
-    # Custom weights: heavy on format (0.8), light on schema (0.2), no audio
+    # Custom weights: heavy on format (0.8), light on schema (0.2), no audio/title
     custom_weights = RewardWeights(
         format_weight=0.8,
         schema_weight=0.2,
         audio_weight=0.0,
+        title_similarity_weight=0.0,
+        title_length_penalty_weight=0.0,
     )
     custom_config = RewardConfig(weights=custom_weights)
     custom_result = compute_partial_reward("test vibe", valid_json, config=custom_config)
@@ -149,8 +211,21 @@ def test_compute_partial_reward_custom_weights() -> None:
     assert default_result.format == custom_result.format == 1.0
     assert default_result.schema == custom_result.schema == 1.0
 
-    # Default total = 0.2 * 1.0 + 0.3 * 1.0 + 0.5 * 0.0 = 0.5
-    assert abs(default_result.total - 0.5) < 0.01
+    expected_default = (
+        DEFAULT_REWARD_CONFIG.weights.format_weight * default_result.format
+        + DEFAULT_REWARD_CONFIG.weights.schema_weight * default_result.schema
+        + DEFAULT_REWARD_CONFIG.weights.audio_weight * default_result.audio
+        + DEFAULT_REWARD_CONFIG.weights.title_similarity_weight * default_result.title_similarity
+        - DEFAULT_REWARD_CONFIG.weights.title_length_penalty_weight
+        * default_result.title_length_penalty
+    )
+    assert abs(default_result.total - expected_default) < 0.01
 
-    # Custom total = 0.8 * 1.0 + 0.2 * 1.0 + 0.0 * 0.0 = 1.0
-    assert abs(custom_result.total - 1.0) < 0.01
+    expected_custom = (
+        custom_weights.format_weight * custom_result.format
+        + custom_weights.schema_weight * custom_result.schema
+        + custom_weights.audio_weight * custom_result.audio
+        + custom_weights.title_similarity_weight * custom_result.title_similarity
+        - custom_weights.title_length_penalty_weight * custom_result.title_length_penalty
+    )
+    assert abs(custom_result.total - expected_custom) < 0.01

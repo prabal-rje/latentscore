@@ -15,6 +15,7 @@ async def test_call_llm_for_config_wraps_vibe(monkeypatch: pytest.MonkeyPatch) -
         return types.SimpleNamespace(
             model_dump=lambda **_kwargs: {
                 "thinking": "",
+                "title": "Misty Morning",
                 "config": {},
                 "palettes": [],
             }

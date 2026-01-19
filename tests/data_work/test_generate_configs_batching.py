@@ -14,7 +14,12 @@ async def test_batch_call_uses_batch_prompt(monkeypatch: pytest.MonkeyPatch) -> 
         captured.update(kwargs)
         model = types.SimpleNamespace(
             model_dump=lambda: {
-                "generated_config_0": {"thinking": "", "config": {}, "palettes": []}
+                "generated_config_0": {
+                    "thinking": "",
+                    "title": "Misty Morning",
+                    "config": {},
+                    "palettes": [],
+                }
             }
         )
         return model
@@ -49,7 +54,12 @@ async def test_batch_call_enables_prompt_cache(monkeypatch: pytest.MonkeyPatch) 
         captured.update(kwargs)
         model = types.SimpleNamespace(
             model_dump=lambda: {
-                "generated_config_0": {"thinking": "", "config": {}, "palettes": []}
+                "generated_config_0": {
+                    "thinking": "",
+                    "title": "Fog Drift",
+                    "config": {},
+                    "palettes": [],
+                }
             }
         )
         return model

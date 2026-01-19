@@ -14,7 +14,7 @@ async def test_generate_configs_returns_pydantic_row(
     gen = importlib.import_module("data_work.02b_generate_configs")
 
     async def fake_config_call(_vibe_text: str) -> JsonDict:
-        return {"thinking": "", "config": {}, "palettes": []}
+        return {"thinking": "", "title": "Mist Drift", "config": {}, "palettes": []}
 
     row = VibeRow(
         dataset="demo",

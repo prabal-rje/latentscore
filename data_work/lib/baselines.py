@@ -8,6 +8,8 @@ from abc import ABC, abstractmethod
 from typing import Sequence, TypeVar, get_args  # noqa: F401 (TypeVar used in generic)
 
 from common.music_schema import (
+    MAX_TITLE_CHARS,
+    MAX_TITLE_WORDS,
     AccentStyle,
     AttackStyle,
     BassStyle,
@@ -78,6 +80,27 @@ MOTIF_REPEAT_VALUES: Sequence[MotifRepeatLabel] = get_args(MotifRepeatLabel)
 STEP_BIAS_VALUES: Sequence[StepBiasLabel] = get_args(StepBiasLabel)
 CHROMATIC_VALUES: Sequence[ChromaticLabel] = get_args(ChromaticLabel)
 CADENCE_VALUES: Sequence[CadenceLabel] = get_args(CadenceLabel)
+
+_TITLE_FALLBACK = "Ambient Mood Study"
+_TITLE_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9']+")
+
+
+def _make_title(vibe: str) -> str:
+    cleaned = re.sub(r"<[^>]+>", " ", vibe)
+    tokens = _TITLE_TOKEN_PATTERN.findall(cleaned)
+    if not tokens:
+        return _TITLE_FALLBACK
+    words = tokens[:MAX_TITLE_WORDS]
+    title = " ".join(word.capitalize() for word in words)
+    if len(title) <= MAX_TITLE_CHARS:
+        return title
+    while words and len(" ".join(word.capitalize() for word in words)) > MAX_TITLE_CHARS:
+        words = words[:-1]
+    if not words:
+        return _TITLE_FALLBACK
+    return " ".join(word.capitalize() for word in words)
+
+
 CHORD_CHANGE_VALUES: Sequence[ChordChangeLabel] = get_args(ChordChangeLabel)
 WEIGHT_VALUES: Sequence[WeightLabel] = get_args(WeightLabel)
 
@@ -196,6 +219,7 @@ class RandomConfigBaseline(ConfigBaseline):
         _ = vibe  # Intentionally ignored
         return MusicConfigPromptPayload(
             thinking="Random baseline config for evaluation purposes.",
+            title=_make_title(vibe),
             config=self._random_config(),
             palettes=[self._random_palette() for _ in range(3)],
         )
@@ -360,6 +384,7 @@ class RuleBasedBaseline(ConfigBaseline):
 
         return MusicConfigPromptPayload(
             thinking=f"Rule-based config for vibe: {vibe[:50]}...",
+            title=_make_title(vibe),
             config=new_config,
             palettes=payload.palettes,
         )
@@ -418,6 +443,7 @@ class ModeConfigBaseline(ConfigBaseline):
 
         return MusicConfigPromptPayload(
             thinking="Mode baseline using most common values.",
+            title=_make_title(vibe),
             config=new_config,
             palettes=payload.palettes,
         )

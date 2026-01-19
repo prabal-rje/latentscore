@@ -205,14 +205,14 @@ python -m data_work.02b_generate_configs \
 {
   "...all vibe fields from 02a...",
   "config_model": "anthropic/claude-opus-4-5-20251101",
-  "config_candidates": [/* N configs */],
+  "config_candidates": [/* N configs (thinking, title, config, palettes) */],
   "scores": {
     "format_valid": [1, 1, 1, 0, 1],
     "schema_valid": [1, 1, 0, 0, 1],
     "palette_valid": [1, 1, 0, 0, 1]
   },
   "best_index": 0,
-  "config_payload": {/* best config */},
+  "config_payload": {/* best config (thinking, title, config, palettes) */},
   "config_error": null
 }
 ```
@@ -473,4 +473,4 @@ Document key decisions made during the process.
 | Best-of-N config generation (N=5) | Multiple candidates increase probability of valid config. Store all N + scores for analysis. Temperature 0.8 for diversity. | 2026-01-18 |
 | ScoreResult protocol for all scorers | Enforces mandatory `final_score` property in [0,1] across all scoring systems (CLAP, LLM, rewards, custom). Runtime validation prevents silent failures. | 2026-01-18 |
 | Separate scoring script (02c) | Decouples scoring from config generation. Can re-run scoring with different methods. Supports multiple scorers in one pass. | 2026-01-18 |
-| Config payload uses `thinking` | Aligns prompt outputs with new naming. | 2026-01-18 |
+| Config payload uses `thinking` and `title` | Aligns prompt outputs with new naming. | 2026-01-19 |

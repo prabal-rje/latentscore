@@ -11,7 +11,13 @@ from data_work.lib.config_batcher import (
 def _payload_for(vibe: str):
     baseline = get_baseline("random")
     payload = baseline.generate(vibe)
-    return payload.model_copy(update={"thinking": f"just:{vibe}"})
+    return payload.model_copy(update={"thinking": f"just:{vibe}", "title": f"title:{vibe}"})
+
+
+def test_baseline_generates_title() -> None:
+    baseline = get_baseline("random")
+    payload = baseline.generate("mellow dawn")
+    assert payload.title
 
 
 def test_build_batch_response_model_fields():
@@ -25,6 +31,7 @@ def test_build_batch_response_model_fields():
     parsed = response_model.model_validate(data)
     assert parsed.generated_config_0.thinking == "just:a"
     assert parsed.generated_config_2.thinking == "just:c"
+    assert parsed.generated_config_0.title == "title:a"
 
 
 def test_config_batcher_batches_in_order():

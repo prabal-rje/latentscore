@@ -8,8 +8,10 @@ import re
 from collections.abc import Sequence
 from typing import Any, Callable, Mapping
 
+import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from common.music_schema import MAX_TITLE_CHARS
 from common.reward_config import DEFAULT_REWARD_CONFIG, RewardConfig
 from data_work.lib.scoring_types import ScoreResult
 
@@ -20,6 +22,11 @@ PALETTE_SIZE = 5
 PALETTE_COUNT = 3
 WEIGHT_LABELS = ("xs", "sm", "md", "lg", "xl", "xxl")
 HEX_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
+TITLE_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9']+")
+
+_TITLE_EMBEDDER = None
+_TITLE_EMBEDDER_FAILED = False
+_TITLE_EMBEDDER_WARNED = False
 
 TEMPO_LABELS = ("very_slow", "slow", "medium", "fast", "very_fast")
 BRIGHTNESS_LABELS = ("very_dark", "dark", "medium", "bright", "very_bright")
@@ -147,6 +154,9 @@ class RewardBreakdown(BaseModel):
     format: float
     schema: float
     audio: float
+    title_similarity: float
+    title_length_penalty: float
+    title_score: float
     field_errors: dict[str, list[str]]
 
     @computed_field  # type: ignore[prop-decorator]
@@ -168,6 +178,9 @@ def _check_reward_protocol() -> None:
             format=1.0,
             schema=0.5,
             audio=0.0,
+            title_similarity=0.0,
+            title_length_penalty=0.0,
+            title_score=0.0,
             field_errors={},
         ),
         ScoreResult,
@@ -175,6 +188,73 @@ def _check_reward_protocol() -> None:
 
 
 _check_reward_protocol()
+
+
+def _get_title_embedder():
+    """Return a cached sentence-transformers embedder if available."""
+    global _TITLE_EMBEDDER, _TITLE_EMBEDDER_FAILED, _TITLE_EMBEDDER_WARNED
+    if _TITLE_EMBEDDER_FAILED:
+        return None
+    if _TITLE_EMBEDDER is not None:
+        return _TITLE_EMBEDDER
+    try:
+        from sentence_transformers import SentenceTransformer  # type: ignore[import]
+    except Exception as exc:
+        if not _TITLE_EMBEDDER_WARNED:
+            LOGGER.warning(
+                "sentence-transformers unavailable; using lexical title similarity: %s", exc
+            )
+            _TITLE_EMBEDDER_WARNED = True
+        _TITLE_EMBEDDER_FAILED = True
+        return None
+    try:
+        _TITLE_EMBEDDER = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    except Exception as exc:
+        if not _TITLE_EMBEDDER_WARNED:
+            LOGGER.warning("Failed to load title embedder; using lexical similarity: %s", exc)
+            _TITLE_EMBEDDER_WARNED = True
+        _TITLE_EMBEDDER_FAILED = True
+        return None
+    return _TITLE_EMBEDDER
+
+
+def _tokenize_text(text: str) -> set[str]:
+    return {token.lower() for token in TITLE_TOKEN_PATTERN.findall(text)}
+
+
+def _lexical_similarity(a: str, b: str) -> float:
+    tokens_a = _tokenize_text(a)
+    tokens_b = _tokenize_text(b)
+    if not tokens_a or not tokens_b:
+        return 0.0
+    overlap = tokens_a & tokens_b
+    union = tokens_a | tokens_b
+    return len(overlap) / len(union)
+
+
+def _title_similarity(vibe: str, title: str) -> float:
+    embedder = _get_title_embedder()
+    if embedder is None:
+        return _lexical_similarity(vibe, title)
+    embeddings = embedder.encode([vibe, title], normalize_embeddings=True)
+    vectors = np.asarray(embeddings, dtype=float)
+    if vectors.shape[0] != 2:
+        return _lexical_similarity(vibe, title)
+    sim = float(vectors[0] @ vectors[1])
+    if sim < 0.0:
+        return 0.0
+    if sim > 1.0:
+        return 1.0
+    return sim
+
+
+def _title_length_penalty(title: str) -> float:
+    if not title:
+        return 0.0
+    over = max(0, len(title) - MAX_TITLE_CHARS)
+    if over <= 0:
+        return 0.0
+    return min(1.0, over / MAX_TITLE_CHARS)
 
 
 def _parse_json(output: str) -> Mapping[str, Any] | None:
@@ -252,10 +332,19 @@ def compute_partial_reward(
     schema_score, field_errors = reward_schema(output)
 
     audio_score = 0.0
+    title_similarity = 0.0
+    title_length_penalty = 0.0
+    title_score = 0.0
     palette_penalty = 0.0
     parsed = _parse_json(output)
 
     if format_score > 0 and parsed is not None:
+        title_value = parsed.get("title")
+        if weights.title_similarity_weight > 0 and isinstance(title_value, str):
+            title_similarity = _title_similarity(vibe, title_value)
+        if isinstance(title_value, str):
+            title_length_penalty = _title_length_penalty(title_value)
+
         # Check for palette duplicates
         raw_palettes = parsed.get("palettes", [])
         match raw_palettes:
@@ -268,19 +357,29 @@ def compute_partial_reward(
         if schema_score > weights.schema_threshold_for_audio and audio_scorer is not None:
             audio_score = audio_scorer(vibe, parsed)
 
+    title_score = weights.title_similarity_weight * title_similarity
     base_total = (
         weights.format_weight * format_score
         + weights.schema_weight * schema_score
         + weights.audio_weight * audio_score
+        + title_score
     )
-    # Apply palette duplicate penalty
-    total = max(0.0, base_total - weights.palette_duplicate_penalty * palette_penalty)
+    # Apply palette duplicate + title length penalties
+    total = max(
+        0.0,
+        base_total
+        - weights.palette_duplicate_penalty * palette_penalty
+        - weights.title_length_penalty_weight * title_length_penalty,
+    )
 
     return RewardBreakdown(
         total=total,
         format=format_score,
         schema=schema_score,
         audio=audio_score,
+        title_similarity=title_similarity,
+        title_length_penalty=title_length_penalty,
+        title_score=title_score,
         field_errors=field_errors,
     )
 

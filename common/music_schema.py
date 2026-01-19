@@ -275,6 +275,7 @@ class MusicConfigPromptPayload(BaseModel):
         max_length=3,
         description=PALETTES_DESC,
     )
+
     @field_validator("title")
     @classmethod
     def _validate_title(cls, value: str) -> str:
@@ -284,7 +285,6 @@ class MusicConfigPromptPayload(BaseModel):
         if len(words) > MAX_TITLE_WORDS:
             raise ValueError("title exceeds max word count")
         return value
-
 
 
 def schema_signature() -> str:

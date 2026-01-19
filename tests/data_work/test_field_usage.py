@@ -14,7 +14,18 @@ def test_ablate_field_uses_default() -> None:
 def test_run_field_usage_writes_outputs(tmp_path: Path) -> None:
     input_path = tmp_path / "input.jsonl"
     input_path.write_text(
-        json.dumps({"config_payload": {"tempo": "medium"}}) + "\n", encoding="utf-8"
+        json.dumps(
+            {
+                "config_payload": {
+                    "thinking": "ok",
+                    "title": "Tempo Mid",
+                    "config": {"tempo": "medium"},
+                    "palettes": [],
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
     )
     output_dir = tmp_path / "out"
     MODULE.run_field_usage(

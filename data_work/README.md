@@ -398,7 +398,7 @@ to produce the dataset.
 Takes vibe JSONL from 02a and adds config fields. Each row includes all vibe fields plus:
 
 - `config_model`: Model used for config generation
-- `config_candidates`: Array of N config candidates (each with `thinking`, `config`, `palettes`)
+- `config_candidates`: Array of N config candidates (each with `thinking`, `title`, `config`, `palettes`)
 - `scores`: Dict with binary scores per candidate:
   - `format_valid`: 1 if parses as JSON
   - `schema_valid`: 1 if validates against MusicConfigPromptPayload

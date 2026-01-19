@@ -21,10 +21,10 @@ def test_score_row_returns_scored_row() -> None:
         tags_noisy=[],
         vibe_model="m",
         config_model="m",
-        config_candidates=[{"thinking": "", "config": {}, "palettes": []}],
+        config_candidates=[{"thinking": "", "title": "Calm Drift", "config": {}, "palettes": []}],
         scores={"format_valid": [1], "schema_valid": [1], "palette_valid": [1]},
         best_index=0,
-        config_payload={"thinking": "", "config": {}, "palettes": []},
+        config_payload={"thinking": "", "title": "Calm Drift", "config": {}, "palettes": []},
         config_error=None,
     )
 

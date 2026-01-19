@@ -16,7 +16,7 @@ Output format:
     ...all vibe fields from input...,
     "config_model": "anthropic/claude-opus-4-5-20251101",
     "config_candidates": [
-        {"thinking": "...", "config": {...}, "palettes": [...]},
+        {"thinking": "...", "title": "...", "config": {...}, "palettes": [...]},
         ...
     ],
     "scores": {
@@ -25,7 +25,7 @@ Output format:
         "palette_valid": [1, 1, 0, 0, 1]
     },
     "best_index": 0,
-    "config_payload": {"thinking": "...", "config": {...}, "palettes": [...]},
+    "config_payload": {"thinking": "...", "title": "...", "config": {...}, "palettes": [...]},
     "config_error": null
 }
 """

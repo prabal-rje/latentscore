@@ -45,10 +45,22 @@ class RewardWeights(BaseModel):
         description="Weight for schema field correctness (0.0-1.0)",
     )
     audio_weight: float = Field(
-        default=0.5,
+        default=0.4,
         ge=0.0,
         le=1.0,
         description="Weight for audio/CLAP similarity score (0.0-1.0)",
+    )
+    title_similarity_weight: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Weight for title-vibe similarity score (0.0-1.0)",
+    )
+    title_length_penalty_weight: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=1.0,
+        description="Penalty weight for title length overage (0.0-1.0)",
     )
     palette_duplicate_penalty: float = Field(
         default=0.2,

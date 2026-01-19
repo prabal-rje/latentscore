@@ -83,13 +83,12 @@ def test_prompt_payload_schema_matches_data_work() -> None:
     )
 
 
-
-
 def test_prompt_payload_includes_title() -> None:
     """Ensure MusicConfigPromptPayload has title field."""
     assert "title" in MusicConfigPromptPayload.model_fields
     field = MusicConfigPromptPayload.model_fields["title"]
     assert field.is_required()
+
 
 def test_prompt_payload_includes_palettes() -> None:
     """Ensure MusicConfigPromptPayload has palettes field."""

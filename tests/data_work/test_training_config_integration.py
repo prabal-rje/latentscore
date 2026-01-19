@@ -54,15 +54,29 @@ def test_reward_config_from_args():
     modal_train = importlib.import_module("data_work.03_modal_train")
 
     # With all weights specified
-    args = argparse.Namespace(format_weight=0.3, schema_weight=0.4, audio_weight=0.3)
+    args = argparse.Namespace(
+        format_weight=0.3,
+        schema_weight=0.4,
+        audio_weight=0.3,
+        title_similarity_weight=0.15,
+        title_length_penalty_weight=0.05,
+    )
     reward_config = modal_train._build_reward_config_from_args(args)
     assert reward_config is not None
     assert reward_config.weights.format_weight == 0.3
     assert reward_config.weights.schema_weight == 0.4
     assert reward_config.weights.audio_weight == 0.3
+    assert reward_config.weights.title_similarity_weight == 0.15
+    assert reward_config.weights.title_length_penalty_weight == 0.05
 
     # With no weights specified - should return None
-    args = argparse.Namespace(format_weight=None, schema_weight=None, audio_weight=None)
+    args = argparse.Namespace(
+        format_weight=None,
+        schema_weight=None,
+        audio_weight=None,
+        title_similarity_weight=None,
+        title_length_penalty_weight=None,
+    )
     reward_config = modal_train._build_reward_config_from_args(args)
     assert reward_config is None
 

@@ -25,7 +25,7 @@ Notes:
 - Config generation prompts use system-role instructions with `<vibe>` in the user role; batching uses `<vibe_input index=...>` and prompt caching on the system message.
 - `04_clap_benchmark` LiteLLM sources follow the same system/user role contract (`<vibe>` in user role).
 - Config generation prompt caching can be disabled with `--no-prompt-caching` in `02b_generate_configs`.
-- Config payloads use `thinking`.
+- Config payloads use `thinking` and `title`.
 - LLM judge `final_score` is the harmonic mean of `vibe_match` and `audio_quality`.
 
 **Data pipeline note (2026-01-18):** The data processing pipeline uses two scripts:

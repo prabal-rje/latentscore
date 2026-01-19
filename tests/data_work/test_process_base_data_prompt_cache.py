@@ -14,6 +14,7 @@ async def test_config_call_disables_cache_control(monkeypatch: pytest.MonkeyPatc
         return types.SimpleNamespace(
             model_dump=lambda *args, **_kwargs: {
                 "thinking": "",
+                "title": "Quiet Dusk",
                 "config": {},
                 "palettes": [],
             }

@@ -56,6 +56,7 @@ def _payload_json(overrides: dict[str, object] | None = None) -> str:
         config.update(overrides)
     payload = {
         "thinking": "Sound choices explained.",
+        "title": "Warm Sunrise Glow",
         "config": config,
         "palettes": _sample_palettes(),
     }
