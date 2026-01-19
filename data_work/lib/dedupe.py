@@ -8,6 +8,8 @@ from typing import Any, Callable, Protocol, Sequence, TypeVar
 
 import numpy as np
 
+from data_work.lib.pipeline_models import VibeRow
+
 _LOGGER = logging.getLogger("data_work.dedupe")
 
 
@@ -55,44 +57,20 @@ def _resolve_embeddings(
 
 
 def dedupe_rows(
-    rows: list[dict[str, Any]],
+    rows: Sequence[VibeRow],
     *,
     threshold: float,
     model_name: str,
     embed_fn: EmbedFn | None = None,
-) -> tuple[list[dict[str, Any]], int]:
-    if not rows:
-        return [], 0
-    if not (0 <= threshold <= 1):
-        raise ValueError("threshold must be between 0 and 1.")
-
-    texts: list[str] = []
-    for row in rows:
-        value = row.get("vibe_original", "")
-        text = str(value or "")
-        texts.append(text)
-
-    embeddings = _resolve_embeddings(texts, model_name=model_name, embed_fn=embed_fn)
-    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-    normalized = np.where(norms == 0, 0.0, embeddings / norms)
-
-    kept_rows: list[dict[str, Any]] = []
-    kept_embeddings: list[np.ndarray] = []
-    removed = 0
-    for idx, row in enumerate(rows):
-        embedding = normalized[idx]
-        if not kept_embeddings:
-            kept_rows.append(row)
-            kept_embeddings.append(embedding)
-            continue
-        matrix = np.stack(kept_embeddings, axis=0)
-        similarities = matrix @ embedding
-        if float(similarities.max(initial=-1.0)) >= threshold:
-            removed += 1
-            continue
-        kept_rows.append(row)
-        kept_embeddings.append(embedding)
-    return kept_rows, removed
+) -> tuple[list[VibeRow], int]:
+    """Backward-compatible alias for dedupe_vibe_rows."""
+    return dedupe_vibe_rows(
+        list(rows),
+        threshold=threshold,
+        model_name=model_name,
+        text_field="vibe_original",
+        embed_fn=embed_fn,
+    )
 
 
 def dedupe_records(
@@ -217,13 +195,13 @@ def diversity_sample(
 
 
 def dedupe_vibe_rows(
-    rows: list[dict[str, Any]],
+    rows: list["VibeRow"],
     *,
     threshold: float,
     model_name: str,
     text_field: str = "vibe_original",
     embed_fn: EmbedFn | None = None,
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list["VibeRow"], int]:
     """Dedupe vibe rows based on text field similarity.
 
     This dedupes on the vibe content (e.g., "love") rather than raw source text,
@@ -245,12 +223,12 @@ def dedupe_vibe_rows(
     if not (0 <= threshold <= 1):
         raise ValueError("threshold must be between 0 and 1.")
 
-    texts = [str(row.get(text_field, "") or "") for row in rows]
+    texts = [str(getattr(row, text_field, "") or "") for row in rows]
     embeddings = _resolve_embeddings(texts, model_name=model_name, embed_fn=embed_fn)
     norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
     normalized = np.where(norms == 0, 0.0, embeddings / norms)
 
-    kept_rows: list[dict[str, Any]] = []
+    kept_rows: list["VibeRow"] = []
     kept_embeddings: list[np.ndarray] = []
     removed = 0
 
@@ -279,14 +257,14 @@ def dedupe_vibe_rows(
 
 
 def diversity_sample_rows(
-    rows: list[dict[str, Any]],
+    rows: list["VibeRow"],
     n_samples: int,
     *,
     model_name: str,
     seed: int = 42,
     text_field: str = "vibe_original",
     embed_fn: EmbedFn | None = None,
-) -> tuple[list[dict[str, Any]], list[int]]:
+) -> tuple[list["VibeRow"], list[int]]:
     """Select n_samples vibe rows that maximize coverage of embedding space.
 
     Uses farthest-point sampling (greedy algorithm) on vibe text content.
@@ -309,7 +287,7 @@ def diversity_sample_rows(
     if n_samples >= len(rows):
         return list(rows), list(range(len(rows)))
 
-    texts = [str(row.get(text_field, "") or "") for row in rows]
+    texts = [str(getattr(row, text_field, "") or "") for row in rows]
     embeddings = _resolve_embeddings(texts, model_name=model_name, embed_fn=embed_fn)
 
     # Normalize for cosine similarity

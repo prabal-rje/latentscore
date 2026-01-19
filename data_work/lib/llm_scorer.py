@@ -11,8 +11,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from common.prompts import build_llm_scoring_prompt
-from data_work.lib.scoring_types import ScoreResult
 from data_work.lib.clap_scorer import ClapScore, ClapScorerProtocol
+from data_work.lib.scoring_types import ScoreResult
 from latentscore.audio import write_wav
 from latentscore.config import MusicConfig, MusicConfigPrompt
 from latentscore.synth import assemble
@@ -22,10 +22,17 @@ LOGGER = logging.getLogger("data_work.llm_scorer")
 DEFAULT_SCORING_PROMPT = build_llm_scoring_prompt()
 
 
+def compute_llm_final_score(vibe_match: float, audio_quality: float) -> float:
+    """Compute the equal-weight harmonic mean of vibe match and audio quality."""
+    if vibe_match <= 0.0 or audio_quality <= 0.0:
+        return 0.0
+    return (2.0 * vibe_match * audio_quality) / (vibe_match + audio_quality)
+
+
 class LLMScoreResult(BaseModel):
     """Structured output for LLM-based audio scoring."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     vibe_match: float = Field(
         ge=0.0,
@@ -37,28 +44,17 @@ class LLMScoreResult(BaseModel):
         le=1.0,
         description="Technical quality of the audio (0.0-1.0)",
     )
-    creativity: float = Field(
-        ge=0.0,
-        le=1.0,
-        description="How creative/interesting the interpretation is (0.0-1.0)",
-    )
-    justification: str = Field(
+    thinking: str = Field(
         max_length=500,
+        validation_alias="justification",
         description="Brief explanation of the scores",
     )
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def final_score(self) -> float:
-        """Return weighted final score implementing ScoreResult protocol.
-
-        Weights: vibe_match=0.6, audio_quality=0.25, creativity=0.15
-        """
-        return (
-            self.vibe_match * 0.6
-            + self.audio_quality * 0.25
-            + self.creativity * 0.15
-        )
+        """Return harmonic-mean final score implementing ScoreResult protocol."""
+        return compute_llm_final_score(self.vibe_match, self.audio_quality)
 
 
 # Runtime check that LLMScoreResult implements ScoreResult
@@ -68,8 +64,7 @@ def _check_llm_protocol() -> None:
         LLMScoreResult(
             vibe_match=0.5,
             audio_quality=0.5,
-            creativity=0.5,
-            justification="test",
+            thinking="test",
         ),
         ScoreResult,
     ), "LLMScoreResult must implement ScoreResult protocol"
@@ -114,8 +109,8 @@ def _llm_score_to_clap_score(result: LLMScoreResult) -> ClapScore:
     """Convert LLM score result to ClapScore for compatibility."""
     # Map LLM scores to ClapScore fields:
     # - vibe_match -> audio_text_similarity (main similarity metric)
-    # - audio_quality penalty -> excess_badness (inverted)
-    # - Compute final_reward as weighted average
+    # - audio_quality -> audio_bad_similarity (inverted)
+    # - Compute final_reward as harmonic mean (no penalty)
 
     audio_text_sim = result.vibe_match
     audio_quality = result.audio_quality
@@ -123,21 +118,11 @@ def _llm_score_to_clap_score(result: LLMScoreResult) -> ClapScore:
     # Badness is inverse of quality
     audio_bad_sim = 1.0 - audio_quality
     text_bad_sim = 0.0  # Assume vibe text isn't inherently "bad"
-    excess_badness = max(0.0, audio_bad_sim - 0.3)  # Penalty if quality < 0.7
-    penalty = excess_badness * 0.5
+    excess_badness = 0.0
+    penalty = 0.0
 
-    # Weighted final score
-    weights = {
-        "vibe_match": 0.6,
-        "audio_quality": 0.25,
-        "creativity": 0.15,
-    }
-    raw_score = (
-        result.vibe_match * weights["vibe_match"]
-        + result.audio_quality * weights["audio_quality"]
-        + result.creativity * weights["creativity"]
-    )
-    final_reward = max(0.0, min(1.0, raw_score - penalty))
+    raw_score = compute_llm_final_score(result.vibe_match, result.audio_quality)
+    final_reward = raw_score
 
     return ClapScore(
         audio_text_similarity=audio_text_sim,
@@ -209,11 +194,10 @@ class LLMScorer:
         )
 
         LOGGER.debug(
-            "LLM score for '%s': vibe=%.2f quality=%.2f creativity=%.2f",
+            "LLM score for '%s': vibe=%.2f quality=%.2f",
             vibe[:30],
             result.vibe_match,
             result.audio_quality,
-            result.creativity,
         )
 
         return _llm_score_to_clap_score(result)
@@ -221,7 +205,7 @@ class LLMScorer:
     def score_detailed(self, vibe: str, audio_path: str) -> LLMScoreResult:
         """Get detailed scoring result (not just ClapScore).
 
-        Use this to get the full LLMScoreResult with justification.
+        Use this to get the full LLMScoreResult with thinking text.
         """
         import asyncio
 
@@ -312,7 +296,7 @@ def score_config_with_llm_detailed(
         duration: Audio duration in seconds.
 
     Returns:
-        LLMScoreResult with all detailed scores and justification.
+        LLMScoreResult with all detailed scores and thinking text.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path = _config_to_audio_path(config, duration, tmpdir)

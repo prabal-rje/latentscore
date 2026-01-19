@@ -90,6 +90,9 @@ Key features:
 - Scores each candidate on: `format_valid`, `schema_valid`, `palette_valid`
 - Stores all N candidates + scores for analysis
 - Selects best valid config automatically
+- Role-based prompting: system prompt holds instructions + schema, user message holds `<vibe>...</vibe>`
+- LiteLLM prompt caching enabled on the system message by default (disable with `--no-prompt-caching`)
+- Optional batching via `--batch-size` and `--batch-wait-ms`
 - Writes incrementally with resume support (`--resume` flag)
 - Uses SQLite caching
 
@@ -102,6 +105,8 @@ python -m data_work.02b_generate_configs \
   --model anthropic/claude-opus-4-5-20251101 \
   --num-candidates 5 \
   --temperature 0.8 \
+  --batch-size 1 \
+  --batch-wait-ms 200 \
   --seed 42
 ```
 
@@ -138,13 +143,6 @@ python -m data_work.02c_score_configs \
 
 Custom scorers must have signature `def score_fn(vibe: str, config: dict) -> dict` and
 return a dict containing at least `{"final_score": float}` where `final_score` is in [0, 1].
-
-### `02_process_base_data` (deprecated)
-
-**Note:** This script is deprecated. Use `02a_extract_vibes` + `02b_generate_configs` instead.
-
-The old combined script that did both vibe extraction and config generation in one pass.
-It used the same cheap model for both tasks and lacked Best-of-N sampling.
 
 ## CLI usage
 
@@ -240,6 +238,8 @@ For GRPO, `--model` should point at the base HF repo (e.g. `unsloth/gemma-3-270m
 and `--init-adapter-dir` should point at the SFT LoRA adapter. If the base model
 is private or only available locally, merge the adapter first and pass the merged
 checkpoint path instead so Modal can resolve it.
+Use `--debug-prompts` (optionally with `--debug-prompts-max`) to log a few formatted
+system/user prompt samples so you can verify chat roles and prompt content.
 
 If `--download-dir` is set, outputs are downloaded into `<download-dir>/<output>`.
 Use `--delete-remote` to remove the Modal volume output after a successful download.
@@ -399,6 +399,7 @@ Takes vibe JSONL from 02a and adds config fields. Each row includes all vibe fie
 
 - `config_model`: Model used for config generation
 - `config_candidates`: Array of N config candidates (each with `thinking`, `config`, `palettes`)
+- `thinking` replaces legacy `justification` (schema still accepts `justification` as an alias)
 - `scores`: Dict with binary scores per candidate:
   - `format_valid`: 1 if parses as JSON
   - `schema_valid`: 1 if validates against MusicConfigPromptPayload
@@ -429,7 +430,7 @@ from data_work.lib.scoring_types import ScoreResult, validate_score_result
 
 # All these implement ScoreResult:
 from data_work.lib.clap_scorer import ClapScore       # final_score = final_reward
-from data_work.lib.llm_scorer import LLMScoreResult   # final_score = weighted average
+from data_work.lib.llm_scorer import LLMScoreResult   # final_score = harmonic mean (vibe_match + audio_quality)
 from data_work.lib.rewards import RewardBreakdown     # final_score = total
 from data_work.lib.eval_schema import EvalResult      # final_score = best available
 

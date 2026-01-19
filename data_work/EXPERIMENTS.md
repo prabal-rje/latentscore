@@ -22,13 +22,17 @@ Notes:
 - GRPO `--init-adapter-dir` should point at the SFT LoRA adapter in `/outputs/<name>`.
 - Run notes reflect prior tiny-run validation; re-verify for IRL.
 - Run notes are stale after chat-template + adapter-init alignment; re-run before relying on them.
+- Config generation prompts use system-role instructions with `<vibe>` in the user role; batching uses `<vibe_input index=...>` and prompt caching on the system message.
+- `04_clap_benchmark` LiteLLM sources follow the same system/user role contract (`<vibe>` in user role).
+- Config generation prompt caching can be disabled with `--no-prompt-caching` in `02b_generate_configs`.
+- Config payloads use `thinking` (legacy `justification` is still accepted by the schema).
+- LLM judge `final_score` is the harmonic mean of `vibe_match` and `audio_quality`.
 
-**Data pipeline note (2026-01-18):** The data processing pipeline has been refactored into two scripts:
+**Data pipeline note (2026-01-18):** The data processing pipeline uses two scripts:
 - `02a_extract_vibes` - Vibe extraction only (cheap model: gpt-oss-20b), dedupes on vibe content
 - `02b_generate_configs` - Best-of-N config generation (SOTA model: Claude Opus)
 
-The old `02_process_base_data` is deprecated. Experiments below using the old script should be
-migrated to the new two-step pipeline when re-running. See METHODOLOGY.md for details.
+Legacy combined-pipeline entries have been removed; follow the two-step examples when re-running.
 
 ## Core ablations
 
@@ -267,63 +271,6 @@ jq -c 'select(.vibe_level == "xs")' \
   > data_work/.experiments/vibe_xs_only/SFT-Train.jsonl
 ```
 
-**Legacy pipeline (deprecated):**
-```bash
-# base extraction for ablation (run once; reused by filters below)
-conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.outputs \
-  --output-dir data_work/.experiments/vibe_base \
-  --overwrite
-
-# raw_text_direct (no vibe extraction; reuse configs, replace vibe text with raw input text)
-conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --source-dir data_work/.experiments/vibe_base \
-  --input-dir data_work/.outputs \
-  --output-dir data_work/.experiments/vibe_raw_text \
-  --raw-text-direct \
-  --overwrite
-
-# scene_only
-conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --source-dir data_work/.experiments/vibe_base \
-  --output-dir data_work/.experiments/vibe_scene_only \
-  --filter-vibe-scope scene \
-  --overwrite
-
-# character_only
-conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --source-dir data_work/.experiments/vibe_base \
-  --output-dir data_work/.experiments/vibe_character_only \
-  --filter-vibe-scope character \
-  --overwrite
-
-# both_scopes
-conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --source-dir data_work/.experiments/vibe_base \
-  --output-dir data_work/.experiments/vibe_both_scopes \
-  --overwrite
-
-# xl_only
-conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --source-dir data_work/.experiments/vibe_base \
-  --output-dir data_work/.experiments/vibe_xl_only \
-  --filter-vibe-level xl \
-  --overwrite
-
-# xs_only
-conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --source-dir data_work/.experiments/vibe_base \
-  --output-dir data_work/.experiments/vibe_xs_only \
-  --filter-vibe-level xs \
-  --overwrite
-
-# all_levels
-conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --source-dir data_work/.experiments/vibe_base \
-  --output-dir data_work/.experiments/vibe_all_levels \
-  --overwrite
-```
-
 <!--
 Legacy Python fallback (kept for reuse):
 
@@ -496,33 +443,6 @@ conda run -n latentscore-data python -m data_work.02a_extract_vibes \
 conda run -n latentscore-data python -m data_work.02b_generate_configs \
   --input-dir data_work/.experiments/noise_0_30_vibes \
   --output-dir data_work/.experiments/noise_0_30 \
-  --overwrite
-```
-
-**Legacy pipeline (deprecated):**
-```bash
-conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.outputs \
-  --output-dir data_work/.experiments/noise_0_0 \
-  --error-rate 0.0 \
-  --overwrite
-
-conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.outputs \
-  --output-dir data_work/.experiments/noise_0_05 \
-  --error-rate 0.05 \
-  --overwrite
-
-conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.outputs \
-  --output-dir data_work/.experiments/noise_0_15 \
-  --error-rate 0.15 \
-  --overwrite
-
-conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.outputs \
-  --output-dir data_work/.experiments/noise_0_30 \
-  --error-rate 0.30 \
   --overwrite
 ```
 
@@ -953,33 +873,6 @@ conda run -n latentscore-data python -m data_work.02a_extract_vibes \
 conda run -n latentscore-data python -m data_work.02b_generate_configs \
   --input-dir data_work/.experiments/dedupe_1_0_vibes \
   --output-dir data_work/.experiments/dedupe_1_0 \
-  --overwrite
-```
-
-**Legacy pipeline (deprecated):**
-```bash
-conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.outputs \
-  --output-dir data_work/.experiments/dedupe_0_90 \
-  --dedupe-threshold 0.90 \
-  --overwrite
-
-conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.outputs \
-  --output-dir data_work/.experiments/dedupe_0_95 \
-  --dedupe-threshold 0.95 \
-  --overwrite
-
-conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.outputs \
-  --output-dir data_work/.experiments/dedupe_0_98 \
-  --dedupe-threshold 0.98 \
-  --overwrite
-
-conda run -n latentscore-data python -m data_work.02_process_base_data \
-  --input-dir data_work/.outputs \
-  --output-dir data_work/.experiments/dedupe_1_0 \
-  --dedupe-threshold 1.0 \
   --overwrite
 ```
 

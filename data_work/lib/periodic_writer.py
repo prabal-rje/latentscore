@@ -10,9 +10,21 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import cast
+
+from pydantic import BaseModel, JsonValue
 
 _LOGGER = logging.getLogger(__name__)
+
+
+JsonDict = dict[str, JsonValue]
+RowLike = BaseModel | JsonDict
+
+
+def _coerce_row(row: RowLike) -> JsonDict:
+    if isinstance(row, BaseModel):
+        return cast(JsonDict, row.model_dump(mode="json"))
+    return row
 
 
 class AsyncPeriodicWriter:
@@ -49,7 +61,7 @@ class AsyncPeriodicWriter:
         self._path = path
         self._interval = interval_seconds
         self._overwrite = overwrite
-        self._buffer: list[dict[str, Any]] = []
+        self._buffer: list[JsonDict] = []
         self._lock = asyncio.Lock()
         self._task: asyncio.Task[None] | None = None
         self._running = False
@@ -87,17 +99,19 @@ class AsyncPeriodicWriter:
 
         # Final flush
         await self._flush()
-        _LOGGER.debug("Stopped periodic writer for %s (total written: %d)", self._path, self._total_written)
+        _LOGGER.debug(
+            "Stopped periodic writer for %s (total written: %d)", self._path, self._total_written
+        )
 
-    async def add_row(self, row: dict[str, Any]) -> None:
+    async def add_row(self, row: RowLike) -> None:
         """Add a row to the buffer (will be flushed periodically)."""
         async with self._lock:
-            self._buffer.append(row)
+            self._buffer.append(_coerce_row(row))
 
-    async def add_rows(self, rows: list[dict[str, Any]]) -> None:
+    async def add_rows(self, rows: list[RowLike]) -> None:
         """Add multiple rows to the buffer."""
         async with self._lock:
-            self._buffer.extend(rows)
+            self._buffer.extend(_coerce_row(row) for row in rows)
 
     @property
     def total_written(self) -> int:
@@ -172,7 +186,7 @@ class SyncPeriodicWriter:
         self._path = path
         self._interval = interval_seconds
         self._overwrite = overwrite
-        self._buffer: list[dict[str, Any]] = []
+        self._buffer: list[JsonDict] = []
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -208,17 +222,19 @@ class SyncPeriodicWriter:
 
         # Final flush
         self._flush()
-        _LOGGER.debug("Stopped periodic writer for %s (total written: %d)", self._path, self._total_written)
+        _LOGGER.debug(
+            "Stopped periodic writer for %s (total written: %d)", self._path, self._total_written
+        )
 
-    def add_row(self, row: dict[str, Any]) -> None:
+    def add_row(self, row: RowLike) -> None:
         """Add a row to the buffer (will be flushed periodically)."""
         with self._lock:
-            self._buffer.append(row)
+            self._buffer.append(_coerce_row(row))
 
-    def add_rows(self, rows: list[dict[str, Any]]) -> None:
+    def add_rows(self, rows: list[RowLike]) -> None:
         """Add multiple rows to the buffer."""
         with self._lock:
-            self._buffer.extend(rows)
+            self._buffer.extend(_coerce_row(row) for row in rows)
 
     @property
     def total_written(self) -> int:

@@ -28,6 +28,7 @@ _LLM_MAX_TOKENS = 3_000
 _EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 _LOCAL_EMBEDDING_DIR = Path("models") / _EMBEDDING_MODEL_NAME
 _LOGGER = logging.getLogger("latentscore.models")
+_mlx_role_warning_emitted = False
 
 
 def _disable_transformers_progress() -> None:
@@ -105,6 +106,26 @@ def build_expressive_prompt() -> str:
 
 def build_litellm_prompt() -> str:
     return build_config_generation_prompt()
+
+
+def _warn_mlx_roles_once() -> None:
+    global _mlx_role_warning_emitted
+    if _mlx_role_warning_emitted:
+        return
+    _mlx_role_warning_emitted = True
+    _LOGGER.warning(
+        "MLX inference is temporary. Using chat roles for MLX prompts to match system/user "
+        "separation."
+    )
+
+
+def _build_mlx_chat_prompt(*, system_prompt: str, vibe: str, tokenizer: Any) -> str:
+    _warn_mlx_roles_once()
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"<vibe>{vibe}</vibe>"},
+    ]
+    return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
 
 class ExampleConfig(BaseModel):
@@ -436,7 +457,7 @@ class ExpressiveMlxModel:
             spinner.stop()
 
     @functools.lru_cache(maxsize=1)
-    def _load_model(self) -> Any:
+    def _load_model(self) -> tuple[Any, Any]:
         try:
             self.check_dependencies()
         except ModelNotAvailableError as exc:
@@ -463,16 +484,20 @@ class ExpressiveMlxModel:
         model_any: Any = model
         tokenizer_any: Any = tokenizer
         outlines_any: Any = outlines
-        return outlines_any.from_mlxlm(model_any, tokenizer_any)
+        return outlines_any.from_mlxlm(model_any, tokenizer_any), tokenizer_any
 
-    def _build_prompt(self, vibe: str) -> str:
-        return f"{build_expressive_prompt()}\n\n{vibe}\n"
+    def _build_prompt(self, tokenizer: Any, vibe: str) -> str:
+        return _build_mlx_chat_prompt(
+            system_prompt=build_expressive_prompt(),
+            vibe=vibe,
+            tokenizer=tokenizer,
+        )
 
     def _generate_sync(self, vibe: str) -> MusicConfig:
-        model = self._load_model()
+        model, tokenizer = self._load_model()
         last_error: Exception | None = None
         for _ in range(self._max_retries):
-            prompt = self._build_prompt(vibe)
+            prompt = self._build_prompt(tokenizer, vibe)
             try:
                 raw = model(prompt, output_type=MusicConfig, max_tokens=_LLM_MAX_TOKENS)
                 return MusicConfig.model_validate_json(raw)

@@ -256,7 +256,7 @@ class MusicConfigPromptPayload(BaseModel):
 
     thinking: str = Field(
         ...,
-        alias="justification",
+        validation_alias="justification",
         max_length=MAX_LONG_FIELD_CHARS,
         description=PROMPT_DESC["thinking"],
     )
@@ -271,7 +271,7 @@ class MusicConfigPromptPayload(BaseModel):
 
 def schema_signature() -> str:
     """Return the JSON schema as a compact string for prompts."""
-    schema = MusicConfigPromptPayload.model_json_schema()
+    schema = MusicConfigPromptPayload.model_json_schema(by_alias=False)
     return json.dumps(schema, sort_keys=True, separators=(",", ":"))
 
 

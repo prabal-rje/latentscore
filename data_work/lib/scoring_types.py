@@ -16,6 +16,8 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import Any, Protocol, TypeVar, runtime_checkable
 
+from pydantic import JsonValue
+
 
 @runtime_checkable
 class ScoreResult(Protocol):
@@ -47,6 +49,7 @@ class ScoreResult(Protocol):
 
 # Type variable for generic score result handling
 T_ScoreResult = TypeVar("T_ScoreResult", bound=ScoreResult)
+JsonDict = dict[str, JsonValue]
 
 
 def validate_score_result(result: Any, source: str = "scorer") -> None:
@@ -73,12 +76,10 @@ def validate_score_result(result: Any, source: str = "scorer") -> None:
         )
 
     if not (0.0 <= score <= 1.0):
-        raise ValueError(
-            f"Scorer '{source}' final_score must be in [0.0, 1.0], got {score}"
-        )
+        raise ValueError(f"Scorer '{source}' final_score must be in [0.0, 1.0], got {score}")
 
 
-def score_result_to_dict(result: ScoreResult) -> dict[str, Any]:
+def score_result_to_dict(result: ScoreResult) -> JsonDict:
     """Convert a ScoreResult to a dict, ensuring final_score is included.
 
     Works with Pydantic models (via model_dump) or any object with __dict__.
@@ -91,7 +92,7 @@ def score_result_to_dict(result: ScoreResult) -> dict[str, Any]:
     """
     # Try Pydantic model_dump first
     if hasattr(result, "model_dump"):
-        data = result.model_dump()
+        data = result.model_dump(mode="json")
     elif hasattr(result, "__dict__"):
         data = dict(result.__dict__)
     else:
@@ -114,7 +115,7 @@ class DictScoreResult:
         validate_score_result(result)  # OK
     """
 
-    def __init__(self, data: dict[str, Any]) -> None:
+    def __init__(self, data: JsonDict) -> None:
         """Initialize with a dict containing final_score.
 
         Args:
@@ -132,14 +133,14 @@ class DictScoreResult:
         """Return the final score from the wrapped dict."""
         return float(self._data["final_score"])
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> JsonDict:
         """Return the underlying dict."""
         return dict(self._data)
 
-    def __getitem__(self, key: str) -> Any:
+    def __getitem__(self, key: str) -> JsonValue:
         """Allow dict-like access."""
         return self._data[key]
 
-    def get(self, key: str, default: Any = None) -> Any:
+    def get(self, key: str, default: JsonValue | None = None) -> JsonValue | None:
         """Allow dict-like get access."""
         return self._data.get(key, default)

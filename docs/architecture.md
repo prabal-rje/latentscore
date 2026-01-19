@@ -6,7 +6,8 @@ The `data_work/` folder is a standalone data pipeline outside the core package.
 
 **Pipeline flow**
 - `data_work/01_download_base_data.py` → download + sample raw text → `data_work/.outputs/`
-- `data_work/02_process_base_data.py` → schema validation + vibe/config generation → `data_work/.processed/`
+- `data_work/02a_extract_vibes.py` → vibe extraction + dedupe → `data_work/.vibes/`
+- `data_work/02b_generate_configs.py` → config generation (Best-of-N) → `data_work/.processed/`
 - `data_work/03_modal_train.py` → Modal SFT/GRPO training → `data_work/.modal_outputs/`
 - `data_work/04_clap_benchmark.py` → CLAP scoring + model comparisons
 - `data_work/05_export_models.py` → merge LoRA adapters → `data_work/.exports/`
@@ -30,7 +31,7 @@ The pipeline uses two schema formats for music configs that require conversion:
 
 ```
 MusicConfigPromptPayload (LLM output)
-├── justification: str
+├── thinking: str
 ├── config: MusicConfigPrompt  ← string labels ("sparse", "light", "medium")
 └── palettes: list[Palette]
 

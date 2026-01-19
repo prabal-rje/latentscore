@@ -524,7 +524,7 @@ class MusicConfigPromptPayload(BaseModel):
         ...,
         max_length=MAX_LONG_FIELD_CHARS,
         description=_PROMPT_DESC["thinking"],
-        alias="justification",
+        validation_alias="justification",
     )
     config: MusicConfigPrompt = Field(description=_PROMPT_DESC["config"])
     palettes: list[Palette] = Field(

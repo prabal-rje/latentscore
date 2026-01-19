@@ -1,7 +1,10 @@
+import json
+
 from data_work.lib.music_schema import (
     MusicConfigPromptPayload,
     repair_palette_duplicates,
     schema_hash,
+    schema_signature,
 )
 
 
@@ -153,6 +156,12 @@ def test_music_schema_accepts_justification_alias() -> None:
     }
     parsed = MusicConfigPromptPayload.model_validate(payload)
     assert parsed.thinking == "Alias input still works."
+
+
+def test_schema_signature_uses_thinking_key() -> None:
+    schema = json.loads(schema_signature())
+    assert "thinking" in schema["properties"]
+    assert "justification" not in schema["properties"]
 
 
 def test_music_schema_hash_stable() -> None:

@@ -270,13 +270,15 @@ async def evaluate_source(
         # LLM-based audio scoring (optional)
         llm_vibe_match: float | None = None
         llm_audio_quality: float | None = None
-        llm_creativity: float | None = None
-        llm_justification: str | None = None
+        llm_thinking: str | None = None
         llm_score_value: float | None = None
 
         if llm_scorer is not None and config is not None and schema_valid:
             try:
-                from data_work.lib.llm_scorer import score_config_with_llm_detailed_async
+                from data_work.lib.llm_scorer import (
+                    compute_llm_final_score,
+                    score_config_with_llm_detailed_async,
+                )
 
                 llm_detailed = await score_config_with_llm_detailed_async(
                     vibe=prompt.prompt,
@@ -286,13 +288,10 @@ async def evaluate_source(
                 )
                 llm_vibe_match = llm_detailed.vibe_match
                 llm_audio_quality = llm_detailed.audio_quality
-                llm_creativity = llm_detailed.creativity
-                llm_justification = llm_detailed.justification
+                llm_thinking = llm_detailed.thinking
 
-                # Compute weighted overall score
-                llm_score_value = (
-                    llm_vibe_match * 0.6 + llm_audio_quality * 0.25 + llm_creativity * 0.15
-                )
+                # Compute overall score (harmonic mean of vibe match + audio quality)
+                llm_score_value = compute_llm_final_score(llm_vibe_match, llm_audio_quality)
             except ValidationError as exc:
                 llm_error = f"SchemaError: {exc}"
                 error_tags.append(ErrorTag.LLM_SCHEMA_ERROR)
@@ -316,8 +315,7 @@ async def evaluate_source(
             clap_error=clap_error,
             llm_vibe_match=llm_vibe_match,
             llm_audio_quality=llm_audio_quality,
-            llm_creativity=llm_creativity,
-            llm_justification=llm_justification,
+            llm_thinking=llm_thinking,
             llm_score=llm_score_value,
             llm_error=llm_error,
             error_tags=error_tags,
@@ -377,9 +375,6 @@ def compute_metrics(
     llm_audio_qualities = [r.llm_audio_quality for r in results if r.llm_audio_quality is not None]
     llm_audio_quality_mean = statistics.mean(llm_audio_qualities) if llm_audio_qualities else None
 
-    llm_creativities = [r.llm_creativity for r in results if r.llm_creativity is not None]
-    llm_creativity_mean = statistics.mean(llm_creativities) if llm_creativities else None
-
     # Field distributions
     field_distributions = compute_field_distributions(results)
 
@@ -424,7 +419,6 @@ def compute_metrics(
         llm_score_std=llm_score_std,
         llm_vibe_match_mean=llm_vibe_match_mean,
         llm_audio_quality_mean=llm_audio_quality_mean,
-        llm_creativity_mean=llm_creativity_mean,
         n_config_errors=n_config_errors,
         n_clap_errors=n_clap_errors,
         n_llm_errors=n_llm_errors,
@@ -491,8 +485,6 @@ def write_results(
                 f.write(f"- Vibe Match Mean: {metrics.llm_vibe_match_mean:.3f}\n")
             if metrics.llm_audio_quality_mean is not None:
                 f.write(f"- Audio Quality Mean: {metrics.llm_audio_quality_mean:.3f}\n")
-            if metrics.llm_creativity_mean is not None:
-                f.write(f"- Creativity Mean: {metrics.llm_creativity_mean:.3f}\n")
             f.write("\n")
 
         if metrics.inference_time_mean_ms is not None:
@@ -726,10 +718,8 @@ async def main_async(args: argparse.Namespace) -> None:
     clap_scorer = None
     if args.include_clap:
         try:
-            import importlib
+            from data_work.lib.clap_scorer import ClapScorer
 
-            clap_module = importlib.import_module("data_work.04_clap_benchmark")
-            ClapScorer = clap_module.ClapScorer  # noqa: N806
             clap_scorer = ClapScorer()
             LOGGER.info("CLAP scorer initialized")
         except ImportError:
@@ -791,8 +781,6 @@ async def main_async(args: argparse.Namespace) -> None:
                 print(f"  Vibe Match: {metrics.llm_vibe_match_mean:.3f}")
             if metrics.llm_audio_quality_mean is not None:
                 print(f"  Audio Quality: {metrics.llm_audio_quality_mean:.3f}")
-            if metrics.llm_creativity_mean is not None:
-                print(f"  Creativity: {metrics.llm_creativity_mean:.3f}")
         if metrics.inference_time_mean_ms is not None:
             print(f"Inference Time Mean: {metrics.inference_time_mean_ms:.1f}ms")
 

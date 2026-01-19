@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import json
 import logging
-import math
 import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -19,6 +18,8 @@ if __package__ is None and __name__ == "__main__":
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# Import shared ClapScore + ClapScorer
+from data_work.lib.clap_scorer import ClapScore, ClapScorer
 from data_work.lib.jsonl_io import iter_jsonl
 from data_work.lib.llm_client import (
     LocalHFClient,
@@ -27,15 +28,13 @@ from data_work.lib.llm_client import (
     load_env_file,
     normalize_model_and_base,
     resolve_api_key_for_models,
+    wrap_vibe_for_chat,
 )
 from data_work.lib.music_prompt import build_music_prompt
 from data_work.lib.music_schema import MusicConfigPromptPayload
 from latentscore.audio import write_wav
 from latentscore.config import MusicConfig, MusicConfigPrompt
 from latentscore.synth import assemble
-
-# Import shared ClapScore (implements ScoreResult protocol)
-from data_work.lib.clap_scorer import ClapScore
 
 LOGGER = logging.getLogger("data_work.clap_benchmark")
 
@@ -44,26 +43,6 @@ DEFAULT_VIBE_FIELD = "vibe_original"
 DEFAULT_OUTPUT_DIR = Path("data_work/.benchmarks")
 DEFAULT_DURATION = 12.0
 DEFAULT_MAX_NEW_TOKENS = 512
-
-BAD_CONCEPTS = [
-    "bad",
-    "terrible",
-    "awful",
-    "discordant",
-    "unharmonious",
-    "cacophony",
-    "noise",
-    "unpleasant",
-    "harsh",
-    "grating",
-    "off-key",
-    "out of tune",
-    "distorted badly",
-    "broken audio",
-    "annoying sound",
-    "painful to listen to",
-    "low quality audio",
-]
 
 
 class BenchmarkSource(BaseModel):
@@ -104,60 +83,6 @@ class ModelSummary(BaseModel):
 
     count: int
     mean_clap_reward: float
-
-
-class ClapScorer:
-    def __init__(self) -> None:
-        try:
-            import laion_clap  # type: ignore[import]
-        except ImportError as exc:
-            raise SystemExit(
-                "laion_clap is required. Install via data_work/requirements.txt."
-            ) from exc
-
-        self._model = laion_clap.CLAP_Module(enable_fusion=False)
-        self._model.load_ckpt()
-        self._bad_embedding: np.ndarray | None = None
-
-    def _get_bad_embedding(self) -> np.ndarray:
-        if self._bad_embedding is None:
-            embeddings = self._model.get_text_embedding(BAD_CONCEPTS)
-            self._bad_embedding = embeddings.mean(axis=0, keepdims=True)
-        return self._bad_embedding
-
-    @staticmethod
-    def _softplus(value: float, beta: float = 1.0) -> float:
-        return (1.0 / beta) * math.log(1.0 + math.exp(beta * value))
-
-    @staticmethod
-    def _cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
-        numerator = float(a @ b.T)
-        denom = float(np.linalg.norm(a) * np.linalg.norm(b) + 1e-8)
-        return numerator / denom
-
-    def score(self, vibe: str, audio_path: str) -> ClapScore:
-        """Score audio against vibe text using CLAP embeddings."""
-        text_embed = self._model.get_text_embedding([vibe])
-        audio_embed = self._model.get_audio_embedding_from_filelist([audio_path])
-        bad_embed = self._get_bad_embedding()
-
-        audio_text_sim = self._cosine_sim(audio_embed, text_embed)
-        audio_bad_sim = self._cosine_sim(audio_embed, bad_embed)
-        text_bad_sim = self._cosine_sim(text_embed, bad_embed)
-        excess_badness = audio_bad_sim - text_bad_sim
-        penalty = self._softplus(excess_badness, beta=5.0)
-        raw_score = self._softplus(audio_text_sim, beta=2.0) - 0.5 * penalty
-        reward = float(np.clip(math.exp(raw_score - 1.0), 0.0, 1.0))
-
-        return ClapScore(
-            audio_text_similarity=float(audio_text_sim),
-            audio_bad_similarity=float(audio_bad_sim),
-            text_bad_similarity=float(text_bad_sim),
-            excess_badness=float(excess_badness),
-            penalty=float(penalty),
-            raw_score=float(raw_score),
-            final_reward=reward,
-        )
 
 
 def parse_source_entries(values: Sequence[str], kind: str) -> list[BenchmarkSource]:
@@ -245,7 +170,7 @@ async def _generate_litellm_payload(
 ) -> MusicConfigPromptPayload:
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": vibe},
+        {"role": "user", "content": wrap_vibe_for_chat(vibe)},
     ]
     return await litellm_structured_completion(
         model=model,

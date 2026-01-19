@@ -72,6 +72,9 @@ DEFAULT_GRPO_TEMPERATURE = 0.7
 DEFAULT_GRPO_TOP_P = 0.8
 DEFAULT_GRPO_TOP_K = 20
 
+DEBUG_PROMPT_TRUNCATE = 400
+DEBUG_PROMPT_MAX_DEFAULT = 1
+
 PROMPT_REGISTRY_NAMES = list_prompts()
 PROMPT_REGISTRY_HELP = ", ".join(sorted(PROMPT_REGISTRY_NAMES))
 
@@ -200,6 +203,8 @@ class SftConfig(BaseModel):
     wandb_project: str | None
     wandb_entity: str | None
     wandb_run_name: str | None
+    debug_prompts: bool = False
+    debug_prompts_max: int = DEBUG_PROMPT_MAX_DEFAULT
 
 
 class GrpoConfig(BaseModel):
@@ -242,6 +247,8 @@ class GrpoConfig(BaseModel):
     wandb_project: str | None
     wandb_entity: str | None
     wandb_run_name: str | None
+    debug_prompts: bool = False
+    debug_prompts_max: int = DEBUG_PROMPT_MAX_DEFAULT
 
 
 _VIBE_TAG_RE = re.compile(r"<vibe>(.*?)</vibe>", re.DOTALL)
@@ -254,6 +261,39 @@ def _clean_completion(text: str) -> str:
     if "<think>" in cleaned and "</think>" in cleaned:
         cleaned = cleaned.split("</think>", 1)[1]
     return cleaned.strip()
+
+
+def _truncate_debug_text(value: str, limit: int = DEBUG_PROMPT_TRUNCATE) -> str:
+    if limit <= 0 or len(value) <= limit:
+        return value
+    head = value[: limit // 2]
+    tail = value[-limit // 2 :]
+    return f"{head}...<snip {len(value) - limit} chars>...{tail}"
+
+
+def _log_prompt_sample(
+    *,
+    stage: str,
+    sample_idx: int,
+    system_prompt: str,
+    user_prompt: str,
+    rendered_prompt: str,
+    response: str | None,
+) -> None:
+    lines = [
+        (
+            f"[TRAIN_DEBUG] {stage} sample {sample_idx}: system_len={len(system_prompt)} "
+            f"user_len={len(user_prompt)} rendered_len={len(rendered_prompt)}"
+        ),
+        f"[TRAIN_DEBUG] {stage} system_head={_truncate_debug_text(repr(system_prompt))}",
+        f"[TRAIN_DEBUG] {stage} user_prompt={_truncate_debug_text(repr(user_prompt))}",
+        f"[TRAIN_DEBUG] {stage} rendered_head={_truncate_debug_text(repr(rendered_prompt))}",
+    ]
+    if response is not None:
+        lines.append(f"[TRAIN_DEBUG] {stage} assistant_head={_truncate_debug_text(repr(response))}")
+    for line in lines:
+        LOGGER.info("%s", line)
+        print(line)
 
 
 def _ensure_output_dir(path: Path, overwrite: bool) -> None:
@@ -675,6 +715,9 @@ def run_sft(config: dict[str, Any]) -> str:
             )
 
     dataset = datasets.load_dataset("json", data_files=sft.data_file, split="train")
+    debug_prompts = sft.debug_prompts
+    debug_limit = max(0, sft.debug_prompts_max)
+    debug_count = 0
 
     def has_prompt(example: dict[str, Any]) -> bool:
         return example.get(sft.prompt_field) not in (None, "")
@@ -686,19 +729,38 @@ def run_sft(config: dict[str, Any]) -> str:
     dataset = dataset.filter(has_response)
 
     def format_example(example: dict[str, Any]) -> dict[str, str]:
+        nonlocal debug_count
         prompt = str(example[sft.prompt_field])
         response = json.dumps(example[sft.response_field], ensure_ascii=False)
+        user_prompt = wrap_vibe_for_chat(prompt)
         text = render_chat_prompt(
             system_prompt=sft.system_prompt,
-            user_prompt=wrap_vibe_for_chat(prompt),
+            user_prompt=user_prompt,
             tokenizer=tokenizer,
             model_name=sft.base_model,
             add_generation_prompt=False,
             assistant=response,
         )
+        if debug_prompts and debug_count < debug_limit:
+            debug_count += 1
+            _log_prompt_sample(
+                stage="SFT",
+                sample_idx=debug_count,
+                system_prompt=sft.system_prompt,
+                user_prompt=user_prompt,
+                rendered_prompt=text,
+                response=response,
+            )
         return {DEFAULT_DATASET_TEXT_FIELD: text}
 
-    dataset = dataset.map(format_example, remove_columns=dataset.column_names)
+    map_kwargs = {}
+    if debug_prompts:
+        map_kwargs["load_from_cache_file"] = False
+    dataset = dataset.map(
+        format_example,
+        remove_columns=dataset.column_names,
+        **map_kwargs,
+    )
 
     observed_max_length = _estimate_max_token_length(
         (example[DEFAULT_DATASET_TEXT_FIELD] for example in dataset),
@@ -880,6 +942,9 @@ def run_grpo(config: dict[str, Any]) -> str:
     _configure_torch_dynamo()
 
     dataset = datasets.load_dataset("json", data_files=grpo.data_file, split="train")
+    debug_prompts = grpo.debug_prompts
+    debug_limit = max(0, grpo.debug_prompts_max)
+    debug_count = 0
 
     def has_prompt(example: dict[str, Any]) -> bool:
         return example.get(grpo.prompt_field) not in (None, "")
@@ -887,17 +952,36 @@ def run_grpo(config: dict[str, Any]) -> str:
     dataset = dataset.filter(has_prompt)
 
     def format_prompts(example: dict[str, Any]) -> dict[str, str]:
+        nonlocal debug_count
         vibe = str(example[grpo.prompt_field])
+        user_prompt = wrap_vibe_for_chat(vibe)
         text = render_chat_prompt(
             system_prompt=grpo.system_prompt,
-            user_prompt=wrap_vibe_for_chat(vibe),
+            user_prompt=user_prompt,
             tokenizer=tokenizer,
             model_name=grpo.base_model,
             add_generation_prompt=True,
         )
+        if debug_prompts and debug_count < debug_limit:
+            debug_count += 1
+            _log_prompt_sample(
+                stage="GRPO",
+                sample_idx=debug_count,
+                system_prompt=grpo.system_prompt,
+                user_prompt=user_prompt,
+                rendered_prompt=text,
+                response=None,
+            )
         return {"prompt": text, "vibe": vibe}
 
-    dataset = dataset.map(format_prompts, remove_columns=dataset.column_names)
+    map_kwargs = {}
+    if debug_prompts:
+        map_kwargs["load_from_cache_file"] = False
+    dataset = dataset.map(
+        format_prompts,
+        remove_columns=dataset.column_names,
+        **map_kwargs,
+    )
 
     observed_max_length = _estimate_max_token_length(
         (example["prompt"] for example in dataset),
@@ -1072,6 +1156,17 @@ def _build_parser(show_advanced: bool) -> argparse.ArgumentParser:
             type=int,
             default=DEFAULT_MAX_SEQ_LEN,
             help="Maximum sequence length for tokenization.",
+        )
+        subparser.add_argument(
+            "--debug-prompts",
+            action="store_true",
+            help="Log formatted prompt samples (system/user/renderer) for verification.",
+        )
+        subparser.add_argument(
+            "--debug-prompts-max",
+            type=int,
+            default=DEBUG_PROMPT_MAX_DEFAULT,
+            help="Maximum number of prompt samples to log when --debug-prompts is set.",
         )
         subparser.add_argument(
             "--overwrite",
@@ -1549,6 +1644,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                         wandb_project=training_config.logging.wandb_project,
                         wandb_entity=training_config.logging.wandb_entity,
                         wandb_run_name=args.wandb_run_name,
+                        debug_prompts=args.debug_prompts,
+                        debug_prompts_max=args.debug_prompts_max,
                     )
                     LOGGER.info(
                         "Using TrainingConfig: %s", training_config.model_dump_json(indent=2)
@@ -1596,6 +1693,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                         wandb_project=training_config.logging.wandb_project,
                         wandb_entity=training_config.logging.wandb_entity,
                         wandb_run_name=args.wandb_run_name,
+                        debug_prompts=args.debug_prompts,
+                        debug_prompts_max=args.debug_prompts_max,
                     )
                     LOGGER.info(
                         "Using TrainingConfig: %s", training_config.model_dump_json(indent=2)

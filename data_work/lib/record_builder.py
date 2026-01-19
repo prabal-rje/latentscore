@@ -2,27 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal
 
+from data_work.lib.pipeline_models import VibeRow
 from data_work.lib.vibe_schema import VibeDescriptor, VibeResponse
 
 VibeLevel = Literal["xl", "lg", "m", "sm", "xs"]
-VibeScope = Literal["character", "scene"]
-
-
-class VibeRow(TypedDict):
-    dataset: str
-    id_in_dataset: Any
-    split: str
-    vibe_index: int
-    text_page: tuple[int, int]
-    vibe_scope: VibeScope
-    character_name: str | None
-    vibe_level: VibeLevel
-    vibe_original: str
-    vibe_noisy: str
-    tags_original: list[str]
-    tags_noisy: list[str]
 
 
 _LEVELS: tuple[tuple[VibeLevel, str], ...] = (
@@ -86,27 +71,29 @@ def build_vibe_rows(
             ):
                 for level, original_text, noisy_text in _iter_levels(orig_desc, noisy_desc):
                     rows.append(
-                        {
+                        VibeRow(
                             **base,
-                            "vibe_scope": "character",
-                            "character_name": original_char.character_name,
-                            "vibe_level": level,
-                            "vibe_original": original_text,
-                            "vibe_noisy": noisy_text,
-                        }
+                            vibe_scope="character",
+                            character_name=original_char.character_name,
+                            vibe_level=level,
+                            vibe_original=original_text,
+                            vibe_noisy=noisy_text,
+                            vibe_model="",
+                        )
                     )
         for orig_desc, noisy_desc in _pair_descriptors(
             original_obj.scene_vibes, noisy_obj.scene_vibes
         ):
             for level, original_text, noisy_text in _iter_levels(orig_desc, noisy_desc):
                 rows.append(
-                    {
+                    VibeRow(
                         **base,
-                        "vibe_scope": "scene",
-                        "character_name": None,
-                        "vibe_level": level,
-                        "vibe_original": original_text,
-                        "vibe_noisy": noisy_text,
-                    }
+                        vibe_scope="scene",
+                        character_name=None,
+                        vibe_level=level,
+                        vibe_original=original_text,
+                        vibe_noisy=noisy_text,
+                        vibe_model="",
+                    )
                 )
     return rows

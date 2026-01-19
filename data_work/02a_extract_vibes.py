@@ -36,23 +36,24 @@ import logging
 import random
 import sys
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Mapping, Sequence
+from typing import Any, Awaitable, Callable, Sequence
 
 if __package__ is None and __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from data_work.lib.dedupe import dedupe_vibe_rows, diversity_sample_rows
 from data_work.lib.jsonl_io import iter_jsonl
 from data_work.lib.llm_cache import SqliteCache, cached_async
-from data_work.lib.periodic_writer import AsyncPeriodicWriter
 from data_work.lib.llm_client import (
     litellm_structured_completion,
     load_env_file,
     normalize_model_and_base,
     resolve_api_key_for_models,
 )
+from data_work.lib.periodic_writer import AsyncPeriodicWriter
+from data_work.lib.pipeline_models import BaseRecord, JsonDict, VibeRow
 from data_work.lib.record_builder import build_vibe_rows
 from data_work.lib.resilience import (
     AsyncRateLimiter,
@@ -96,22 +97,14 @@ RUN_CONFIG_NAME = "run_config.json"
 PROGRESS_FILE_NAME = "_progress.jsonl"
 
 
-class BaseRecord(BaseModel):
-    """Input record from 01_download_base_data."""
-
-    created: str
-    metadata: dict[str, Any]
-    dataset: str
-    id_in_dataset: Any = Field(alias="id_in_dataset")
-    text: str
-
-
 class RecordResult(BaseModel):
     """Result of processing a single input record."""
 
+    model_config = ConfigDict(extra="forbid")
+
     dataset: str
-    id_in_dataset: Any
-    rows: list[dict[str, Any]] = Field(default_factory=list)
+    id_in_dataset: str | int
+    rows: list[VibeRow] = Field(default_factory=list)
     error: str | None = None
 
 
@@ -302,9 +295,9 @@ def build_cache_payload(
     page_tokens: int,
     prompt_hash: str,
     error_rate: float,
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, JsonDict]:
     """Build cache key and payload for LLM call."""
-    payload: dict[str, Any] = {
+    payload: JsonDict = {
         "schema_hash": schema_hash(),
         "dataset_hash": dataset_hash,
         "record_id": record_id,
@@ -456,7 +449,7 @@ async def process_record(
     record: BaseRecord,
     dataset_hash: str,
     system_prompt: str,
-    llm_call: Callable[[str, str, dict[str, Any]], Awaitable[VibeResponse]],
+    llm_call: Callable[[str, str, JsonDict], Awaitable[VibeResponse]],
     error_rate: float,
     noise_lock: asyncio.Lock,
     model: str,
@@ -508,9 +501,7 @@ async def process_record(
             noisy=noisy,
         )
 
-        # Add vibe_model to each row
-        for row in rows:
-            row["vibe_model"] = model
+        rows = [row.model_copy(update={"vibe_model": model}) for row in rows]
 
         return RecordResult(
             dataset=record.dataset,
@@ -529,26 +520,24 @@ async def process_record(
         )
 
 
-def _row_is_noisy(row: Mapping[str, Any]) -> bool:
+def _row_is_noisy(row: VibeRow) -> bool:
     """Check if row has been noise-corrupted."""
-    return row.get("vibe_noisy") != row.get("vibe_original") or row.get(
-        "tags_noisy"
-    ) != row.get("tags_original")
+    return row.vibe_noisy != row.vibe_original or row.tags_noisy != row.tags_original
 
 
-def _row_noise_key(row: Mapping[str, Any], error_seed: int, dataset_hash: str) -> int:
+def _row_noise_key(row: VibeRow, error_seed: int, dataset_hash: str) -> int:
     """Compute deterministic noise key for row."""
     combined = (
         f"{error_seed}:{dataset_hash}:"
-        f"{row.get('id_in_dataset')}:{row.get('vibe_index')}:"
-        f"{row.get('vibe_scope')}:{row.get('vibe_level')}"
+        f"{row.id_in_dataset}:{row.vibe_index}:"
+        f"{row.vibe_scope}:{row.vibe_level}"
     )
     digest = hashlib.sha256(combined.encode("utf-8")).hexdigest()
     return int(digest[:8], 16)
 
 
 def _force_noise_row(
-    rows: list[dict[str, Any]],
+    rows: list[VibeRow],
     *,
     error_seed: int,
     dataset_hash: str,
@@ -564,21 +553,28 @@ def _force_noise_row(
         _LOGGER.warning("nlpaug not installed for fallback noise: %s", exc)
         return
 
-    target = min(rows, key=lambda row: _row_noise_key(row, error_seed, dataset_hash))
+    target_index = min(
+        range(len(rows)),
+        key=lambda idx: _row_noise_key(rows[idx], error_seed, dataset_hash),
+    )
+    target = rows[target_index]
     nlpaug_util.Randomness.seed(error_seed)
     augmenter = RandomCharAug(action="substitute", aug_char_p=DEFAULT_FORCE_CHAR_AUG_P)
-    original = str(target.get("vibe_original") or "")
-    target["vibe_noisy"] = _augment_text(augmenter, original)
-    tags_value = target.get("tags_original") or []
-    tags = [str(tag) for tag in tags_value]
-    target["tags_noisy"] = [_augment_text(augmenter, tag) for tag in tags]
+    original = str(target.vibe_original or "")
+    tags = [str(tag) for tag in target.tags_original]
+    rows[target_index] = target.model_copy(
+        update={
+            "vibe_noisy": _augment_text(augmenter, original),
+            "tags_noisy": [_augment_text(augmenter, tag) for tag in tags],
+        }
+    )
 
 
 def split_vibe_rows(
-    rows: list[dict[str, Any]],
+    rows: list[VibeRow],
     seed: int,
     dedupe_model: str,
-) -> dict[str, list[dict[str, Any]]]:
+) -> dict[str, list[VibeRow]]:
     """Split vibe rows into train/val/GRPO/test with diversity sampling for GRPO.
 
     Splitting order (for scientific validity):
@@ -607,13 +603,13 @@ def split_vibe_rows(
 
     test_count = split_counts["TEST"]
     test_indices = set(indices[:test_count])
-    test_rows = [rows[i] for i in sorted(test_indices)]
+    test_rows = [rows[i].model_copy(update={"split": "TEST"}) for i in sorted(test_indices)]
 
     # Step 2: Random sample for SFT-Val (evaluation - must predict TEST)
     remaining_after_test = [i for i in indices if i not in test_indices]
     val_count = split_counts["SFT-Val"]
     val_indices = set(remaining_after_test[:val_count])
-    val_rows = [rows[i] for i in sorted(val_indices)]
+    val_rows = [rows[i].model_copy(update={"split": "SFT-Val"}) for i in sorted(val_indices)]
 
     # Pool for training (after removing evaluation sets)
     train_pool_indices = [i for i in remaining_after_test if i not in val_indices]
@@ -630,22 +626,17 @@ def split_vibe_rows(
             seed=seed,
         )
         grpo_indices_set = set(grpo_local_indices)
+        grpo_rows = [row.model_copy(update={"split": "GRPO"}) for row in grpo_rows]
     else:
         grpo_rows = []
         grpo_indices_set = set()
 
     # Step 4: SFT-Train gets the leftovers
-    train_rows = [r for i, r in enumerate(train_pool) if i not in grpo_indices_set]
-
-    # Assign split names to rows
-    for row in test_rows:
-        row["split"] = "TEST"
-    for row in val_rows:
-        row["split"] = "SFT-Val"
-    for row in grpo_rows:
-        row["split"] = "GRPO"
-    for row in train_rows:
-        row["split"] = "SFT-Train"
+    train_rows = [
+        row.model_copy(update={"split": "SFT-Train"})
+        for i, row in enumerate(train_pool)
+        if i not in grpo_indices_set
+    ]
 
     return {
         "SFT-Train": train_rows,
@@ -690,9 +681,7 @@ async def main_async(args: argparse.Namespace) -> None:
     for split_name, _ in SPLITS:
         output_path = output_dir / f"{split_name}.jsonl"
         if output_path.exists() and not args.overwrite:
-            raise SystemExit(
-                f"Output exists: {output_path}. Use --overwrite to replace."
-            )
+            raise SystemExit(f"Output exists: {output_path}. Use --overwrite to replace.")
 
     # Load environment and setup API
     load_env_file(args.env_file)
@@ -739,9 +728,7 @@ async def main_async(args: argparse.Namespace) -> None:
 
     semaphore = asyncio.Semaphore(args.max_concurrency)
     limiter = AsyncRateLimiter(args.max_qps)
-    tracker = EWMAErrorTracker(
-        alpha=args.ewma_alpha, min_samples=args.ewma_min_samples
-    )
+    tracker = EWMAErrorTracker(alpha=args.ewma_alpha, min_samples=args.ewma_min_samples)
     noise_lock = asyncio.Lock()
 
     @cached_async(
@@ -753,9 +740,7 @@ async def main_async(args: argparse.Namespace) -> None:
     @retry_async(max_retries=args.max_retries, base_delay=args.retry_base_delay, logger=_LOGGER)
     @rate_limited(limiter)
     @with_semaphore(semaphore)
-    async def cached_call(
-        paged_text: str, cache_key: str, payload: dict[str, Any]
-    ) -> VibeResponse:
+    async def cached_call(paged_text: str, cache_key: str, payload: JsonDict) -> VibeResponse:
         return await call_llm(
             paged_text=paged_text,
             model=model,
@@ -799,11 +784,10 @@ async def main_async(args: argparse.Namespace) -> None:
         return index, result
 
     tasks = [
-        asyncio.create_task(bound_process(index, record))
-        for index, record in enumerate(records)
+        asyncio.create_task(bound_process(index, record)) for index, record in enumerate(records)
     ]
 
-    all_rows: list[dict[str, Any]] = []
+    all_rows: list[VibeRow] = []
     error_count = 0
     abort_event = asyncio.Event()
 
@@ -816,9 +800,7 @@ async def main_async(args: argparse.Namespace) -> None:
                 tracker.update(success=result.error is None)
                 if result.error:
                     error_count += 1
-                    _LOGGER.warning(
-                        "Record %s failed: %s", result.id_in_dataset, result.error
-                    )
+                    _LOGGER.warning("Record %s failed: %s", result.id_in_dataset, result.error)
                 else:
                     all_rows.extend(result.rows)
                     # Write to progress file periodically
@@ -884,9 +866,7 @@ async def main_async(args: argparse.Namespace) -> None:
         if args.error_rate > 0 and split_rows:
             noisy_count = sum(1 for row in split_rows if _row_is_noisy(row))
             if noisy_count == 0:
-                _LOGGER.warning(
-                    "Split %s has no noisy rows; forcing noise on one.", split_name
-                )
+                _LOGGER.warning("Split %s has no noisy rows; forcing noise on one.", split_name)
                 _force_noise_row(split_rows, error_seed=args.seed, dataset_hash=dataset_hash)
 
     # Write outputs (incrementally to each split file)
@@ -898,7 +878,7 @@ async def main_async(args: argparse.Namespace) -> None:
 
         with output_path.open("a", encoding="utf-8") as f:
             for row in split_rows:
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+                f.write(json.dumps(row.model_dump(mode="json"), ensure_ascii=False) + "\n")
                 f.flush()  # Ensure written to disk
 
         _LOGGER.info("  Wrote %d rows to %s", len(split_rows), output_path)

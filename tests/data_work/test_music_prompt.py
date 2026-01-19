@@ -30,3 +30,8 @@ def test_music_prompt_batch_suffix_only_when_enabled() -> None:
     batch_prompt = build_config_generation_prompt(batch=True)
     assert "<batch_response>" not in base_prompt
     assert "<batch_response>" in batch_prompt
+
+
+def test_music_prompt_mentions_vibe_wrapper() -> None:
+    prompt = build_config_generation_prompt()
+    assert "<vibe>" in prompt

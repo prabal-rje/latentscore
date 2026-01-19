@@ -39,6 +39,7 @@ if __package__ is None and __name__ == "__main__":
 from data_work.lib.jsonl_io import iter_jsonl
 from data_work.lib.llm_client import load_env_file
 from data_work.lib.periodic_writer import SyncPeriodicWriter
+from data_work.lib.pipeline_models import ConfigGenerationRow, JsonDict, ScoredRow
 from data_work.lib.scoring_types import DictScoreResult, validate_score_result
 
 _LOGGER = logging.getLogger("data_work.score_configs")
@@ -52,7 +53,7 @@ RUN_CONFIG_NAME = "run_config.json"
 class ScorerProtocol(Protocol):
     """Protocol for config scorers."""
 
-    def score(self, vibe: str, config: dict[str, Any]) -> dict[str, Any]:
+    def score(self, vibe: str, config: JsonDict) -> JsonDict:
         """Score a config against a vibe.
 
         Args:
@@ -80,7 +81,7 @@ class ClapConfigScorer:
             self._scorer = ClapScorer()
         return self._scorer
 
-    def score(self, vibe: str, config: dict[str, Any]) -> dict[str, Any]:
+    def score(self, vibe: str, config: JsonDict) -> JsonDict:
         """Score config using CLAP."""
         from data_work.lib.clap_scorer import score_config
 
@@ -126,7 +127,7 @@ class LLMJudgeScorer:
             )
         return self._scorer
 
-    def score(self, vibe: str, config: dict[str, Any]) -> dict[str, Any]:
+    def score(self, vibe: str, config: JsonDict) -> JsonDict:
         """Score config using LLM judge."""
         # Generate audio first
         from latentscore.audio import write_wav
@@ -164,7 +165,7 @@ class LLMJudgeScorer:
         }
 
 
-def load_custom_scorer(spec: str) -> Callable[[str, dict[str, Any]], dict[str, Any]]:
+def load_custom_scorer(spec: str) -> Callable[[str, JsonDict], JsonDict]:
     """Load a custom scorer from a Python file.
 
     Args:
@@ -207,7 +208,7 @@ def parse_scorers(
     llm_model: str,
     llm_api_key: str | None,
     audio_duration: float,
-) -> dict[str, Callable[[str, dict[str, Any]], dict[str, Any]]]:
+) -> dict[str, Callable[[str, JsonDict], JsonDict]]:
     """Parse scorer specifications into callable scorers.
 
     Args:
@@ -219,7 +220,7 @@ def parse_scorers(
     Returns:
         Dict mapping scorer names to scorer functions
     """
-    scorers: dict[str, Callable[[str, dict[str, Any]], dict[str, Any]]] = {}
+    scorers: dict[str, Callable[[str, JsonDict], JsonDict]] = {}
 
     for spec in scorer_specs:
         spec = spec.strip()
@@ -336,9 +337,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def row_key(row: dict[str, Any]) -> str:
+def row_key(row: ConfigGenerationRow | ScoredRow) -> str:
     """Generate unique key for a row."""
-    return f"{row.get('dataset')}:{row.get('id_in_dataset')}:{row.get('vibe_index')}:{row.get('vibe_scope')}:{row.get('vibe_level')}"
+    return f"{row.dataset}:{row.id_in_dataset}:{row.vibe_index}:{row.vibe_scope}:{row.vibe_level}"
 
 
 def load_processed_keys(path: Path) -> set[str]:
@@ -347,14 +348,14 @@ def load_processed_keys(path: Path) -> set[str]:
         return set()
     processed: set[str] = set()
     for row in iter_jsonl(path):
-        processed.add(row_key(row))
+        processed.add(row_key(ScoredRow.model_validate(row)))
     return processed
 
 
 def score_row(
-    row: dict[str, Any],
-    scorers: dict[str, Callable[[str, dict[str, Any]], dict[str, Any]]],
-) -> dict[str, Any]:
+    row: ConfigGenerationRow,
+    scorers: dict[str, Callable[[str, JsonDict], JsonDict]],
+) -> ScoredRow:
     """Score a single row with all scorers.
 
     Args:
@@ -364,11 +365,10 @@ def score_row(
     Returns:
         Row with added scores dict
     """
-    vibe = str(row.get("vibe_original", ""))
-    config = row.get("config_payload")
+    vibe = row.vibe_original
+    config = row.config_payload
 
-    output_row = dict(row)
-    scores: dict[str, dict[str, Any]] = {}
+    scores: dict[str, JsonDict] = {}
 
     if config is None:
         # No valid config to score
@@ -385,13 +385,16 @@ def score_row(
                 validate_score_result(score_result, source=name)
 
                 # Store the raw dict result (with final_score validated)
-                scores[name] = result if isinstance(result, dict) else {"final_score": score_result.final_score}
+                scores[name] = (
+                    result
+                    if isinstance(result, dict)
+                    else {"final_score": score_result.final_score}
+                )
             except Exception as exc:
                 _LOGGER.warning("Scorer '%s' failed: %s", name, exc)
                 scores[name] = {"error": str(exc), "final_score": 0.0}
 
-    output_row["scores_external"] = scores
-    return output_row
+    return ScoredRow(**row.model_dump(), scores_external=scores)
 
 
 def write_run_config(output_dir: Path, args: argparse.Namespace) -> None:
@@ -441,9 +444,7 @@ def main() -> None:
     for split_name, _ in split_files:
         output_path = output_dir / f"{split_name}.jsonl"
         if output_path.exists() and not args.overwrite and not args.resume:
-            raise SystemExit(
-                f"Output exists: {output_path}. Use --overwrite or --resume."
-            )
+            raise SystemExit(f"Output exists: {output_path}. Use --overwrite or --resume.")
 
     # Load environment
     load_env_file(args.env_file)
@@ -482,7 +483,12 @@ def main() -> None:
             output_path.unlink()
 
         # Load input rows
-        input_rows = list(iter_jsonl(split_file))
+        input_rows: list[ConfigGenerationRow] = []
+        for row in iter_jsonl(split_file):
+            try:
+                input_rows.append(ConfigGenerationRow.model_validate(row))
+            except Exception as exc:
+                raise SystemExit(f"Invalid config row in {split_file}: {exc}") from exc
         if args.limit > 0:
             remaining = args.limit - total_processed
             if remaining <= 0:
@@ -490,9 +496,7 @@ def main() -> None:
             input_rows = input_rows[:remaining]
 
         # Filter out already processed
-        pending_rows = [
-            row for row in input_rows if row_key(row) not in processed_keys
-        ]
+        pending_rows = [row for row in input_rows if row_key(row) not in processed_keys]
 
         if not pending_rows:
             _LOGGER.info("Split %s: all rows already processed", split_name)

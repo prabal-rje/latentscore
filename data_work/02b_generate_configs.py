@@ -37,26 +37,41 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import sys
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Mapping
 
 if __package__ is None and __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
 from common.prompts import build_config_generation_prompt
+from data_work.lib.config_batcher import (
+    ConfigBatcher,
+    build_batch_prompt,
+    build_batch_response_keys,
+    build_batch_response_model,
+    parse_batch_response,
+)
 from data_work.lib.jsonl_io import iter_jsonl
 from data_work.lib.llm_cache import SqliteCache, cached_async
-from data_work.lib.periodic_writer import AsyncPeriodicWriter
 from data_work.lib.llm_client import (
     litellm_structured_completion,
     load_env_file,
     normalize_model_and_base,
     resolve_api_key_for_models,
+    wrap_vibe_for_chat,
 )
 from data_work.lib.music_schema import MusicConfigPromptPayload
+from data_work.lib.periodic_writer import AsyncPeriodicWriter
+from data_work.lib.pipeline_models import (
+    ConfigCandidateScores,
+    ConfigGenerationRow,
+    JsonDict,
+    VibeRow,
+)
 from data_work.lib.resilience import (
     AsyncRateLimiter,
     EWMAErrorTracker,
@@ -75,11 +90,34 @@ DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_BASE_DELAY = 1.0
 DEFAULT_NUM_CANDIDATES = 5
 DEFAULT_TEMPERATURE = 0.8
+DEFAULT_BATCH_SIZE = 1
+DEFAULT_BATCH_WAIT_MS = 200
 DEFAULT_EWMA_ALPHA = 0.2
 DEFAULT_EWMA_THRESHOLD = 0.25
 DEFAULT_EWMA_MIN_SAMPLES = 10
 DEFAULT_PERIODIC_WRITE_INTERVAL = 60.0
 RUN_CONFIG_NAME = "run_config.json"
+
+ModelKwargs = Mapping[str, JsonValue]
+_DEBUG_PROMPTS = os.getenv("LATENTSCORE_DEBUG_PROMPTS") == "1"
+_DEBUG_PROMPTS_EMITTED = False
+
+
+def _maybe_debug_prompts(
+    messages: Sequence[Mapping[str, str]],
+    cache_control: list[dict[str, str]] | None,
+    label: str,
+) -> None:
+    global _DEBUG_PROMPTS_EMITTED
+    if not _DEBUG_PROMPTS or _DEBUG_PROMPTS_EMITTED:
+        return
+    _DEBUG_PROMPTS_EMITTED = True
+    print(f"[DEBUG] {label} prompt preview")
+    print(f"[DEBUG] cache_control: {cache_control}")
+    for message in messages:
+        role = message.get("role", "")
+        content = message.get("content", "")
+        print(f"[DEBUG] role={role}\n{content}\n")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -136,6 +174,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=DEFAULT_TEMPERATURE,
         help="Temperature for diversity in generations.",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_BATCH_SIZE,
+        help="Batch size for vibe-to-config generation (1 disables batching).",
+    )
+    parser.add_argument(
+        "--batch-wait-ms",
+        type=int,
+        default=DEFAULT_BATCH_WAIT_MS,
+        help="Max wait (ms) to fill a batch before sending.",
     )
     parser.add_argument(
         "--limit",
@@ -235,9 +285,9 @@ def build_cache_key(
     candidate_index: int,
     seed: int,
     prompt_hash: str,
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, JsonDict]:
     """Build cache key for a single config generation call."""
-    payload: dict[str, Any] = {
+    payload: JsonDict = {
         "vibe_text_hash": hash_text(vibe_text),
         "model": model,
         "api_base": api_base,
@@ -251,9 +301,9 @@ def build_cache_key(
     return cache_key, payload
 
 
-def row_key(row: Mapping[str, Any]) -> str:
+def row_key(row: VibeRow | ConfigGenerationRow) -> str:
     """Generate unique key for a row."""
-    return f"{row.get('dataset')}:{row.get('id_in_dataset')}:{row.get('vibe_index')}:{row.get('vibe_scope')}:{row.get('vibe_level')}"
+    return f"{row.dataset}:{row.id_in_dataset}:{row.vibe_index}:{row.vibe_scope}:{row.vibe_level}"
 
 
 def load_processed_keys(path: Path) -> set[str]:
@@ -262,7 +312,7 @@ def load_processed_keys(path: Path) -> set[str]:
         return set()
     processed: set[str] = set()
     for row in iter_jsonl(path):
-        processed.add(row_key(row))
+        processed.add(row_key(ConfigGenerationRow.model_validate(row)))
     return processed
 
 
@@ -275,10 +325,8 @@ async def call_llm_for_config(
     system_prompt: str,
     temperature: float,
     use_prompt_caching: bool = True,
-) -> dict[str, Any]:
+) -> JsonDict:
     """Call LLM for config generation.
-
-    Returns raw dict (not validated) so we can score validation separately.
 
     Args:
         vibe_text: The vibe description to convert to a config
@@ -295,7 +343,7 @@ async def call_llm_for_config(
     """
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": vibe_text},
+        {"role": "user", "content": wrap_vibe_for_chat(vibe_text)},
     ]
 
     # Enable prompt caching on the system message.
@@ -308,6 +356,8 @@ async def call_llm_for_config(
     if use_prompt_caching:
         cache_control = [{"location": "message", "role": "system"}]
 
+    _maybe_debug_prompts(messages, cache_control, "single-config")
+
     # Use structured completion but catch validation errors
     result = await litellm_structured_completion(
         model=model,
@@ -319,11 +369,44 @@ async def call_llm_for_config(
         cache_control_injection_points=cache_control,
     )
 
-    # Return as dict for storage
-    return result.model_dump()
+    return result.model_dump(mode="json")
 
 
-def score_candidate(candidate: dict[str, Any] | None) -> dict[str, int]:
+async def call_music_config_batch(
+    *,
+    vibe_texts: Sequence[str],
+    model: str,
+    api_key: str | None,
+    api_base: str | None,
+    system_prompt: str,
+    model_kwargs: ModelKwargs,
+    use_prompt_caching: bool = True,
+) -> list[JsonDict]:
+    keys = build_batch_response_keys(len(vibe_texts))
+    prompt = build_batch_prompt(vibe_texts, keys)
+    response_model = build_batch_response_model(len(vibe_texts))
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt},
+    ]
+    cache_control: list[dict[str, str]] | None = None
+    if use_prompt_caching:
+        cache_control = [{"location": "message", "role": "system"}]
+    _maybe_debug_prompts(messages, cache_control, "batch-config")
+    response = await litellm_structured_completion(
+        model=model,
+        messages=messages,
+        response_model=response_model,
+        api_key=api_key,
+        api_base=api_base,
+        model_kwargs=model_kwargs,
+        cache_control_injection_points=cache_control,
+    )
+    payloads = parse_batch_response(response, len(vibe_texts))
+    return [payload.model_dump(mode="json") for payload in payloads]
+
+
+def score_candidate(candidate: JsonDict | None) -> dict[str, int]:
     """Score a single config candidate.
 
     Returns dict with binary scores:
@@ -365,9 +448,9 @@ def score_candidate(candidate: dict[str, Any] | None) -> dict[str, int]:
 
 
 def select_best_candidate(
-    candidates: list[dict[str, Any] | None],
-    scores: dict[str, list[int]],
-) -> tuple[int, dict[str, Any] | None]:
+    candidates: list[JsonDict | None],
+    scores: ConfigCandidateScores,
+) -> tuple[int, JsonDict | None]:
     """Select the best candidate based on scores.
 
     Priority: schema_valid > palette_valid > format_valid.
@@ -384,9 +467,9 @@ def select_best_candidate(
             continue
 
         score = (
-            scores["schema_valid"][i],
-            scores["palette_valid"][i],
-            scores["format_valid"][i],
+            scores.schema_valid[i],
+            scores.palette_valid[i],
+            scores.format_valid[i],
         )
 
         if score > best_score:
@@ -399,30 +482,28 @@ def select_best_candidate(
 
 
 async def generate_configs_for_row(
-    row: dict[str, Any],
+    row: VibeRow,
     *,
     model: str,
-    api_key: str | None,
     api_base: str | None,
-    system_prompt: str,
     prompt_hash: str,
     num_candidates: int,
     temperature: float,
     seed: int,
     cache: SqliteCache,
-    semaphore: asyncio.Semaphore,
-    limiter: AsyncRateLimiter,
+    config_call: Callable[[str], Awaitable[JsonDict]],
     max_retries: int,
     retry_base_delay: float,
-    use_prompt_caching: bool = True,
-) -> dict[str, Any]:
+) -> ConfigGenerationRow:
     """Generate N config candidates for a single vibe row."""
-    vibe_text = str(row.get("vibe_original", ""))
+    vibe_text = row.vibe_original
 
-    candidates: list[dict[str, Any] | None] = []
+    candidates: list[JsonDict | None] = []
     errors: list[str | None] = []
 
-    async def generate_one(candidate_index: int) -> tuple[dict[str, Any] | None, str | None]:
+    async def generate_one(
+        candidate_index: int,
+    ) -> tuple[JsonDict | None, str | None]:
         """Generate a single config candidate."""
         cache_key, payload = build_cache_key(
             vibe_text=vibe_text,
@@ -437,22 +518,12 @@ async def generate_configs_for_row(
         @cached_async(
             cache=cache,
             key_fn=lambda: (cache_key, payload),
-            serializer=lambda x: x,
-            deserializer=lambda x: x,
+            serializer=lambda response: response,
+            deserializer=lambda data: data,
         )
         @retry_async(max_retries=max_retries, base_delay=retry_base_delay, logger=_LOGGER)
-        @rate_limited(limiter)
-        @with_semaphore(semaphore)
-        async def _call() -> dict[str, Any]:
-            return await call_llm_for_config(
-                vibe_text=vibe_text,
-                model=model,
-                api_key=api_key,
-                api_base=api_base,
-                system_prompt=system_prompt,
-                temperature=temperature,
-                use_prompt_caching=use_prompt_caching,
-            )
+        async def _call() -> JsonDict:
+            return await config_call(vibe_text)
 
         try:
             result = await _call()
@@ -473,33 +544,33 @@ async def generate_configs_for_row(
         candidates.append(result)
         errors.append(error)
 
-    # Score each candidate
-    all_scores: dict[str, list[int]] = {
-        "format_valid": [],
-        "schema_valid": [],
-        "palette_valid": [],
-    }
+    candidate_payloads = candidates
 
-    for candidate in candidates:
-        candidate_scores = score_candidate(candidate)
-        for key in all_scores:
-            all_scores[key].append(candidate_scores[key])
-
-    # Select best
-    best_index, best_candidate = select_best_candidate(candidates, all_scores)
-
-    # Build output row
-    output_row = dict(row)
-    output_row["config_model"] = model
-    output_row["config_candidates"] = candidates
-    output_row["scores"] = all_scores
-    output_row["best_index"] = best_index
-    output_row["config_payload"] = best_candidate
-    output_row["config_error"] = (
-        "; ".join(e for e in errors if e) if best_candidate is None else None
+    all_scores = ConfigCandidateScores(
+        format_valid=[],
+        schema_valid=[],
+        palette_valid=[],
     )
 
-    return output_row
+    for candidate in candidate_payloads:
+        candidate_scores = score_candidate(candidate)
+        all_scores.format_valid.append(candidate_scores["format_valid"])
+        all_scores.schema_valid.append(candidate_scores["schema_valid"])
+        all_scores.palette_valid.append(candidate_scores["palette_valid"])
+
+    # Select best
+    best_index, best_candidate = select_best_candidate(candidate_payloads, all_scores)
+
+    # Build output row
+    return ConfigGenerationRow(
+        **row.model_dump(),
+        config_model=model,
+        config_candidates=candidate_payloads,
+        scores=all_scores,
+        best_index=best_index,
+        config_payload=best_candidate,
+        config_error="; ".join(e for e in errors if e) if best_candidate is None else None,
+    )
 
 
 def write_run_config(output_dir: Path, args: argparse.Namespace) -> None:
@@ -509,6 +580,8 @@ def write_run_config(output_dir: Path, args: argparse.Namespace) -> None:
         "model": args.model,
         "num_candidates": args.num_candidates,
         "temperature": args.temperature,
+        "batch_size": args.batch_size,
+        "batch_wait_ms": args.batch_wait_ms,
     }
     config_path = output_dir / RUN_CONFIG_NAME
     with config_path.open("w", encoding="utf-8") as f:
@@ -541,9 +614,7 @@ async def main_async(args: argparse.Namespace) -> None:
     for split_name, _ in split_files:
         output_path = output_dir / f"{split_name}.jsonl"
         if output_path.exists() and not args.overwrite and not args.resume:
-            raise SystemExit(
-                f"Output exists: {output_path}. Use --overwrite or --resume."
-            )
+            raise SystemExit(f"Output exists: {output_path}. Use --overwrite or --resume.")
 
     # Load environment and setup API
     load_env_file(args.env_file)
@@ -560,16 +631,17 @@ async def main_async(args: argparse.Namespace) -> None:
     write_run_config(output_dir, args)
 
     # Setup LLM infrastructure
-    system_prompt = build_config_generation_prompt(batch=False)
-    prompt_hash = hash_text(system_prompt)
+    base_prompt = build_config_generation_prompt(batch=False)
+    batch_prompt = (
+        build_config_generation_prompt(batch=True) if args.batch_size > 1 else base_prompt
+    )
+    prompt_hash = hash_text(batch_prompt if args.batch_size > 1 else base_prompt)
     cache = SqliteCache(args.cache_path)
     await cache.initialize()
 
-    semaphore = asyncio.Semaphore(args.max_concurrency)
-    limiter = AsyncRateLimiter(args.max_qps)
-    tracker = EWMAErrorTracker(
-        alpha=args.ewma_alpha, min_samples=args.ewma_min_samples
-    )
+    config_semaphore = asyncio.Semaphore(args.max_concurrency)
+    config_limiter = AsyncRateLimiter(args.max_qps)
+    tracker = EWMAErrorTracker(alpha=args.ewma_alpha, min_samples=args.ewma_min_samples)
 
     use_prompt_caching = not args.no_prompt_caching
 
@@ -585,107 +657,169 @@ async def main_async(args: argparse.Namespace) -> None:
     else:
         _LOGGER.info("Prompt caching: DISABLED (full input token cost per candidate)")
 
+    model_kwargs: ModelKwargs = {"temperature": args.temperature}
+
+    @rate_limited(config_limiter)
+    @with_semaphore(config_semaphore)
+    async def single_config_call(vibe_text: str) -> JsonDict:
+        return await call_llm_for_config(
+            vibe_text=vibe_text,
+            model=model,
+            api_key=api_key,
+            api_base=api_base,
+            system_prompt=base_prompt,
+            temperature=args.temperature,
+            use_prompt_caching=use_prompt_caching,
+        )
+
+    @rate_limited(config_limiter)
+    @with_semaphore(config_semaphore)
+    async def batched_config_call(vibe_texts: Sequence[str]) -> list[JsonDict]:
+        return await call_music_config_batch(
+            vibe_texts=vibe_texts,
+            model=model,
+            api_key=api_key,
+            api_base=api_base,
+            system_prompt=batch_prompt,
+            model_kwargs=model_kwargs,
+            use_prompt_caching=use_prompt_caching,
+        )
+
+    batcher: ConfigBatcher | None = None
+    if args.batch_size > 1:
+        batcher = ConfigBatcher(
+            batch_size=args.batch_size,
+            max_wait=args.batch_wait_ms / 1000.0,
+            call_batch=batched_config_call,
+        )
+        _LOGGER.info(
+            "Batching ENABLED (batch_size=%d, max_wait_ms=%d)",
+            args.batch_size,
+            args.batch_wait_ms,
+        )
+    else:
+        _LOGGER.info("Batching DISABLED (batch_size=1)")
+
+    async def config_call(vibe_text: str) -> JsonDict:
+        if batcher is None:
+            return await single_config_call(vibe_text)
+        try:
+            return await batcher.submit(vibe_text)
+        except Exception as exc:
+            _LOGGER.warning(
+                "Batch config call failed; falling back to single-item batch call. (%s)",
+                exc,
+            )
+            return (await batched_config_call([vibe_text]))[0]
+
     # Process each split
     total_processed = 0
-    for split_name, split_file in split_files:
-        output_path = output_dir / f"{split_name}.jsonl"
+    try:
+        for split_name, split_file in split_files:
+            output_path = output_dir / f"{split_name}.jsonl"
 
-        # Load processed keys for resume
-        processed_keys = set()
-        if args.resume and output_path.exists():
-            processed_keys = load_processed_keys(output_path)
-            _LOGGER.info("Resuming %s: %d already processed", split_name, len(processed_keys))
+            # Load processed keys for resume
+            processed_keys: set[str] = set()
+            if args.resume and output_path.exists():
+                processed_keys = load_processed_keys(output_path)
+                _LOGGER.info(
+                    "Resuming %s: %d already processed",
+                    split_name,
+                    len(processed_keys),
+                )
 
-        # Overwrite mode: clear existing file
-        if args.overwrite and output_path.exists():
-            output_path.unlink()
+            # Overwrite mode: clear existing file
+            if args.overwrite and output_path.exists():
+                output_path.unlink()
 
-        # Load input rows
-        input_rows = list(iter_jsonl(split_file))
-        if args.limit > 0:
-            remaining = args.limit - total_processed
-            if remaining <= 0:
-                break
-            input_rows = input_rows[:remaining]
+            # Load input rows
+            input_rows: list[VibeRow] = []
+            for row in iter_jsonl(split_file):
+                try:
+                    input_rows.append(VibeRow.model_validate(row))
+                except ValidationError as exc:
+                    raise SystemExit(f"Invalid vibe row in {split_file}: {exc}") from exc
+            if args.limit > 0:
+                remaining = args.limit - total_processed
+                if remaining <= 0:
+                    break
+                input_rows = input_rows[:remaining]
 
-        # Filter out already processed
-        pending_rows = [
-            row for row in input_rows if row_key(row) not in processed_keys
-        ]
+            # Filter out already processed
+            pending_rows = [row for row in input_rows if row_key(row) not in processed_keys]
 
-        if not pending_rows:
-            _LOGGER.info("Split %s: all rows already processed", split_name)
-            continue
+            if not pending_rows:
+                _LOGGER.info("Split %s: all rows already processed", split_name)
+                continue
 
-        _LOGGER.info("Processing %s: %d pending rows", split_name, len(pending_rows))
+            _LOGGER.info("Processing %s: %d pending rows", split_name, len(pending_rows))
 
-        # Setup periodic writer for this split
-        writer = AsyncPeriodicWriter(
-            output_path,
-            interval_seconds=args.write_interval,
-            overwrite=False,  # Never overwrite in append/resume mode
-        )
-        await writer.start()
-        _LOGGER.info(
-            "Output file: %s (updates every %.0fs)",
-            output_path,
-            args.write_interval,
-        )
-
-        try:
-            with tqdm(total=len(pending_rows), desc=split_name) as progress:
-                for row in pending_rows:
-                    try:
-                        result = await generate_configs_for_row(
-                            row,
-                            model=model,
-                            api_key=api_key,
-                            api_base=api_base,
-                            system_prompt=system_prompt,
-                            prompt_hash=prompt_hash,
-                            num_candidates=args.num_candidates,
-                            temperature=args.temperature,
-                            seed=args.seed,
-                            cache=cache,
-                            semaphore=semaphore,
-                            limiter=limiter,
-                            max_retries=args.max_retries,
-                            retry_base_delay=args.retry_base_delay,
-                            use_prompt_caching=use_prompt_caching,
-                        )
-
-                        # Track success based on whether we got a valid config
-                        success = result.get("config_payload") is not None
-                        tracker.update(success=success)
-
-                        # Add to periodic writer buffer
-                        await writer.add_row(result)
-
-                        progress.update(1)
-                        total_processed += 1
-
-                        # Check error threshold
-                        if tracker.threshold_reached(args.ewma_threshold):
-                            _LOGGER.error(
-                                "Excessive error rate (EWMA=%.2f). Aborting.",
-                                tracker.error_rate,
-                            )
-                            raise SystemExit("Excessive error rate - try again later.")
-
-                    except SystemExit:
-                        raise
-                    except Exception as exc:
-                        _LOGGER.error("Fatal error on row: %s", exc, exc_info=True)
-                        raise
-        finally:
-            await writer.stop()
+            # Setup periodic writer for this split
+            writer = AsyncPeriodicWriter(
+                output_path,
+                interval_seconds=args.write_interval,
+                overwrite=False,  # Never overwrite in append/resume mode
+            )
+            await writer.start()
             _LOGGER.info(
-                "Split %s: wrote %d rows total",
-                split_name,
-                writer.total_written,
+                "Output file: %s (updates every %.0fs)",
+                output_path,
+                args.write_interval,
             )
 
-        _LOGGER.info("Completed %s: wrote to %s", split_name, output_path)
+            try:
+                with tqdm(total=len(pending_rows), desc=split_name) as progress:
+                    for row in pending_rows:
+                        try:
+                            result = await generate_configs_for_row(
+                                row,
+                                model=model,
+                                api_base=api_base,
+                                prompt_hash=prompt_hash,
+                                num_candidates=args.num_candidates,
+                                temperature=args.temperature,
+                                seed=args.seed,
+                                cache=cache,
+                                config_call=config_call,
+                                max_retries=args.max_retries,
+                                retry_base_delay=args.retry_base_delay,
+                            )
+
+                            # Track success based on whether we got a valid config
+                            success = result.config_payload is not None
+                            tracker.update(success=success)
+
+                            # Add to periodic writer buffer
+                            await writer.add_row(result)
+
+                            progress.update(1)
+                            total_processed += 1
+
+                            # Check error threshold
+                            if tracker.threshold_reached(args.ewma_threshold):
+                                _LOGGER.error(
+                                    "Excessive error rate (EWMA=%.2f). Aborting.",
+                                    tracker.error_rate,
+                                )
+                                raise SystemExit("Excessive error rate - try again later.")
+
+                        except SystemExit:
+                            raise
+                        except Exception as exc:
+                            _LOGGER.error("Fatal error on row: %s", exc, exc_info=True)
+                            raise
+            finally:
+                await writer.stop()
+                _LOGGER.info(
+                    "Split %s: wrote %d rows total",
+                    split_name,
+                    writer.total_written,
+                )
+
+            _LOGGER.info("Completed %s: wrote to %s", split_name, output_path)
+    finally:
+        if batcher is not None:
+            await batcher.aclose()
 
     _LOGGER.info("Done! Total processed: %d rows", total_processed)
 

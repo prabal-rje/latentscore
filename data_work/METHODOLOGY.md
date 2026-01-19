@@ -171,6 +171,17 @@ python -m data_work.02a_extract_vibes \
 - Select best valid config (priority: schema > palette > format)
 - Store all N candidates + scores for analysis
 
+**Prompt contract + caching (2026-01-18):**
+- System prompt contains all instructions + schema (see `common/prompts.py`)
+- User message contains only `<vibe>...</vibe>`; batch calls use `<vibe_input index=...>`
+- LiteLLM prompt caching is enabled on the system message by default
+- Optional batching: `--batch-size` + `--batch-wait-ms` (batch suffix stays in system prompt)
+- Disable caching with `--no-prompt-caching` in `02b_generate_configs` if needed
+
+**Inference note (2026-01-18):**
+- MLX-based local inference uses the same system/user role contract and logs a warning
+  because MLX is a temporary inference path.
+
 **Command:**
 ```bash
 python -m data_work.02b_generate_configs \
@@ -181,6 +192,8 @@ python -m data_work.02b_generate_configs \
   --num-candidates 5 \
   --temperature 0.8 \
   --seed 42 \
+  --batch-size 1 \
+  --batch-wait-ms 200 \
   --max-concurrency 4 \
   --max-qps 2
 ```
@@ -255,12 +268,13 @@ python -m data_work.02c_score_configs \
     "llm_judge": {
       "vibe_match": 0.8,
       "audio_quality": 0.7,
-      "creativity": 0.6,
-      "final_score": 0.74
+      "final_score": 0.75
     }
   }
 }
 ```
+
+LLM judge `final_score` uses the harmonic mean of `vibe_match` and `audio_quality` (equal weights).
 
 ---
 
@@ -282,6 +296,9 @@ python -m data_work.02c_score_configs \
 | LoRA alpha | 16 | |
 | Max seq length | 2048 | |
 | Warmup ratio | 0.06 | |
+
+**Debugging:** Add `--debug-prompts` (optionally `--debug-prompts-max`) to print a few
+formatted system/user prompt samples for verification.
 
 **Command:**
 ```bash
@@ -456,4 +473,4 @@ Document key decisions made during the process.
 | Best-of-N config generation (N=5) | Multiple candidates increase probability of valid config. Store all N + scores for analysis. Temperature 0.8 for diversity. | 2026-01-18 |
 | ScoreResult protocol for all scorers | Enforces mandatory `final_score` property in [0,1] across all scoring systems (CLAP, LLM, rewards, custom). Runtime validation prevents silent failures. | 2026-01-18 |
 | Separate scoring script (02c) | Decouples scoring from config generation. Can re-run scoring with different methods. Supports multiple scorers in one pass. | 2026-01-18 |
-
+| Config payload uses `thinking` (alias `justification`) | Aligns prompt outputs with new naming while keeping backward compatibility for older datasets. | 2026-01-18 |

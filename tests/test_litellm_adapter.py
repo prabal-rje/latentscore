@@ -87,6 +87,30 @@ async def test_litellm_adapter_enforces_json(
 
 
 @pytest.mark.asyncio
+async def test_litellm_adapter_user_message_is_vibe_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_acompletion(**kwargs: object) -> object:
+        captured.update(kwargs)
+        message = SimpleNamespace(content=_payload_json())
+        choice = SimpleNamespace(message=message)
+        return SimpleNamespace(choices=[choice])
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+    adapter = LiteLLMAdapter(model="gemini/gemini-3-flash-preview")
+    await adapter.generate("warm sunrise")
+
+    messages = captured["messages"]
+    assert isinstance(messages, list)
+    assert messages[-1]["role"] == "user"
+    assert messages[-1]["content"] == "<vibe>warm sunrise</vibe>"
+    assert "<output>" not in messages[-1]["content"]
+
+
+@pytest.mark.asyncio
 async def test_litellm_kwargs_forwarded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

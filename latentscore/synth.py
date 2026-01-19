@@ -2830,7 +2830,7 @@ if __name__ == "__main__":
     # These examples mirror the demo config blocks captured in @file_context_0:
     demo_configs = [
         {
-            # "justification": "The 'Bubblegum'-style sound is characterized by a bright, slightly distorted, and playful melody with a prominent bass line and a smooth, evolving pad.",
+            # "thinking": "The 'Bubblegum'-style sound is characterized by a bright, slightly distorted, and playful melody with a prominent bass line and a smooth, evolving pad.",
             "tempo": 0.5,
             "root": "a",
             "mode": "major",
@@ -2852,7 +2852,7 @@ if __name__ == "__main__":
             "grain": "clean",
         },
         {
-            # "justification": "The sad vibe is characterized by a low-key sound and a sense of melancholy. The low intensity and muted tones create a feeling of quiet sorrow. The 'low' intensity of the bass and the 'dark' tone of the pad support this feeling. The 'soft' attack and 'warm' tone of the pad create a sense of longing and a feeling of sadness.",
+            # "thinking": "The sad vibe is characterized by a low-key sound and a sense of melancholy. The low intensity and muted tones create a feeling of quiet sorrow. The 'low' intensity of the bass and the 'dark' tone of the pad support this feeling. The 'soft' attack and 'warm' tone of the pad create a sense of longing and a feeling of sadness.",
             "tempo": 0.25,
             "root": "e",
             "mode": "minor",
@@ -2874,7 +2874,7 @@ if __name__ == "__main__":
             "grain": "gritty",
         },
         {
-            # "justification": "The 'dead', a low volume synth with a simple sine wave and a low pitch.",
+            # "thinking": "The 'dead', a low volume synth with a simple sine wave and a low pitch.",
             "tempo": 0.25,
             "root": "c",
             "mode": "minor",

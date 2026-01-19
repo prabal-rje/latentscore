@@ -117,9 +117,8 @@ class EvalResult(BaseModel):
     # LLM scorer metrics (if computed)
     llm_vibe_match: float | None = None
     llm_audio_quality: float | None = None
-    llm_creativity: float | None = None
-    llm_justification: str | None = None
-    llm_score: float | None = None  # Weighted overall score
+    llm_thinking: str | None = None
+    llm_score: float | None = None  # Harmonic mean of vibe match + audio quality
     llm_error: str | None = Field(default=None, description="LLM scoring error if any")
 
     # Error tags for filtering/analysis
@@ -189,7 +188,6 @@ class EvalSetMetrics(BaseModel):
     llm_score_std: float | None = None
     llm_vibe_match_mean: float | None = None
     llm_audio_quality_mean: float | None = None
-    llm_creativity_mean: float | None = None
 
     # Error counts
     n_config_errors: int = 0
@@ -242,7 +240,17 @@ def compute_field_distributions(results: list[EvalResult]) -> dict[str, dict[str
         if not result.config:
             continue
 
-        for field, value in result.config.items():
+        config = result.config
+        if isinstance(config.get("config"), dict):
+            config = config["config"]
+        else:
+            config = {
+                key: value
+                for key, value in config.items()
+                if key not in {"justification", "palettes", "thinking"}
+            }
+
+        for field, value in config.items():
             if field not in distributions:
                 distributions[field] = {}
             str_value = str(value)

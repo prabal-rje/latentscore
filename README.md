@@ -138,14 +138,20 @@ python -m data_work.01_download_base_data \
   --output-dir data_work/.outputs \
   --sample-size 10
 
-# 2. Process data with vibe extraction (requires API key)
+# 2. Extract vibes (requires API key)
 export OPENROUTER_API_KEY="your-key"
-python -m data_work.02_process_base_data \
+python -m data_work.02a_extract_vibes \
   --input-dir data_work/.outputs \
-  --output-dir data_work/.processed \
-  --limit-per-split 5
+  --output-dir data_work/.vibes \
+  --limit 5
 
-# 3. Run baseline evaluation (no API needed)
+# 3. Generate configs (requires API key)
+python -m data_work.02b_generate_configs \
+  --input-dir data_work/.vibes \
+  --output-dir data_work/.processed \
+  --limit 5
+
+# 4. Run baseline evaluation (no API needed)
 python -m data_work.06_eval_suite \
   --eval-set test_prompts \
   --baseline random \
@@ -158,7 +164,8 @@ python -m data_work.06_eval_suite \
 | Script | Purpose | Key Options |
 |--------|---------|-------------|
 | `01_download_base_data.py` | Download & sample text datasets | `--sample-size`, `--output-dir` |
-| `02_process_base_data.py` | Extract vibes & generate configs | `--model`, `--limit-per-split` |
+| `02a_extract_vibes.py` | Extract vibes only | `--model`, `--limit` |
+| `02b_generate_configs.py` | Generate configs (Best-of-N) | `--model`, `--num-candidates` |
 | `03_modal_train.py` | Train SFT/GRPO on Modal cloud | `--config-file`, `--ablation-preset` |
 | `04_clap_benchmark.py` | CLAP audio-text scoring | `--litellm-model`, `--local-model` |
 | `05_export_models.py` | Merge LoRA adapters | `--input-dir`, `--output-dir` |
@@ -287,31 +294,37 @@ python -m data_work.01_download_base_data \
   --output-dir data_work/.outputs \
   --sample-size 50
 
-# 2. Process with vibe extraction
-python -m data_work.02_process_base_data \
+# 2. Extract vibes
+python -m data_work.02a_extract_vibes \
   --input-dir data_work/.outputs \
-  --output-dir data_work/.processed \
-  --limit-per-split 20
+  --output-dir data_work/.vibes \
+  --limit 20
 
-# 3. Train SFT model on Modal
+# 3. Generate configs
+python -m data_work.02b_generate_configs \
+  --input-dir data_work/.vibes \
+  --output-dir data_work/.processed \
+  --limit 20
+
+# 4. Train SFT model on Modal
 python -m data_work.03_modal_train sft \
   --data data_work/.processed/SFT-Train.jsonl \
   --output sft-experiment \
   --epochs 1
 
-# 4. Train GRPO model on Modal
+# 5. Train GRPO model on Modal
 python -m data_work.03_modal_train grpo \
   --model outputs/sft-experiment \
   --data data_work/.processed/GRPO.jsonl \
   --output grpo-experiment \
   --epochs 1
 
-# 5. Export merged model
+# 6. Export merged model
 python -m data_work.05_export_models \
   --input-dir outputs/grpo-experiment \
   --output-dir exports/final-model
 
-# 6. Benchmark with CLAP
+# 7. Benchmark with CLAP
 python -m data_work.04_clap_benchmark \
   --input data_work/.processed/TEST.jsonl \
   --local-model exports/final-model:trained \

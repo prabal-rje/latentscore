@@ -306,7 +306,7 @@ class LiteLLMAdapter:
             {
                 "role": "user",
                 # "content": f"{self._schema_str}\n<vibe>{vibe}</vibe>\n<output>",
-                "content": f"<vibe>{vibe}</vibe>\n<output>",
+                "content": f"<vibe>{vibe}</vibe>",
             }
         )
 
