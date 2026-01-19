@@ -2,6 +2,8 @@
 
 from common.music_schema import (
     MAX_LONG_FIELD_CHARS,
+    MAX_TITLE_CHARS,
+    MAX_TITLE_WORDS,
     PALETTE_COLOR_DESC,
     PALETTE_DESC,
     PALETTE_WEIGHT_DESC,
@@ -125,6 +127,8 @@ __all__ = [
     "render_prompt",
     # Schema constants
     "MAX_LONG_FIELD_CHARS",
+    "MAX_TITLE_CHARS",
+    "MAX_TITLE_WORDS",
     "PALETTE_COLOR_DESC",
     "PALETTE_DESC",
     "PALETTE_WEIGHT_DESC",

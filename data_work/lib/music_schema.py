@@ -9,6 +9,8 @@ from __future__ import annotations
 # Re-export everything from common for backwards compatibility
 from common import (
     MAX_LONG_FIELD_CHARS,
+    MAX_TITLE_CHARS,
+    MAX_TITLE_WORDS,
     PALETTE_COLOR_DESC,
     PALETTE_DESC,
     PALETTE_WEIGHT_DESC,
@@ -60,6 +62,8 @@ from common import (
 
 __all__ = [
     "MAX_LONG_FIELD_CHARS",
+    "MAX_TITLE_CHARS",
+    "MAX_TITLE_WORDS",
     "PALETTE_COLOR_DESC",
     "PALETTE_DESC",
     "PALETTE_WEIGHT_DESC",

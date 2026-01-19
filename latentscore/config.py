@@ -4,11 +4,13 @@ import logging
 from types import MappingProxyType
 from typing import Any, Callable, Literal, Mapping, Optional, TypeVar, cast
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 # Import shared types from common.music_schema
 from common.music_schema import (
     MAX_LONG_FIELD_CHARS,
+    MAX_TITLE_CHARS,
+    MAX_TITLE_WORDS,
     PALETTES_DESC,
     PROMPT_DESC,
     PROMPT_REGISTER_MAX,
@@ -525,6 +527,12 @@ class MusicConfigPromptPayload(BaseModel):
         max_length=MAX_LONG_FIELD_CHARS,
         description=_PROMPT_DESC["thinking"],
     )
+    title: str = Field(
+        ...,
+        max_length=MAX_TITLE_CHARS,
+        min_length=1,
+        description=_PROMPT_DESC["title"],
+    )
     config: MusicConfigPrompt = Field(description=_PROMPT_DESC["config"])
     palettes: list[Palette] = Field(
         ...,
@@ -532,6 +540,16 @@ class MusicConfigPromptPayload(BaseModel):
         max_length=3,
         description=PALETTES_DESC,
     )
+
+    @field_validator("title")
+    @classmethod
+    def _validate_title(cls, value: str) -> str:
+        words = [word for word in value.strip().split() if word]
+        if not words:
+            raise ValueError("title must not be empty")
+        if len(words) > MAX_TITLE_WORDS:
+            raise ValueError("title exceeds max word count")
+        return value
 
     model_config = ConfigDict(extra="forbid")
 

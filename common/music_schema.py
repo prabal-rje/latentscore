@@ -11,10 +11,12 @@ import hashlib
 import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # Field length limits
 MAX_LONG_FIELD_CHARS = 1_000
+MAX_TITLE_CHARS = 60
+MAX_TITLE_WORDS = 6
 
 # Core label types
 TempoLabel = Literal["very_slow", "slow", "medium", "fast", "very_fast"]
@@ -132,6 +134,7 @@ PROMPT_DESC: dict[str, str] = {
         "Explain the sonic reasoning for the choices. Mention vibe decomposition, sonic "
         "translation, coherence check, and which examples guided the selection."
     ),
+    "title": "Short, readable title summarizing the vibe (<=6 words).",
     "config": "Music configuration that matches the requested vibe.",
     "tempo": "Tempo label controlling overall speed and energy.",
     "root": "Root note of the scale.",
@@ -259,6 +262,12 @@ class MusicConfigPromptPayload(BaseModel):
         max_length=MAX_LONG_FIELD_CHARS,
         description=PROMPT_DESC["thinking"],
     )
+    title: str = Field(
+        ...,
+        max_length=MAX_TITLE_CHARS,
+        min_length=1,
+        description=PROMPT_DESC["title"],
+    )
     config: MusicConfigPrompt = Field(..., description=PROMPT_DESC["config"])
     palettes: list[Palette] = Field(
         ...,
@@ -266,6 +275,16 @@ class MusicConfigPromptPayload(BaseModel):
         max_length=3,
         description=PALETTES_DESC,
     )
+    @field_validator("title")
+    @classmethod
+    def _validate_title(cls, value: str) -> str:
+        words = [word for word in value.strip().split() if word]
+        if not words:
+            raise ValueError("title must not be empty")
+        if len(words) > MAX_TITLE_WORDS:
+            raise ValueError("title exceeds max word count")
+        return value
+
 
 
 def schema_signature() -> str:

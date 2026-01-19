@@ -16,6 +16,7 @@ def test_music_prompt_includes_schema() -> None:
     assert "<schema>" in prompt
     assert "</schema>" in prompt
     assert "thinking" in prompt
+    assert "title" in prompt
     assert "config" in prompt
 
 
