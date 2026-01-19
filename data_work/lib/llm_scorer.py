@@ -32,7 +32,7 @@ def compute_llm_final_score(vibe_match: float, audio_quality: float) -> float:
 class LLMScoreResult(BaseModel):
     """Structured output for LLM-based audio scoring."""
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid")
 
     vibe_match: float = Field(
         ge=0.0,
@@ -46,7 +46,6 @@ class LLMScoreResult(BaseModel):
     )
     thinking: str = Field(
         max_length=500,
-        validation_alias="justification",
         description="Brief explanation of the scores",
     )
 

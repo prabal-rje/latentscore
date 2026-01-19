@@ -524,7 +524,6 @@ class MusicConfigPromptPayload(BaseModel):
         ...,
         max_length=MAX_LONG_FIELD_CHARS,
         description=_PROMPT_DESC["thinking"],
-        validation_alias="justification",
     )
     config: MusicConfigPrompt = Field(description=_PROMPT_DESC["config"])
     palettes: list[Palette] = Field(
@@ -534,7 +533,7 @@ class MusicConfigPromptPayload(BaseModel):
         description=PALETTES_DESC,
     )
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid")
 
 
 def _assert_prompt_schema_parity() -> None:

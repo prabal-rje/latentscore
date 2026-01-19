@@ -473,4 +473,4 @@ Document key decisions made during the process.
 | Best-of-N config generation (N=5) | Multiple candidates increase probability of valid config. Store all N + scores for analysis. Temperature 0.8 for diversity. | 2026-01-18 |
 | ScoreResult protocol for all scorers | Enforces mandatory `final_score` property in [0,1] across all scoring systems (CLAP, LLM, rewards, custom). Runtime validation prevents silent failures. | 2026-01-18 |
 | Separate scoring script (02c) | Decouples scoring from config generation. Can re-run scoring with different methods. Supports multiple scorers in one pass. | 2026-01-18 |
-| Config payload uses `thinking` (alias `justification`) | Aligns prompt outputs with new naming while keeping backward compatibility for older datasets. | 2026-01-18 |
+| Config payload uses `thinking` | Aligns prompt outputs with new naming. | 2026-01-18 |

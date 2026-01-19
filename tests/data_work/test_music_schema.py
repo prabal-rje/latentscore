@@ -1,5 +1,8 @@
 import json
 
+import pytest
+from pydantic import ValidationError
+
 from data_work.lib.music_schema import (
     MusicConfigPromptPayload,
     repair_palette_duplicates,
@@ -85,9 +88,9 @@ def test_music_schema_validates() -> None:
     assert [c.weight for c in parsed.palettes[0].colors] == ["xl", "lg", "md", "sm", "xs"]
 
 
-def test_music_schema_accepts_justification_alias() -> None:
+def test_music_schema_rejects_justification_alias() -> None:
     payload = {
-        "justification": "Alias input still works.",
+        "justification": "Legacy field should fail.",
         "config": {
             "tempo": "slow",
             "root": "d",
@@ -154,8 +157,8 @@ def test_music_schema_accepts_justification_alias() -> None:
             },
         ],
     }
-    parsed = MusicConfigPromptPayload.model_validate(payload)
-    assert parsed.thinking == "Alias input still works."
+    with pytest.raises(ValidationError):
+        MusicConfigPromptPayload.model_validate(payload)
 
 
 def test_schema_signature_uses_thinking_key() -> None:

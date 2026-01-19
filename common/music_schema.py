@@ -252,11 +252,10 @@ class MusicConfigPrompt(BaseModel):
 class MusicConfigPromptPayload(BaseModel):
     """LLM payload that includes a thinking field, config, and palettes."""
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid")
 
     thinking: str = Field(
         ...,
-        validation_alias="justification",
         max_length=MAX_LONG_FIELD_CHARS,
         description=PROMPT_DESC["thinking"],
     )
