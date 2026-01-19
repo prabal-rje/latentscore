@@ -1,0 +1,19 @@
+# Title Field in MusicConfigPromptPayload Design
+
+## Context
+We are extending the `MusicConfigPromptPayload` schema so that each payload includes a short, human-readable `title` that sits between `thinking` and `config` in the JSON object. This title must be concise (<=6 words), readable even when the input vibe is noisy or gibberish, and constrained by a max character count. The system prompt must describe the new field and enforce ordering, while downstream dataset generation, training, and inference must validate and preserve the new field. GRPO reward shaping must add a title component that encourages semantic alignment with the input vibe and penalizes overly long titles with a graded penalty.
+
+## Architecture
+The change is centered in shared schema definitions (`common/music_schema.py` and `latentscore/config.py`) so that all consumers share identical validation rules. The `title` field is added directly after `thinking` in the Pydantic model ordering, and its constraints are enforced both by max length and a validator that checks word count. The prompt text in `common/prompts.py` is updated to include the new field and ordering requirement, keeping all prompt instructions in the system role. Downstream code that produces or parses payloads inherits the updated schema; any explicit payload literals in tests or fixtures are updated to include `title`.
+
+## Data Flow
+Input vibe strings flow through `02b_generate_configs.py` and produce payloads validated by the schema. The schema drives LiteLLM response formatting, local training data construction, and inference output validation. With the new `title` field, the system prompt instructs generation to produce `thinking`, then `title`, then `config`, then `palettes`. The JSON output remains a single object; only the payload structure changes. Consumers that extract the `config` subobject continue to operate as before, but avoid misclassifying `title` as a config field (e.g., in field distributions). Training data examples and smoke fixtures are updated so SFT/GRPO input formatting stays consistent and valid.
+
+## Reward Shaping
+GRPO reward computation is extended with a `title` component that measures similarity between the input vibe and generated title. The similarity computation uses a lightweight lexical fallback with an optional embedding-based cosine similarity path when sentence-transformers is available. This yields a 0-1 score that is weighted into the total reward. A separate graded penalty applies when title length exceeds the configured maximum character count; the penalty scales linearly with the overage and is subtracted from the reward total. These additions are surfaced in `RewardBreakdown` for logging and analytics, and the GRPO training logger is extended to report the new metrics.
+
+## Error Handling
+Schema validation failures surface clearly in both batch generation and training, with the new `title` field treated as required. The title validator enforces word count and max length; violations are caught during schema validation. Reward computation handles missing or malformed titles by assigning a low title similarity score and applying the length penalty only when the title is present. If sentence-transformers is not available, the reward logic logs a single warning and uses lexical similarity instead.
+
+## Testing
+New tests ensure the schema requires `title`, enforces the word-count constraint, and preserves order in JSON dumps. Reward tests are updated to assert title similarity contributions and length penalties. Existing tests and fixtures are updated to include `title` so they remain valid. After implementation, the standard test suite (`pytest`) and lint/format checks (`make check`) are run. Minimal runs of the `02a`, `02b`, `02c`, and `04` scripts are executed with tiny configs to verify prompt formatting and output schemas.
