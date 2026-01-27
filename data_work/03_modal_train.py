@@ -302,6 +302,181 @@ def _log_prompt_sample(
         print(line)
 
 
+def _build_response_template(
+    *,
+    system_prompt: str,
+    tokenizer: Any,
+    model_name: str,
+) -> str:
+    """Derive the assistant-start template from the chat prompt formatter."""
+    dummy_user = wrap_vibe_for_chat("DUMMY")
+    prefix = render_chat_prompt(
+        system_prompt=system_prompt,
+        user_prompt=dummy_user,
+        tokenizer=tokenizer,
+        model_name=model_name,
+        add_generation_prompt=False,
+    )
+    prefix_with_gen = render_chat_prompt(
+        system_prompt=system_prompt,
+        user_prompt=dummy_user,
+        tokenizer=tokenizer,
+        model_name=model_name,
+        add_generation_prompt=True,
+    )
+    if prefix_with_gen.startswith(prefix):
+        suffix = prefix_with_gen[len(prefix) :]
+        if suffix:
+            return suffix
+    return "<start_of_turn>model\n"
+
+
+def _extract_turn_marker(text: str, needle: str) -> str:
+    idx = text.find(needle)
+    if idx == -1:
+        return ""
+    best = -1
+    for marker in ("<start_of_turn>", "<|im_start|>"):
+        pos = text.rfind(marker, 0, idx)
+        if pos > best:
+            best = pos
+    if best != -1:
+        return text[best:idx]
+    last_nl = text.rfind("\n", 0, idx)
+    if last_nl != -1:
+        return text[last_nl + 1 : idx]
+    return text[:idx]
+
+
+def _build_instruction_template(
+    *,
+    system_prompt: str,
+    tokenizer: Any,
+    model_name: str,
+) -> str:
+    dummy_user = wrap_vibe_for_chat("DUMMY")
+    prefix = render_chat_prompt(
+        system_prompt=system_prompt,
+        user_prompt=dummy_user,
+        tokenizer=tokenizer,
+        model_name=model_name,
+        add_generation_prompt=False,
+    )
+    marker = _extract_turn_marker(prefix, dummy_user)
+    if marker:
+        return marker
+    return "<start_of_turn>user\n"
+
+
+def _find_subsequence(sequence: Sequence[int], pattern: Sequence[int]) -> int:
+    if not pattern:
+        return -1
+    limit = len(sequence) - len(pattern) + 1
+    for idx in range(max(limit, 0)):
+        if sequence[idx : idx + len(pattern)] == pattern:
+            return idx
+    return -1
+
+
+def _select_template_candidate(
+    *,
+    tokenizer: Any,
+    input_ids: Sequence[int],
+    candidates: Sequence[str],
+    label: str,
+) -> tuple[str | None, int]:
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        token_ids = tokenizer(candidate, add_special_tokens=False)["input_ids"]
+        match_idx = _find_subsequence(list(input_ids), token_ids)
+        if match_idx != -1:
+            print(
+                f"[TRAIN_DEBUG] SFT {label}_marker_match={candidate!r} idx={match_idx}"
+            )
+            return candidate, match_idx
+    print(f"[TRAIN_DEBUG] SFT {label}_marker_match=NONE")
+    return None, -1
+
+
+def _make_marker_candidates(
+    *,
+    raw_text: str | None,
+    marker: str,
+    base: str,
+    max_prefix: int = 8,
+    max_suffix: int = 2,
+) -> list[str]:
+    candidates: list[str] = [base]
+    if not raw_text:
+        return candidates
+    idx = raw_text.find(marker)
+    if idx == -1:
+        return candidates
+    marker_len = len(marker)
+    for prefix_len in range(0, min(max_prefix, idx) + 1):
+        start = max(0, idx - prefix_len)
+        for suffix_len in range(0, max_suffix + 1):
+            end = min(len(raw_text), idx + marker_len + suffix_len)
+            snippet = raw_text[start:end]
+            if snippet and snippet not in candidates:
+                candidates.append(snippet)
+    return candidates
+
+def _build_completion_only_collator(
+    *,
+    tokenizer: Any,
+    response_template: str,
+) -> Any | None:
+    """Best-effort build of TRL completion-only collator."""
+    try:
+        from trl import DataCollatorForCompletionOnlyLM
+    except Exception:  # pragma: no cover - runtime environment only
+        return None
+
+    values: dict[str, Any] = {}
+    args: list[Any] = []
+    kwargs: dict[str, Any] = {}
+    try:
+        sig = inspect.signature(DataCollatorForCompletionOnlyLM.__init__)
+    except (TypeError, ValueError):
+        sig = None
+
+    if sig is not None:
+        if "response_template" in sig.parameters:
+            values["response_template"] = response_template
+        elif "response_template_ids" in sig.parameters:
+            values["response_template_ids"] = tokenizer.encode(
+                response_template, add_special_tokens=False
+            )
+        if "tokenizer" in sig.parameters:
+            param = sig.parameters["tokenizer"]
+            values["tokenizer"] = tokenizer
+            if param.kind == inspect.Parameter.KEYWORD_ONLY:
+                kwargs["tokenizer"] = values.pop("tokenizer")
+        if "mlm" in sig.parameters:
+            values["mlm"] = False
+
+        params = [p for p in sig.parameters.values() if p.name != "self"]
+        for param in params:
+            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                break
+            if param.kind == inspect.Parameter.KEYWORD_ONLY:
+                break
+            if param.name in values:
+                args.append(values.pop(param.name))
+            elif param.default is inspect._empty:
+                break
+        kwargs.update(values)
+    else:
+        args = [tokenizer, response_template]
+        kwargs = {"mlm": False}
+
+    return DataCollatorForCompletionOnlyLM(*args, **kwargs)
+
+
 def _ensure_output_dir(path: Path, overwrite: bool) -> None:
     if path.exists() and not overwrite:
         raise SystemExit(f"Output path already exists: {path}. Use --overwrite to replace.")
@@ -757,7 +932,7 @@ def run_sft(config: dict[str, Any]) -> str:
     dataset = dataset.filter(has_prompt)
     dataset = dataset.filter(has_response)
 
-    def format_example(example: dict[str, Any]) -> dict[str, str]:
+    def format_example(example: dict[str, Any]) -> dict[str, Any]:
         nonlocal debug_count
         prompt = str(example[sft.prompt_field])
         response = json.dumps(example[sft.response_field], ensure_ascii=False)
@@ -780,7 +955,58 @@ def run_sft(config: dict[str, Any]) -> str:
                 rendered_prompt=text,
                 response=response,
             )
-        return {DEFAULT_DATASET_TEXT_FIELD: text}
+            try:
+                prefix_text = render_chat_prompt(
+                    system_prompt=sft.system_prompt,
+                    user_prompt=user_prompt,
+                    tokenizer=tokenizer,
+                    model_name=sft.base_model,
+                    add_generation_prompt=True,
+                )
+                full_len = len(tokenizer(text)["input_ids"])
+                prefix_len = len(tokenizer(prefix_text)["input_ids"])
+                assistant_len = max(0, full_len - prefix_len)
+                print(
+                    f"[TRAIN_DEBUG] SFT sample {debug_count}: "
+                    f"tokens_full={full_len} tokens_prefix={prefix_len} "
+                    f"tokens_assistant={assistant_len}"
+                )
+            except Exception as exc:
+                print(f"[TRAIN_DEBUG] SFT token length calc failed: {exc}")
+            try:
+                candidates = example.get("config_candidates")
+                best_index = example.get("best_index")
+                payload = example.get(sft.response_field)
+                match = None
+                if isinstance(best_index, int) and isinstance(candidates, list):
+                    if 0 <= best_index < len(candidates):
+                        match = candidates[best_index] == payload
+                print(
+                    f"[TRAIN_DEBUG] SFT best_index={best_index} "
+                    f"payload_matches_best={match}"
+                )
+            except Exception as exc:
+                print(f"[TRAIN_DEBUG] SFT best_index check failed: {exc}")
+        response_start = text.rfind(response)
+        if response_start == -1:
+            raise ValueError("Response payload not found in rendered prompt.")
+        encoded = tokenizer(
+            text,
+            truncation=True,
+            max_length=sft.max_seq_length,
+            return_offsets_mapping=True,
+            add_special_tokens=False,
+        )
+        offsets = encoded.pop("offset_mapping")
+        labels: list[int] = []
+        for token_id, (start, end) in zip(encoded["input_ids"], offsets):
+            if start >= response_start and end > start:
+                labels.append(token_id)
+            else:
+                labels.append(-100)
+        encoded["labels"] = labels
+        encoded[DEFAULT_DATASET_TEXT_FIELD] = text
+        return encoded
 
     map_kwargs = {}
     if debug_prompts:
@@ -831,12 +1057,35 @@ def run_sft(config: dict[str, Any]) -> str:
         SFTTrainer.__init__, trainer_kwargs, tokenizer, "processing_class", "tokenizer"
     )
     if _supports_param(SFTTrainer.__init__, "dataset_text_field"):
-        trainer_kwargs["dataset_text_field"] = DEFAULT_DATASET_TEXT_FIELD
+        if "input_ids" not in dataset.column_names:
+            trainer_kwargs["dataset_text_field"] = DEFAULT_DATASET_TEXT_FIELD
     if _supports_param(SFTTrainer.__init__, "max_seq_length"):
         trainer_kwargs["max_seq_length"] = sft.max_seq_length
     if _supports_param(SFTTrainer.__init__, "packing"):
         trainer_kwargs["packing"] = False
     trainer = SFTTrainer(**trainer_kwargs)
+    if debug_prompts:
+        try:
+            sample = trainer.train_dataset[0]
+            labels = sample.get("labels") if isinstance(sample, dict) else None
+            if labels is not None:
+                supervised = [tok for tok in labels if tok != -100]
+                print(
+                    f"[TRAIN_DEBUG] SFT supervised_tokens={len(supervised)} "
+                    f"of {len(labels)}"
+                )
+                if supervised:
+                    decoded = tokenizer.decode(
+                        [
+                            tokenizer.pad_token_id if tok == -100 else tok
+                            for tok in labels
+                        ]
+                    ).replace(tokenizer.pad_token or "", " ")
+                    print(
+                        f"[TRAIN_DEBUG] SFT supervised_head={_truncate_debug_text(repr(decoded))}"
+                    )
+        except Exception as exc:
+            print(f"[TRAIN_DEBUG] SFT supervised token check failed: {exc}")
     trainer.train()
 
     trainer.model.save_pretrained(sft.output_dir)
