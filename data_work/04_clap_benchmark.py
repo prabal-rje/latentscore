@@ -428,7 +428,10 @@ def main(argv: Sequence[str] | None = None) -> None:
                         config_payload = payload.config.model_dump()
                     case "local":
                         client = local_clients[source.label]
-                        prompt = format_prompt_json(args.system_prompt, vibe)
+                        prompt = client.format_chat_prompt(
+                            system_prompt=args.system_prompt,
+                            user_prompt=wrap_vibe_for_chat(vibe),
+                        )
                         payload = client.generate_structured(prompt, MusicConfigPromptPayload)
                         config_payload = payload.config.model_dump()
                     case "baseline":

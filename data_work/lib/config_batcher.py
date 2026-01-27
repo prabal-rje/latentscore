@@ -64,17 +64,22 @@ class ConfigBatcher:
         batch_size: int,
         max_wait: float,
         call_batch: Callable[[Sequence[str]], Awaitable[list[MusicConfigPromptPayload]]],
+        num_workers: int = 4,
     ) -> None:
         if batch_size < 1:
             raise ValueError("batch_size must be >= 1")
         if max_wait < 0:
             raise ValueError("max_wait must be >= 0")
+        if num_workers < 1:
+            raise ValueError("num_workers must be >= 1")
         self._batch_size = batch_size
         self._max_wait = max_wait
         self._call_batch = call_batch
+        self._num_workers = num_workers
         self._queue: asyncio.Queue[BatchRequest] = asyncio.Queue()
         self._closed = False
-        self._worker = asyncio.create_task(self._run())
+        # Spawn multiple workers for concurrent batch processing
+        self._workers = [asyncio.create_task(self._run()) for _ in range(num_workers)]
 
     async def submit(self, vibe_text: str) -> MusicConfigPromptPayload:
         if self._closed:
@@ -86,15 +91,20 @@ class ConfigBatcher:
 
     async def aclose(self) -> None:
         self._closed = True
-        self._worker.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await self._worker
+        for worker in self._workers:
+            worker.cancel()
+        for worker in self._workers:
+            with contextlib.suppress(asyncio.CancelledError):
+                await worker
 
     async def _run(self) -> None:
         while True:
             first = await self._queue.get()
             batch = [first]
+            seen_vibes: set[str] = {first.vibe_text}
+            deferred: list[BatchRequest] = []
             deadline = asyncio.get_running_loop().time() + self._max_wait
+
             while len(batch) < self._batch_size:
                 timeout = deadline - asyncio.get_running_loop().time()
                 if timeout <= 0:
@@ -103,7 +113,19 @@ class ConfigBatcher:
                     request = await asyncio.wait_for(self._queue.get(), timeout)
                 except asyncio.TimeoutError:
                     break
+
+                # Dedupe: if same vibe already in batch, defer to next batch
+                if request.vibe_text in seen_vibes:
+                    deferred.append(request)
+                    continue
+
                 batch.append(request)
+                seen_vibes.add(request.vibe_text)
+
+            # Re-queue deferred items for next batch
+            for req in deferred:
+                await self._queue.put(req)
+
             vibes = [request.vibe_text for request in batch]
             try:
                 results = await self._call_batch(vibes)
@@ -115,5 +137,6 @@ class ConfigBatcher:
                 for request in batch:
                     request.future.set_exception(exc)
             finally:
+                # Only mark processed items as done (not deferred ones)
                 for _ in batch:
                     self._queue.task_done()

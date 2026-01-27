@@ -1,10 +1,16 @@
-"""Score generated configs using multiple scoring methods.
+"""Score generated configs using multiple scoring methods and re-select best candidate.
 
-This script:
-1. Reads config JSONL from 02b_generate_configs output
-2. Scores each config using specified scorers (CLAP, LLM judge, custom)
-3. Each scorer returns internal scores + a mandatory final_score
-4. Writes results incrementally with all scores attached
+This script implements quality-based Best-of-N selection:
+1. Reads config JSONL from 02b_generate_configs output (which has N candidates per vibe)
+2. Scores ALL valid candidates (not just the pre-selected one) with specified scorers
+3. Re-selects best_index based on highest score from primary scorer (first scorer, e.g., CLAP)
+4. Updates config_payload to the actual quality-based winner
+5. Stores per-candidate scores in candidate_scores for analysis
+6. Writes results incrementally with all scores attached
+
+Note: 02b does validation-only selection (first schema-valid candidate). This script
+refines that selection based on actual quality scores, choosing the highest-scoring
+valid candidate.
 
 Usage:
     python -m data_work.02c_score_configs \
@@ -45,7 +51,7 @@ from data_work.lib.scoring_types import DictScoreResult, validate_score_result
 _LOGGER = logging.getLogger("data_work.score_configs")
 
 DEFAULT_CACHE_PATH = Path("data_work/.cache/score_cache.sqlite")
-DEFAULT_AUDIO_DURATION = 12.0
+DEFAULT_AUDIO_DURATION = 30.0
 DEFAULT_PERIODIC_WRITE_INTERVAL = 60.0
 RUN_CONFIG_NAME = "run_config.json"
 
@@ -356,45 +362,99 @@ def score_row(
     row: ConfigGenerationRow,
     scorers: dict[str, Callable[[str, JsonDict], JsonDict]],
 ) -> ScoredRow:
-    """Score a single row with all scorers.
+    """Score ALL valid candidates and re-select best based on CLAP scores.
+
+    This implements quality-based Best-of-N selection:
+    1. Score each schema-valid candidate with all scorers (e.g., CLAP)
+    2. Re-select best_index = argmax of primary scorer (first scorer, typically CLAP)
+    3. Update config_payload to the actual winner
+    4. Store per-candidate scores in candidate_scores for analysis
 
     Args:
-        row: Input row with vibe_original and config_payload
+        row: Input row with vibe_original and config_candidates
         scorers: Dict of scorer name -> scorer function
 
     Returns:
-        Row with added scores dict
+        Row with candidate_scores, updated best_index/config_payload, and scores_external
     """
     vibe = row.vibe_original
-    config = row.config_payload
+    candidates = row.config_candidates
+    validation_scores = row.validation_scores
 
-    scores: dict[str, JsonDict] = {}
+    # Score ALL valid candidates
+    candidate_scores: dict[str, list[float | None]] = {name: [] for name in scorers}
 
-    if config is None:
-        # No valid config to score
-        for name in scorers:
-            scores[name] = {"error": "no_config", "final_score": 0.0}
-    else:
+    for i, candidate in enumerate(candidates):
+        # Check if candidate is valid (schema + palette validation from 02b)
+        is_valid = (
+            validation_scores.schema_valid[i] == 1 and validation_scores.palette_valid[i] == 1
+        )
+
+        if candidate is None or not is_valid:
+            for name in scorers:
+                candidate_scores[name].append(None)
+            continue
+
+        # Score this valid candidate with each scorer
         for name, scorer_fn in scorers.items():
             try:
-                result = scorer_fn(vibe, config)
+                result = scorer_fn(vibe, candidate)
 
                 # Validate result implements ScoreResult protocol
-                # Wrap dict results in DictScoreResult for protocol validation
                 score_result = DictScoreResult(result) if isinstance(result, dict) else result
                 validate_score_result(score_result, source=name)
 
-                # Store the raw dict result (with final_score validated)
-                scores[name] = (
+                candidate_scores[name].append(score_result.final_score)
+            except Exception as exc:
+                _LOGGER.warning("Scorer '%s' failed on candidate %d: %s", name, i, exc)
+                candidate_scores[name].append(None)
+
+    # Re-select best candidate based on primary scorer (first scorer, typically "clap")
+    primary_scorer = next(iter(scorers.keys())) if scorers else None
+    primary_scores = candidate_scores.get(primary_scorer, []) if primary_scorer else []
+
+    # Find best among valid candidates (highest CLAP score)
+    new_best_index = -1
+    best_score = -1.0
+    for i, score in enumerate(primary_scores):
+        if score is not None and score > best_score:
+            best_score = score
+            new_best_index = i
+
+    # Update config_payload to actual winner
+    new_config_payload = candidates[new_best_index] if new_best_index >= 0 else None
+
+    # Get detailed scores for the winner (for backwards compatibility with scores_external)
+    scores_external: dict[str, JsonDict] = {}
+    if new_config_payload is not None:
+        for name, scorer_fn in scorers.items():
+            try:
+                result = scorer_fn(vibe, new_config_payload)
+                score_result = DictScoreResult(result) if isinstance(result, dict) else result
+                validate_score_result(score_result, source=name)
+                scores_external[name] = (
                     result
                     if isinstance(result, dict)
                     else {"final_score": score_result.final_score}
                 )
             except Exception as exc:
-                _LOGGER.warning("Scorer '%s' failed: %s", name, exc)
-                scores[name] = {"error": str(exc), "final_score": 0.0}
+                _LOGGER.warning("Scorer '%s' failed on winner: %s", name, exc)
+                scores_external[name] = {"error": str(exc), "final_score": 0.0}
+    else:
+        # No valid config to score
+        for name in scorers:
+            scores_external[name] = {"error": "no_valid_config", "final_score": 0.0}
 
-    return ScoredRow(**row.model_dump(), scores_external=scores)
+    # Build output row with updated selection
+    row_data = row.model_dump()
+    row_data["best_index"] = new_best_index
+    row_data["config_payload"] = new_config_payload
+
+    return ScoredRow(
+        **row_data,
+        candidate_scores=candidate_scores,
+        scores_external=scores_external,
+    )
 
 
 def write_run_config(output_dir: Path, args: argparse.Namespace) -> None:

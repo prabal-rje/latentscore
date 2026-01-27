@@ -176,6 +176,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Limit total input records to process (0 = no limit). Use for quick tests.",
     )
     parser.add_argument(
+        "--max-vibes",
+        type=int,
+        default=0,
+        help="Stop when this many output vibes are extracted (0 = no limit). "
+        "Useful for targeting a specific dataset size regardless of input text count.",
+    )
+    parser.add_argument(
         "--max-concurrency",
         type=int,
         default=DEFAULT_MAX_CONCURRENCY,
@@ -790,6 +797,7 @@ async def main_async(args: argparse.Namespace) -> None:
     all_rows: list[VibeRow] = []
     error_count = 0
     abort_event = asyncio.Event()
+    max_vibes_reached = False
 
     try:
         with tqdm(total=len(records), desc="Extracting vibes") as progress:
@@ -806,6 +814,15 @@ async def main_async(args: argparse.Namespace) -> None:
                     # Write to progress file periodically
                     await progress_writer.add_rows(result.rows)
 
+                # Check if max-vibes limit reached
+                if args.max_vibes > 0 and len(all_rows) >= args.max_vibes:
+                    max_vibes_reached = True
+                    _LOGGER.info(
+                        "Reached --max-vibes limit (%d vibes). Stopping early.",
+                        args.max_vibes,
+                    )
+                    break
+
                 if tracker.threshold_reached(args.ewma_threshold):
                     abort_event.set()
                     _LOGGER.error(
@@ -821,11 +838,17 @@ async def main_async(args: argparse.Namespace) -> None:
             progress_writer.total_written,
         )
 
-    if abort_event.is_set():
+    # Cancel remaining tasks if we stopped early
+    if abort_event.is_set() or max_vibes_reached:
+        cancelled = 0
         for task in tasks:
             if not task.done():
                 task.cancel()
-        raise SystemExit("Excessive error rate - try again later.")
+                cancelled += 1
+        if cancelled:
+            _LOGGER.info("Cancelled %d remaining tasks.", cancelled)
+        if abort_event.is_set():
+            raise SystemExit("Excessive error rate - try again later.")
 
     _LOGGER.info(
         "Vibe extraction complete: %d rows from %d records (%d errors).",

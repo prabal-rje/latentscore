@@ -77,37 +77,27 @@ class RewardWeights(BaseModel):
 
 
 class ClapScorerConfig(BaseModel):
-    """Configuration for CLAP-based audio scoring."""
+    """Configuration for CLAP-based audio scoring.
+
+    Current formula (simplified for interpretability):
+        excess_badness = audio_bad_sim - text_bad_sim
+        penalty = max(0, excess_badness)  # ReLU: penalize only if audio sounds "bad"
+        final_score = audio_text_similarity - penalty
+
+    Range: [-3, 1] (higher = better)
+        - audio_text_similarity ∈ [-1, 1] (cosine similarity)
+        - penalty ∈ [0, 2] (clamped excess badness)
+
+    For GRPO/Best-of-N, only relative ordering matters - no normalization needed.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    softplus_beta_similarity: float = Field(
-        default=2.0,
+    # Reserved for future configurability (currently unused)
+    audio_duration: float = Field(
+        default=30.0,
         gt=0.0,
-        description="Softplus beta for text-audio similarity scaling",
-    )
-    softplus_beta_badness: float = Field(
-        default=5.0,
-        gt=0.0,
-        description="Softplus beta for badness penalty scaling",
-    )
-    badness_penalty_weight: float = Field(
-        default=0.5,
-        ge=0.0,
-        le=1.0,
-        description="Weight for badness penalty in raw score",
-    )
-    exponential_shift: float = Field(
-        default=-1.0,
-        description="Shift applied before exponential in final score",
-    )
-    score_clip_min: float = Field(
-        default=0.0,
-        description="Minimum clipped score",
-    )
-    score_clip_max: float = Field(
-        default=1.0,
-        description="Maximum clipped score",
+        description="Duration in seconds for audio synthesis before scoring",
     )
 
 

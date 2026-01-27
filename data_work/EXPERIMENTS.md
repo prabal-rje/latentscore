@@ -5,6 +5,11 @@ for smoke tests. All commands use the conda environment `latentscore-data`.
 
 ## Shared setup
 
+**Modal secret for W&B (one-time setup):**
+```bash
+conda run -n latentscore-data modal secret create wandb WANDB_API_KEY=<your_key>
+```
+
 IRL datasets used here:
 - Training (SFT): `data_work/.processed/SFT-Train.jsonl`
 - Training (GRPO): `data_work/.processed/GRPO.jsonl`
@@ -28,11 +33,103 @@ Notes:
 - Config payloads use `thinking` and `title`.
 - LLM judge `final_score` is the harmonic mean of `vibe_match` and `audio_quality`.
 
-**Data pipeline note (2026-01-18):** The data processing pipeline uses two scripts:
-- `02a_extract_vibes` - Vibe extraction only (cheap model: gpt-oss-20b), dedupes on vibe content
-- `02b_generate_configs` - Best-of-N config generation (SOTA model: Claude Opus)
+**Data pipeline note (2026-01-18, updated 2026-01-26):** The data processing pipeline uses three scripts:
+- `02a_extract_vibes` - Vibe extraction only (cheap model: gpt-oss-120b), dedupes on vibe content
+- `02b_generate_configs` - Best-of-N config generation (Gemini 3 Flash - performs as well as Opus at ~200x lower cost)
+- `02c_score_configs` - Quality-based Best-of-N selection using CLAP scores
 
 Legacy combined-pipeline entries have been removed; follow the two-step examples when re-running.
+
+**Best-of-N selection note (2026-01-25):** Selection now happens in two stages:
+- `02b_generate_configs` - Validation-only selection (picks first schema-valid candidate)
+- `02c_score_configs` - Quality-based selection (scores ALL valid candidates with CLAP, picks highest)
+
+The `candidate_scores` field in 02c output shows per-candidate CLAP scores. The `best_index`
+and `config_payload` in 02c output reflect the CLAP-based winner, which may differ from 02b.
+
+---
+
+## Production data run (2026-01-26)
+
+The following commands were used to generate the production dataset.
+
+### Step 1: Vibe extraction (02a)
+
+```bash
+conda run -n latentscore-data python -m data_work.02a_extract_vibes \
+  --input-dir data_work/2026-01-18_outputs \
+  --output-dir data_work/2026-01-26_vibes \
+  --model openrouter/openai/gpt-oss-120b \
+  --api-key-env OPENROUTER_API_KEY \
+  --env-file .env \
+  --seed 42 \
+  --error-rate 0.15 \
+  --max-input-tokens 80000 \
+  --max-concurrency 16 \
+  --max-qps 10 \
+  --dedupe-threshold 0.95 \
+  --limit 160 \
+  --max-vibes 14000
+```
+
+Notes:
+- `--limit 160`: Only process 160 of the 3000 available texts (API reliability issues)
+- `--max-vibes 14000`: Stop early once enough vibes extracted, avoiding hanging API calls
+
+Results:
+- Texts processed: 160 (of 3000 available)
+- Pre-dedupe vibes: 14,035
+- Post-dedupe vibes: 10,558
+- Output: `data_work/2026-01-26_vibes/`
+
+### Step 2: Config generation (02b)
+
+```bash
+conda run -n latentscore-data python -m data_work.02b_generate_configs \
+  --input-dir data_work/2026-01-26_vibes \
+  --output-dir data_work/2026-01-26_processed \
+  --model gemini/gemini-3-flash-preview \
+  --api-key-env GEMINI_API_KEY \
+  --env-file .env \
+  --num-candidates 5 \
+  --temperature 0.8 \
+  --seed 42 \
+  --max-concurrency 500 \
+  --max-qps 300.0
+```
+
+Notes:
+- High concurrency (500) to utilize Gemini's 20K RPM rate limit
+- N=5 candidates per vibe for Best-of-N selection
+- Estimated cost: ~$40-90 (batching enabled)
+- Output: `data_work/2026-01-26_processed/`
+
+### Step 3: CLAP scoring (02c)
+
+```bash
+conda run -n latentscore-data python -m data_work.02c_score_configs \
+  --input-dir data_work/2026-01-26_processed \
+  --output-dir data_work/2026-01-26_scored \
+  --scorers 'clap' \
+  --env-file .env
+```
+
+Results:
+| Split | Rows | Mean CLAP | Std |
+|-------|------|-----------|-----|
+| GRPO | 2,672 | 0.181 | 0.081 |
+| SFT-Train | 5,749 | 0.204 | 0.083 |
+| SFT-Val | 534 | 0.198 | 0.082 |
+| TEST | 1,603 | 0.195 | 0.082 |
+| **Total** | **10,558** | 0.196 | 0.083 |
+
+Notes:
+- CLAP scoring took ~9 hours (CPU-bound audio synthesis at ~0.32 vibes/sec)
+- Best-of-5 improvement: +28% over single candidate baseline
+- GRPO scores lower than SFT-Train as expected (diversity sampling selects harder cases)
+- Output: `data_work/2026-01-26_scored/`
+
+---
 
 ## Core ablations
 

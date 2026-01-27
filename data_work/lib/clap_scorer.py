@@ -21,6 +21,15 @@ class ClapScore(BaseModel):
     """CLAP scoring result for a single vibe-audio pair.
 
     Implements ScoreResult protocol via final_score property.
+
+    Formula:
+        excess_badness = audio_bad_sim - text_bad_sim
+        penalty = max(0, excess_badness)  # [0, 2], zero if audio isn't "bad"
+        final_score = audio_text_similarity - penalty
+
+    Range: [-3, 1] (higher = better)
+        Best:  audio_text_sim=1.0, penalty=0 → 1.0
+        Worst: audio_text_sim=-1.0, penalty=2.0 → -3.0
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -131,9 +140,12 @@ class ClapScorer:
         audio_bad_sim = self._cosine_sim(audio_embed, bad_embed)
         text_bad_sim = self._cosine_sim(text_embed, bad_embed)
         excess_badness = audio_bad_sim - text_bad_sim
-        penalty = self._softplus(excess_badness, beta=5.0)
-        raw_score = self._softplus(audio_text_sim, beta=2.0) - 0.5 * penalty
-        reward = float(np.clip(math.exp(raw_score - 1.0), 0.0, 1.0))
+        # Penalize only if audio sounds "bad" beyond what vibe implies
+        penalty = max(0.0, excess_badness)
+        # Direct formula: similarity minus badness penalty
+        raw_score = audio_text_sim - penalty
+        # For GRPO/Best-of-N, only relative ordering matters
+        reward = raw_score
 
         return ClapScore(
             audio_text_similarity=float(audio_text_sim),

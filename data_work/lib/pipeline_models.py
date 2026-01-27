@@ -44,8 +44,8 @@ class VibeRow(BaseModel):
     vibe_model: str
 
 
-class ConfigCandidateScores(BaseModel):
-    """Per-candidate validation scores."""
+class ValidationScores(BaseModel):
+    """Per-candidate validation flags (not quality scores)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -59,13 +59,21 @@ class ConfigGenerationRow(VibeRow):
 
     config_model: str
     config_candidates: list[JsonDict | None]
-    scores: ConfigCandidateScores
+    validation_scores: ValidationScores
     best_index: int
     config_payload: JsonDict | None
     config_error: str | None = None
 
 
 class ScoredRow(ConfigGenerationRow):
-    """Row emitted by 02c_score_configs."""
+    """Row emitted by 02c_score_configs.
 
+    Note: 02c re-selects best_index based on CLAP scores (highest score among valid candidates),
+    overriding the validation-only selection from 02b. The config_payload is updated to match.
+    """
+
+    # Per-candidate CLAP scores: {"clap": [0.52, 0.61, None, 0.48, 0.55]}
+    # None indicates invalid candidate or scoring error
+    candidate_scores: dict[str, list[float | None]] = Field(default_factory=dict)
+    # Detailed scores for the selected winner (unchanged from before)
     scores_external: dict[str, JsonDict] = Field(default_factory=dict)

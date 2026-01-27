@@ -44,7 +44,7 @@ python -m data_work.01_download_base_data \
 ### 1.2 Vibe Extraction
 
 **Script:** `02a_extract_vibes.py`
-**Model:** `openrouter/openai/gpt-oss-20b` (cheap model - vibe extraction is straightforward)
+**Model:** `openrouter/openai/gpt-oss-120b` (cheap model with better quality than 20b variant)
 
 **Input truncation:**
 - Max input tokens: 80,000 (whitespace-tokenized)
@@ -62,18 +62,35 @@ python -m data_work.01_download_base_data \
 ```bash
 python -m data_work.02a_extract_vibes \
   --input-dir data_work/2026-01-18_outputs \
-  --output-dir data_work/2026-01-18_vibes \
-  --model openrouter/openai/gpt-oss-20b \
+  --output-dir data_work/2026-01-26_vibes \
+  --model openrouter/openai/gpt-oss-120b \
   --api-key-env OPENROUTER_API_KEY \
+  --env-file .env \
   --seed 42 \
   --error-rate 0.15 \
   --max-input-tokens 80000 \
   --max-concurrency 16 \
   --max-qps 10 \
-  --dedupe-threshold 0.95
+  --dedupe-threshold 0.95 \
+  --limit 160 \
+  --max-vibes 14000
 ```
 
-**Status:** [ ] Not started
+**Note:** `--limit 160` processes only 160 of the 3000 texts. `--max-vibes 14000` ensures early termination once enough vibes are extracted, avoiding hanging API calls.
+
+**Status:** [x] Complete (2026-01-26)
+
+**Results:**
+- Pre-dedupe vibes: 14,035
+- Post-dedupe vibes: 10,558 (24.8% removed)
+- Split distribution:
+  | Split | Rows |
+  |-------|------|
+  | SFT-Train | 5,749 |
+  | SFT-Val | 534 |
+  | GRPO | 2,672 |
+  | TEST | 1,603 |
+  | **Total** | **10,558** |
 
 ---
 
@@ -149,7 +166,7 @@ python -m data_work.02a_extract_vibes \
 ### 1.6 Config Generation (Best-of-N)
 
 **Script:** `02b_generate_configs.py`
-**Model:** `anthropic/claude-opus-4-5-20251101` (SOTA model - config generation needs intelligence)
+**Model:** `gemini/gemini-3-flash-preview` (performs as well as Opus at ~200x lower cost; see model comparison 2026-01-26)
 
 **Why separate scripts:**
 - Can re-run config generation without re-extracting vibes
@@ -161,15 +178,17 @@ python -m data_work.02a_extract_vibes \
 - Must produce valid JSON matching strict schema (3 palettes × 5 colors)
 - Cheap models fail validation frequently (palette errors, missing fields)
 
-**Best-of-N sampling:**
+**Best-of-N sampling (two-stage selection):**
 - Generate N=5 config candidates per vibe
 - Temperature: 0.8 for diversity
-- Score each candidate:
+- Score each candidate for validity:
   - `format_valid`: Parses as JSON
   - `schema_valid`: Validates against MusicConfigPromptPayload
   - `palette_valid`: Exactly 3 palettes with 5 colors each
-- Select best valid config (priority: schema > palette > format)
-- Store all N candidates + scores for analysis
+- **Stage 1 (02b):** Validation-only selection - picks first schema-valid candidate (tentative)
+- **Stage 2 (02c):** Quality-based selection - scores ALL valid candidates with CLAP,
+  re-selects `best_index` based on highest CLAP score
+- Store all N candidates + validation scores + CLAP scores for analysis
 
 **Prompt contract + caching (2026-01-18):**
 - System prompt contains all instructions + schema (see `common/prompts.py`)
@@ -185,28 +204,27 @@ python -m data_work.02a_extract_vibes \
 **Command:**
 ```bash
 python -m data_work.02b_generate_configs \
-  --input-dir data_work/2026-01-18_vibes \
-  --output-dir data_work/2026-01-18_processed \
-  --model anthropic/claude-opus-4-5-20251101 \
-  --api-key-env ANTHROPIC_API_KEY \
+  --input-dir data_work/2026-01-26_vibes \
+  --output-dir data_work/2026-01-26_processed \
+  --model gemini/gemini-3-flash-preview \
+  --api-key-env GEMINI_API_KEY \
+  --env-file .env \
   --num-candidates 5 \
   --temperature 0.8 \
   --seed 42 \
-  --batch-size 1 \
-  --batch-wait-ms 200 \
-  --max-concurrency 4 \
-  --max-qps 2
+  --max-concurrency 500 \
+  --max-qps 300.0
 ```
 
-**Status:** [ ] Not started
+**Status:** [x] Complete (2026-01-26)
 
 **Output schema:**
 ```json
 {
   "...all vibe fields from 02a...",
-  "config_model": "anthropic/claude-opus-4-5-20251101",
+  "config_model": "gemini/gemini-3-flash-preview",
   "config_candidates": [/* N configs (thinking, title, config, palettes) */],
-  "scores": {
+  "validation_scores": {
     "format_valid": [1, 1, 1, 0, 1],
     "schema_valid": [1, 1, 0, 0, 1],
     "palette_valid": [1, 1, 0, 0, 1]
@@ -217,53 +235,74 @@ python -m data_work.02b_generate_configs \
 }
 ```
 
-**Stats:**
-- Total vibe rows: ___
-- Rows per split: SFT-Train=___, SFT-Val=___, GRPO=___, TEST=___
-- Schema validity rate: ___%
-- Best-of-N improvement: ___% (vs single generation)
+**Stats (2026-01-26 run):**
+- Total vibe rows: 10,558
+- Rows per split: SFT-Train=5,749, SFT-Val=534, GRPO=2,672, TEST=1,603
+- Schema validity rate: ~99% (N=5 candidates ensures at least one valid)
+- Best-of-5 improvement: +28% (vs single generation baseline)
 
 ---
 
-### 1.7 External Scoring (Optional)
+### 1.7 External Scoring and Quality-Based Selection
 
 **Script:** `02c_score_configs.py`
 
-**Purpose:** Add external quality scores to configs (e.g., CLAP, LLM-as-judge) for analysis
-or alternative Best-of-N selection.
+**Purpose:** Perform quality-based Best-of-N selection by scoring ALL valid candidates
+with CLAP (or other scorers) and selecting the highest-scoring candidate.
+
+**Why quality-based selection:**
+- 02b does validation-only selection (first schema-valid candidate) - doesn't consider quality
+- 02c scores ALL N candidates and picks the one with highest CLAP score
+- This ensures the selected config is not just valid, but the best quality among valid options
+- Per-candidate scores are stored in `candidate_scores` for analysis
 
 **Scorers available:**
-- `clap`: LAION-CLAP audio-text similarity (requires laion_clap)
+- `clap`: LAION-CLAP audio-text similarity (requires laion_clap) - **primary scorer for selection**
 - `llm_judge`: LLM-as-judge using multimodal models
 - Custom: `path/to/script.py:fn_name` (must return `{final_score: float}`)
 
 **ScoreResult protocol:**
 All scorers must return results implementing the `ScoreResult` protocol with a mandatory
-`final_score` property in [0.0, 1.0]. This is enforced at runtime.
+`final_score` property (higher = better, unbounded). Only relative ordering matters for GRPO/Best-of-N.
 
 **Command:**
 ```bash
 python -m data_work.02c_score_configs \
-  --input-dir data_work/2026-01-18_processed \
-  --output-dir data_work/2026-01-18_scored \
-  --scorers 'clap,llm_judge' \
+  --input-dir data_work/2026-01-26_processed \
+  --output-dir data_work/2026-01-26_scored \
+  --scorers 'clap' \
   --env-file .env
 ```
 
-**Status:** [ ] Not started
+**Status:** [x] Complete (2026-01-26)
+
+**CLAP Score Results (2026-01-26 run):**
+| Split | Rows | Mean CLAP | Std |
+|-------|------|-----------|-----|
+| GRPO | 2,672 | 0.181 | 0.081 |
+| SFT-Train | 5,749 | 0.204 | 0.083 |
+| SFT-Val | 534 | 0.198 | 0.082 |
+| TEST | 1,603 | 0.195 | 0.082 |
+
+**Note:** GRPO scores are lower than SFT-Train as expected - diversity sampling selects harder/more diverse vibes which have lower average CLAP alignment.
 
 **Output schema:**
 ```json
 {
   "...all fields from 02b...",
+  "best_index": 2,  // RE-SELECTED based on CLAP score (may differ from 02b)
+  "config_payload": {/* RE-SELECTED winner */},
+  "candidate_scores": {
+    "clap": [0.52, 0.61, 0.68, null, 0.55]  // Per-candidate CLAP scores (null = invalid/error)
+  },
   "scores_external": {
     "clap": {
-      "audio_text_similarity": 0.65,
+      "audio_text_similarity": 0.68,
       "audio_bad_similarity": 0.12,
       "excess_badness": 0.0,
       "penalty": 0.0,
-      "raw_score": 0.65,
-      "final_score": 0.58
+      "raw_score": 0.68,
+      "final_score": 0.68
     },
     "llm_judge": {
       "vibe_match": 0.8,
@@ -274,27 +313,48 @@ python -m data_work.02c_score_configs \
 }
 ```
 
-LLM judge `final_score` uses the harmonic mean of `vibe_match` and `audio_quality` (equal weights).
+Notes:
+- `best_index` and `config_payload` are updated to reflect the CLAP-based winner
+- `candidate_scores` shows per-candidate CLAP scores for all N candidates
+- `scores_external` contains detailed breakdown for the selected winner
+- LLM judge `final_score` uses the harmonic mean of `vibe_match` and `audio_quality` (equal weights)
 
 ---
 
 ## 2. Training
 
+### 2.0 Prerequisites
+
+**Modal Secret for W&B:**
+
+Training runs on Modal and requires a W&B API key for experiment tracking. Create a Modal secret once:
+
+```bash
+conda run -n latentscore-data modal secret create wandb WANDB_API_KEY=<your_key>
+```
+
+Get your API key from https://wandb.ai/authorize
+
 ### 2.1 SFT (Supervised Fine-Tuning)
 
 **Base model:** `unsloth/gemma-3-270m-it`
-**Training data:** `data_work/2026-01-18_processed/SFT-Train.jsonl`
-**Validation data:** `data_work/2026-01-18_processed/SFT-Val.jsonl`
+**Training data:** `data_work/2026-01-26_scored/SFT-Train.jsonl`
+**Validation data:** `data_work/2026-01-26_scored/SFT-Val.jsonl`
 
 **Hyperparameters:**
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| Epochs | 3 | |
-| Batch size | 16 | |
-| Learning rate | 2e-4 | |
-| LoRA rank | 16 | |
-| LoRA alpha | 16 | |
-| Max seq length | 2048 | |
+| Epochs | 4 | |
+| Batch size | 16 | Effective batch = 32 with grad_accum=2 |
+| Gradient accumulation | 2 | |
+| Learning rate | 1e-4 | Conservative for 270M + LoRA |
+| LR scheduler | cosine | |
+| Weight decay | 0.01 | Regularization |
+| LoRA rank | 32 | Balance capacity vs overfit |
+| LoRA alpha | 32 | Matches rank |
+| LoRA dropout | 0.0 | Optimized |
+| Max seq length | 4096 | Fits long JSON outputs (~2k chars) |
+| Optimizer | adamw_8bit | Memory efficient |
 | Warmup ratio | 0.06 | |
 
 **Debugging:** Add `--debug-prompts` (optionally `--debug-prompts-max`) to print a few
@@ -303,12 +363,23 @@ formatted system/user prompt samples for verification.
 **Command:**
 ```bash
 python -m data_work.03_modal_train sft \
-  --data data_work/2026-01-18_processed/SFT-Train.jsonl \
-  --output prod-sft-gemma3-270m \
+  --data data_work/2026-01-26_scored/SFT-Train.jsonl \
+  --output prod-sft-gemma3-270m-hq \
   --base-model gemma3-270m \
-  --epochs 3 \
+  --epochs 4 \
   --batch-size 16 \
-  --max-seq-length 2048 \
+  --grad-accum 2 \
+  --lr 1e-4 \
+  --lr-scheduler cosine \
+  --warmup-ratio 0.06 \
+  --weight-decay 0.01 \
+  --lora-r 32 \
+  --lora-alpha 32 \
+  --lora-dropout 0.0 \
+  --lora-bias none \
+  --max-seq-length 4096 \
+  --optim adamw_8bit \
+  --seed 42 \
   --download-dir data_work/.modal_outputs
 ```
 
@@ -325,7 +396,7 @@ python -m data_work.03_modal_train sft \
 
 **Base model:** `unsloth/gemma-3-270m-it`
 **Init adapter:** SFT output from 2.1
-**Training data:** `data_work/2026-01-18_processed/GRPO.jsonl` (prompts only)
+**Training data:** `data_work/2026-01-26_scored/GRPO.jsonl` (prompts only)
 
 **Why GRPO after SFT:**
 - SFT teaches the format (vibe → valid config)
@@ -354,21 +425,35 @@ python -m data_work.03_modal_train sft \
 
 **Command:**
 ```bash
-python -m data_work.03_modal_train grpo \
-  --data data_work/2026-01-18_processed/GRPO.jsonl \
+AUDIO_REWARD_DURATION=30 \
+python -m data_work.03_modal_train --advanced grpo \
+  --data data_work/2026-01-26_scored/GRPO.jsonl \
   --model unsloth/gemma-3-270m-it \
-  --init-adapter-dir prod-sft-gemma3-270m \
+  --init-adapter-dir prod-sft-gemma3-270m-hq \
   --output prod-grpo-gemma3-270m \
   --epochs 3 \
   --batch-size 16 \
-  --max-seq-length 2048 \
+  --grad-accum 1 \
+  --lr 5e-5 \
+  --lr-scheduler cosine \
+  --warmup-ratio 0.06 \
+  --weight-decay 0.01 \
+  --lora-r 16 \
+  --lora-alpha 16 \
+  --lora-dropout 0.0 \
+  --lora-bias none \
+  --max-seq-length 4096 \
   --max-completion-length 2048 \
   --num-generations 4 \
   --beta 0.04 \
   --temperature 0.8 \
   --top-p 0.95 \
   --top-k 64 \
-  --download-dir data_work/.modal_outputs
+  --audio-reward data_work.audio_rewards:score_clap \
+  --download-dir data_work/.modal_outputs \
+  --seed 42 \
+  --wandb-project latentscore-alpha \
+  --wandb-entity rjeinc
 ```
 
 **Status:** [ ] Not started
@@ -384,12 +469,12 @@ python -m data_work.03_modal_train grpo \
 
 ### 3.1 CLAP Benchmark
 
-**Eval set:** `data_work/2026-01-18_processed/TEST.jsonl`
+**Eval set:** `data_work/2026-01-26_scored/TEST.jsonl`
 
 **Command:**
 ```bash
 python -m data_work.04_clap_benchmark \
-  --input data_work/2026-01-18_processed/TEST.jsonl \
+  --input data_work/2026-01-26_scored/TEST.jsonl \
   --local-model data_work/.modal_outputs/prod-grpo-gemma3-270m:production \
   --baseline random \
   --baseline rule_based \
@@ -451,7 +536,10 @@ Track actual runs here as they complete.
 
 | Date | Step | Command | Output | Notes |
 |------|------|---------|--------|-------|
-| | | | | |
+| 2026-01-18 | 01 | `01_download_base_data --sample-size 1000` | `data_work/2026-01-18_outputs` | 3,000 texts from Common Pile |
+| 2026-01-26 | 02a | `02a_extract_vibes --limit 160 --max-vibes 14000` | `data_work/2026-01-26_vibes` | 160 texts → 14,035 vibes → 10,558 post-dedupe |
+| 2026-01-26 | 02b | `02b_generate_configs --num-candidates 5 --max-concurrency 500` | `data_work/2026-01-26_processed` | Gemini Flash, N=5, ~$230 cost |
+| 2026-01-26 | 02c | `02c_score_configs --scorers clap` | `data_work/2026-01-26_scored` | ~9 hours, Best-of-5 +28% improvement |
 
 ---
 
@@ -468,9 +556,10 @@ Document key decisions made during the process.
 | Truncate texts to 80k tokens | Avoids API context limit errors (131k limit minus prompt/schema overhead). Truncation preferred over exclusion to avoid selection bias toward shorter texts. 80k tokens ≈ 60k words, sufficient to establish vibe. | 2026-01-18 |
 | Dedupe threshold 0.95 | More aggressive than default 0.97; catches subtle near-duplicates while remaining safe | 2026-01-18 |
 | Separate vibe extraction (02a) and config generation (02b) | Allows re-running config generation without re-extracting vibes. Different models for different tasks. Incremental writes prevent data loss. | 2026-01-18 |
-| Cheap model (gpt-oss-20b) for vibe extraction | Vibe extraction is straightforward - doesn't need SOTA intelligence. Cost effective. | 2026-01-18 |
-| SOTA model (Claude Opus) for config generation | Config generation requires understanding musical semantics. Must produce valid JSON matching strict schema. Cheap models fail validation frequently. | 2026-01-18 |
+| gpt-oss-120b for vibe extraction | Better quality vibes than smaller variants while still being cheap. | 2026-01-26 |
+| Gemini 3 Flash for config generation | Model comparison (2026-01-26) showed Flash performs as well as Opus (0.102 vs 0.090 best-of-N avg) at significantly lower cost. | 2026-01-26 |
 | Best-of-N config generation (N=5) | Multiple candidates increase probability of valid config. Store all N + scores for analysis. Temperature 0.8 for diversity. | 2026-01-18 |
-| ScoreResult protocol for all scorers | Enforces mandatory `final_score` property in [0,1] across all scoring systems (CLAP, LLM, rewards, custom). Runtime validation prevents silent failures. | 2026-01-18 |
+| ScoreResult protocol for all scorers | Enforces mandatory `final_score` property (higher=better, unbounded) across all scoring systems (CLAP, LLM, rewards, custom). Only relative ordering matters for GRPO/Best-of-N. | 2026-01-18 |
 | Separate scoring script (02c) | Decouples scoring from config generation. Can re-run scoring with different methods. Supports multiple scorers in one pass. | 2026-01-18 |
 | Config payload uses `thinking` and `title` | Aligns prompt outputs with new naming. | 2026-01-19 |
+| Quality-based Best-of-N selection in 02c | 02b does validation-only selection (first valid). 02c scores ALL valid candidates with CLAP and re-selects based on highest quality score. This ensures selected config is not just valid, but best quality among valid options. Per-candidate scores stored in `candidate_scores` for analysis. | 2026-01-25 |

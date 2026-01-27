@@ -131,6 +131,27 @@ def test_default_max_seq_length_is_4096():
     assert config.data.max_seq_length == 4096
 
 
+def test_default_grpo_max_completion_length_is_3072() -> None:
+    """Default GRPO completion length should be ~3k tokens."""
+    import importlib
+
+    modal_train = importlib.import_module("data_work.03_modal_train")
+    args = modal_train.parse_args(
+        [
+            "grpo",
+            "--data",
+            "data_work/.tmp_grpo_one.jsonl",
+            "--output",
+            "exp-grpo-default-length",
+            "--model",
+            "unsloth/gemma-3-270m-it",
+            "--epochs",
+            "1",
+        ]
+    )
+    assert args.max_completion_length == 3072
+
+
 def test_resolve_model_path_defaults_to_outputs():
     """Bare model names should resolve to the Modal outputs volume."""
     import importlib

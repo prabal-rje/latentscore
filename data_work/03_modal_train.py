@@ -67,7 +67,7 @@ DEFAULT_PROMPT_FIELD = "vibe_noisy"
 DEFAULT_RESPONSE_FIELD = "config_payload"
 DEFAULT_MAX_SEQ_LEN = 4096
 
-DEFAULT_GRPO_MAX_COMPLETION_LENGTH = 2048
+DEFAULT_GRPO_MAX_COMPLETION_LENGTH = 3072
 DEFAULT_GRPO_TEMPERATURE = 0.7
 DEFAULT_GRPO_TOP_P = 0.8
 DEFAULT_GRPO_TOP_K = 20
@@ -126,6 +126,7 @@ if modal is None:
     RETRY_POLICY = None
     OUTPUTS_VOLUME = None
     TRAIN_IMAGE = None
+    WANDB_SECRETS: list[Any] = []
     app = _ModalStubApp()
 else:
     TRAIN_IMAGE_PACKAGES = (
@@ -171,6 +172,11 @@ else:
         .env({"HF_HOME": "/model_cache", "PYTHONPATH": REMOTE_REPO_PATH})
         .add_local_dir(REPO_ROOT, remote_path=REMOTE_REPO_PATH, copy=True)
     )
+    try:
+        wandb_secret_name = os.environ.get("WANDB_SECRET_NAME", "wandb")
+        WANDB_SECRETS = [modal.Secret.from_name(wandb_secret_name)]
+    except Exception:
+        WANDB_SECRETS = []
     app = modal.App(APP_NAME)
 
 
@@ -328,6 +334,23 @@ def _log_wandb_run(run: Any) -> None:
     print(f"W&B run: {run_name} ({run_id})")
 
 
+def _try_init_weave(project: str | None) -> None:
+    """Best-effort Weave init; skip unless explicitly enabled."""
+    if not project:
+        return
+    if os.environ.get("WEAVE_ENABLED", "").lower() not in {"1", "true", "yes"}:
+        return
+    try:
+        import weave
+    except Exception as exc:  # pragma: no cover - runtime environment only
+        LOGGER.warning("Weave import failed; skipping: %s", exc)
+        return
+    try:
+        weave.init(project)
+    except Exception as exc:  # pragma: no cover - runtime environment only
+        LOGGER.warning("Weave init failed; skipping: %s", exc)
+
+
 def _resolve_remote_data_file(data_file: Path) -> str:
     try:
         relative = data_file.resolve().relative_to(REPO_ROOT)
@@ -463,7 +486,7 @@ def _validate_max_seq_length(max_seq_length: int, observed_max_length: int) -> N
         )
 
 
-@app.function(image=TRAIN_IMAGE, timeout=60, retries=0)
+@app.function(image=TRAIN_IMAGE, timeout=60, retries=0, secrets=WANDB_SECRETS)
 def check_imports() -> dict[str, Any]:
     repo_exists = Path(REMOTE_REPO_PATH).exists()
     repo_entries = sorted(Path(REMOTE_REPO_PATH).iterdir()) if repo_exists else []
@@ -629,6 +652,7 @@ def _ensure_lora_trainable(model: Any) -> None:
     timeout=TIMEOUT_HOURS * 3600,
     retries=RETRY_POLICY,
     volumes={REMOTE_OUTPUT_PATH: OUTPUTS_VOLUME},
+    secrets=WANDB_SECRETS,
 )
 def run_sft(config: dict[str, Any]) -> str:
     # isort: off
@@ -639,7 +663,6 @@ def run_sft(config: dict[str, Any]) -> str:
     import datasets
     import torch
     import wandb
-    import weave
     from transformers import TrainingArguments
     from trl import SFTTrainer
 
@@ -654,7 +677,7 @@ def run_sft(config: dict[str, Any]) -> str:
             name=sft.wandb_run_name,
             config=sft.model_dump(),
         )
-        weave.init(sft.wandb_project)
+        _try_init_weave(sft.wandb_project)
         _log_wandb_run(wandb_run)
 
     def detect_model_family(model_key: str) -> ModelFamily:
@@ -832,6 +855,7 @@ def run_sft(config: dict[str, Any]) -> str:
     timeout=TIMEOUT_HOURS * 3600,
     retries=RETRY_POLICY,
     volumes={REMOTE_OUTPUT_PATH: OUTPUTS_VOLUME},
+    secrets=WANDB_SECRETS,
 )
 def run_grpo(config: dict[str, Any]) -> str:
     # isort: off
@@ -842,7 +866,6 @@ def run_grpo(config: dict[str, Any]) -> str:
     import datasets
     import torch
     import wandb
-    import weave
     from peft.utils import load_peft_weights, set_peft_model_state_dict
     from transformers import TrainingArguments
     from trl import GRPOTrainer
@@ -863,7 +886,7 @@ def run_grpo(config: dict[str, Any]) -> str:
             name=grpo.wandb_run_name,
             config=grpo.model_dump(),
         )
-        weave.init(grpo.wandb_project)
+        _try_init_weave(grpo.wandb_project)
         _log_wandb_run(wandb_run)
 
     audio_scorer = _parse_audio_scorer(grpo.audio_reward)
@@ -959,8 +982,14 @@ def run_grpo(config: dict[str, Any]) -> str:
 
     def format_prompts(example: dict[str, Any]) -> dict[str, str]:
         nonlocal debug_count
-        vibe = str(example[grpo.prompt_field])
-        user_prompt = wrap_vibe_for_chat(vibe)
+        vibe_noisy = str(example[grpo.prompt_field])
+        reward_vibe = example.get("vibe_original")
+        reward_vibe_text = (
+            str(reward_vibe)
+            if reward_vibe not in (None, "")
+            else vibe_noisy
+        )
+        user_prompt = wrap_vibe_for_chat(vibe_noisy)
         text = render_chat_prompt(
             system_prompt=grpo.system_prompt,
             user_prompt=user_prompt,
@@ -978,7 +1007,7 @@ def run_grpo(config: dict[str, Any]) -> str:
                 rendered_prompt=text,
                 response=None,
             )
-        return {"prompt": text, "vibe": vibe}
+        return {"prompt": text, "vibe": reward_vibe_text}
 
     map_kwargs = {}
     if debug_prompts:

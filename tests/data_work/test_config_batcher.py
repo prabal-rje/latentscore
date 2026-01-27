@@ -42,7 +42,8 @@ def test_config_batcher_batches_in_order():
         return [_payload_for(vibe) for vibe in vibes]
 
     async def run():
-        batcher = ConfigBatcher(batch_size=2, max_wait=0.01, call_batch=call_batch)
+        # Use num_workers=1 for deterministic batching behavior in tests
+        batcher = ConfigBatcher(batch_size=2, max_wait=0.01, call_batch=call_batch, num_workers=1)
         results = await asyncio.gather(
             batcher.submit("one"),
             batcher.submit("two"),

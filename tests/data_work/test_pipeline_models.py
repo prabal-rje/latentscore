@@ -30,7 +30,7 @@ def test_pipeline_models_validate_and_forbid_extra() -> None:
             **row.model_dump(),
             "config_model": "anthropic/claude-opus-4-5-20251101",
             "config_candidates": [None],
-            "scores": {"format_valid": [1], "schema_valid": [0], "palette_valid": [0]},
+            "validation_scores": {"format_valid": [1], "schema_valid": [0], "palette_valid": [0]},
             "best_index": -1,
             "config_payload": None,
             "config_error": "error",

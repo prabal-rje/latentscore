@@ -1,7 +1,7 @@
 """Strict typing for scoring results across all data_work scoring systems.
 
 All scoring results MUST implement the ScoreResult protocol, which requires:
-- A `final_score` property returning a float in [0.0, 1.0]
+- A `final_score` property returning a float (higher = better)
 
 This ensures consistent interfaces across:
 - CLAP scoring (clap_scorer.py)
@@ -26,9 +26,8 @@ class ScoreResult(Protocol):
     Any scoring result - whether from CLAP, LLM judge, reward computation,
     or custom scorers - MUST provide a final_score property.
 
-    The final_score should be normalized to [0.0, 1.0] where:
-    - 0.0 = worst possible score
-    - 1.0 = best possible score
+    The final_score is unbounded (higher = better). No normalization required.
+    For GRPO and Best-of-N, only relative ordering matters.
 
     Example implementation:
         class MyScore(BaseModel):
@@ -43,7 +42,7 @@ class ScoreResult(Protocol):
     @property
     @abstractmethod
     def final_score(self) -> float:
-        """Return the final normalized score in [0.0, 1.0]."""
+        """Return the final score (higher = better, unbounded)."""
         ...
 
 
@@ -61,7 +60,6 @@ def validate_score_result(result: Any, source: str = "scorer") -> None:
 
     Raises:
         TypeError: If result doesn't implement ScoreResult protocol
-        ValueError: If final_score is not in valid range
     """
     if not isinstance(result, ScoreResult):
         raise TypeError(
@@ -74,9 +72,6 @@ def validate_score_result(result: Any, source: str = "scorer") -> None:
         raise TypeError(
             f"Scorer '{source}' final_score must be numeric, got {type(score).__name__}"
         )
-
-    if not (0.0 <= score <= 1.0):
-        raise ValueError(f"Scorer '{source}' final_score must be in [0.0, 1.0], got {score}")
 
 
 def score_result_to_dict(result: ScoreResult) -> JsonDict:

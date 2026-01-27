@@ -35,12 +35,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import itertools
 import json
 import logging
 import os
 import sys
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from pathlib import Path
+from typing import TypeVar
 
 if __package__ is None and __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -67,9 +69,9 @@ from data_work.lib.llm_client import (
 from data_work.lib.music_schema import MusicConfigPromptPayload
 from data_work.lib.periodic_writer import AsyncPeriodicWriter
 from data_work.lib.pipeline_models import (
-    ConfigCandidateScores,
     ConfigGenerationRow,
     JsonDict,
+    ValidationScores,
     VibeRow,
 )
 from data_work.lib.resilience import (
@@ -100,6 +102,17 @@ RUN_CONFIG_NAME = "run_config.json"
 
 ModelKwargs = Mapping[str, JsonValue]
 _DEBUG_PROMPTS = os.getenv("LATENTSCORE_DEBUG_PROMPTS") == "1"
+
+_T = TypeVar("_T")
+
+
+def _chunked(iterable: Iterable[_T], size: int) -> Iterable[list[_T]]:
+    """Yield successive chunks of a given size from an iterable."""
+    it = iter(iterable)
+    while chunk := list(itertools.islice(it, size)):
+        yield chunk
+
+
 _DEBUG_PROMPTS_EMITTED = False
 
 
@@ -449,9 +462,13 @@ def score_candidate(candidate: JsonDict | None) -> dict[str, int]:
 
 def select_best_candidate(
     candidates: list[JsonDict | None],
-    scores: ConfigCandidateScores,
+    validation_scores: ValidationScores,
 ) -> tuple[int, JsonDict | None]:
-    """Select the best candidate based on scores.
+    """Select the best candidate based on validation scores (TENTATIVE).
+
+    This is a VALIDATION-ONLY selection that picks the first valid candidate.
+    The actual quality-based selection happens in 02c_score_configs, which scores
+    all valid candidates with CLAP and re-selects based on highest quality score.
 
     Priority: schema_valid > palette_valid > format_valid.
     Among tied candidates, take first (deterministic).
@@ -467,9 +484,9 @@ def select_best_candidate(
             continue
 
         score = (
-            scores.schema_valid[i],
-            scores.palette_valid[i],
-            scores.format_valid[i],
+            validation_scores.schema_valid[i],
+            validation_scores.palette_valid[i],
+            validation_scores.format_valid[i],
         )
 
         if score > best_score:
@@ -546,7 +563,7 @@ async def generate_configs_for_row(
 
     candidate_payloads = candidates
 
-    all_scores = ConfigCandidateScores(
+    all_validation_scores = ValidationScores(
         format_valid=[],
         schema_valid=[],
         palette_valid=[],
@@ -554,19 +571,19 @@ async def generate_configs_for_row(
 
     for candidate in candidate_payloads:
         candidate_scores = score_candidate(candidate)
-        all_scores.format_valid.append(candidate_scores["format_valid"])
-        all_scores.schema_valid.append(candidate_scores["schema_valid"])
-        all_scores.palette_valid.append(candidate_scores["palette_valid"])
+        all_validation_scores.format_valid.append(candidate_scores["format_valid"])
+        all_validation_scores.schema_valid.append(candidate_scores["schema_valid"])
+        all_validation_scores.palette_valid.append(candidate_scores["palette_valid"])
 
     # Select best
-    best_index, best_candidate = select_best_candidate(candidate_payloads, all_scores)
+    best_index, best_candidate = select_best_candidate(candidate_payloads, all_validation_scores)
 
     # Build output row
     return ConfigGenerationRow(
         **row.model_dump(),
         config_model=model,
         config_candidates=candidate_payloads,
-        scores=all_scores,
+        validation_scores=all_validation_scores,
         best_index=best_index,
         config_payload=best_candidate,
         config_error="; ".join(e for e in errors if e) if best_candidate is None else None,
@@ -691,6 +708,7 @@ async def main_async(args: argparse.Namespace) -> None:
             batch_size=args.batch_size,
             max_wait=args.batch_wait_ms / 1000.0,
             call_batch=batched_config_call,
+            num_workers=args.max_concurrency,  # Workers limited by API concurrency
         )
         _LOGGER.info(
             "Batching ENABLED (batch_size=%d, max_wait_ms=%d)",
@@ -768,22 +786,47 @@ async def main_async(args: argparse.Namespace) -> None:
             )
 
             try:
+                # Process vibes in concurrent chunks for better batching efficiency
+                # When batching is enabled, concurrent vibes interleave in the batcher queue,
+                # allowing batches to contain multiple unique vibes (better diversity + efficiency)
+                #
+                # Chunk size is decoupled from max_concurrency (which controls API call concurrency):
+                # - With batching: use larger chunks to keep batcher queue well-fed
+                # - Without batching: chunk_size = max_concurrency (each vibe = 1 API call)
+                if batcher is not None:
+                    # Ensure enough vibes in queue for workers to form full batches
+                    # batch_size * num_workers * num_candidates ensures diversity
+                    chunk_size = args.batch_size * 4 * args.num_candidates
+                else:
+                    chunk_size = args.max_concurrency
+
+                async def process_one_row(row: VibeRow) -> ConfigGenerationRow:
+                    return await generate_configs_for_row(
+                        row,
+                        model=model,
+                        api_base=api_base,
+                        prompt_hash=prompt_hash,
+                        num_candidates=args.num_candidates,
+                        temperature=args.temperature,
+                        seed=args.seed,
+                        cache=cache,
+                        config_call=config_call,
+                        max_retries=args.max_retries,
+                        retry_base_delay=args.retry_base_delay,
+                    )
+
                 with tqdm(total=len(pending_rows), desc=split_name) as progress:
-                    for row in pending_rows:
-                        try:
-                            result = await generate_configs_for_row(
-                                row,
-                                model=model,
-                                api_base=api_base,
-                                prompt_hash=prompt_hash,
-                                num_candidates=args.num_candidates,
-                                temperature=args.temperature,
-                                seed=args.seed,
-                                cache=cache,
-                                config_call=config_call,
-                                max_retries=args.max_retries,
-                                retry_base_delay=args.retry_base_delay,
-                            )
+                    for chunk in _chunked(pending_rows, chunk_size):
+                        # Process chunk concurrently
+                        tasks = [process_one_row(row) for row in chunk]
+                        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                        for result in results:
+                            if isinstance(result, SystemExit):
+                                raise result
+                            if isinstance(result, Exception):
+                                _LOGGER.error("Fatal error on row: %s", result, exc_info=True)
+                                raise result
 
                             # Track success based on whether we got a valid config
                             success = result.config_payload is not None
@@ -802,12 +845,6 @@ async def main_async(args: argparse.Namespace) -> None:
                                     tracker.error_rate,
                                 )
                                 raise SystemExit("Excessive error rate - try again later.")
-
-                        except SystemExit:
-                            raise
-                        except Exception as exc:
-                            _LOGGER.error("Fatal error on row: %s", exc, exc_info=True)
-                            raise
             finally:
                 await writer.stop()
                 _LOGGER.info(
