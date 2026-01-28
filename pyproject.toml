@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "latentscore"
-version = "0.1.1"
+version = "0.1.2"
 description = "LatentScore audio synthesis library."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 dependencies = [
     "numpy",
     "scipy",
@@ -39,7 +39,7 @@ latentscore = "latentscore.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["latentscore", "latentscore.*"]
+include = ["latentscore", "latentscore.*", "common", "common.*"]
 
 [tool.ruff]
 target-version = "py310"

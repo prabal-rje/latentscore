@@ -30,7 +30,7 @@ source .venv/bin/activate
 pip install latentscore
 ```
 
-> Requires Python 3.10. If you don't have it: `brew install python@3.10` (macOS) or `pyenv install 3.10`
+> Requires Python 3.10–3.12. If you don't have it: `brew install python@3.10` (macOS) or `pyenv install 3.12`
 
 ## Usage
 ```python
