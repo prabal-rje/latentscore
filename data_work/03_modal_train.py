@@ -80,8 +80,8 @@ PROMPT_REGISTRY_HELP = ", ".join(sorted(PROMPT_REGISTRY_NAMES))
 
 PYTORCH_CU128_INDEX = "https://download.pytorch.org/whl/cu128"
 
-DEFAULT_LORA_R = 16
-DEFAULT_LORA_ALPHA = 16
+DEFAULT_LORA_R = 128
+DEFAULT_LORA_ALPHA = 128
 DEFAULT_LORA_DROPOUT = 0.0
 DEFAULT_LORA_BIAS = "none"
 DEFAULT_OPTIM = "adamw_8bit"
@@ -187,6 +187,7 @@ class SftConfig(BaseModel):
 
     base_model: str
     data_file: str
+    val_data_file: str | None
     output_dir: str
     system_prompt: str
     prompt_field: str
@@ -1017,6 +1018,21 @@ def run_sft(config: dict[str, Any]) -> str:
         **map_kwargs,
     )
 
+    eval_dataset = None
+    if sft.val_data_file:
+        eval_dataset = datasets.load_dataset("json", data_files=sft.val_data_file, split="train")
+        eval_dataset = eval_dataset.filter(has_prompt)
+        eval_dataset = eval_dataset.filter(has_response)
+        eval_map_kwargs = {}
+        if debug_prompts:
+            eval_map_kwargs["load_from_cache_file"] = False
+        eval_dataset = eval_dataset.map(
+            format_example,
+            remove_columns=eval_dataset.column_names,
+            **eval_map_kwargs,
+        )
+        LOGGER.info("Loaded eval dataset with %d rows.", len(eval_dataset))
+
     observed_max_length = _estimate_max_token_length(
         (example[DEFAULT_DATASET_TEXT_FIELD] for example in dataset),
         tokenizer,
@@ -1024,23 +1040,33 @@ def run_sft(config: dict[str, Any]) -> str:
     _validate_max_seq_length(sft.max_seq_length, observed_max_length)
 
     supports_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
-    training_args = TrainingArguments(
-        output_dir=sft.output_dir,
-        per_device_train_batch_size=sft.batch_size,
-        gradient_accumulation_steps=sft.gradient_accumulation_steps,
-        learning_rate=sft.learning_rate,
-        lr_scheduler_type=sft.lr_scheduler_type,
-        warmup_ratio=sft.warmup_ratio,
-        weight_decay=sft.weight_decay,
-        optim=sft.optim,
-        num_train_epochs=sft.epochs,
-        logging_steps=10,
-        save_strategy="epoch",
-        seed=sft.seed,
-        bf16=supports_bf16,
-        fp16=torch.cuda.is_available() and not supports_bf16,
-        report_to=["wandb"] if wandb_run else [],
-    )
+    training_kwargs: dict[str, Any] = {
+        "output_dir": sft.output_dir,
+        "per_device_train_batch_size": sft.batch_size,
+        "gradient_accumulation_steps": sft.gradient_accumulation_steps,
+        "learning_rate": sft.learning_rate,
+        "lr_scheduler_type": sft.lr_scheduler_type,
+        "warmup_ratio": sft.warmup_ratio,
+        "weight_decay": sft.weight_decay,
+        "optim": sft.optim,
+        "num_train_epochs": sft.epochs,
+        "logging_steps": 10,
+        "save_strategy": "epoch",
+        "seed": sft.seed,
+        "bf16": supports_bf16,
+        "fp16": torch.cuda.is_available() and not supports_bf16,
+        "report_to": ["wandb"] if wandb_run else [],
+    }
+    if eval_dataset is not None:
+        if _supports_param(TrainingArguments.__init__, "evaluation_strategy"):
+            training_kwargs["evaluation_strategy"] = "epoch"
+        elif _supports_param(TrainingArguments.__init__, "eval_strategy"):
+            training_kwargs["eval_strategy"] = "epoch"
+        if _supports_param(TrainingArguments.__init__, "do_eval"):
+            training_kwargs["do_eval"] = True
+        if _supports_param(TrainingArguments.__init__, "per_device_eval_batch_size"):
+            training_kwargs["per_device_eval_batch_size"] = sft.batch_size
+    training_args = TrainingArguments(**training_kwargs)
 
     trainer_kwargs: dict[str, Any] = {}
     if not _set_first_supported(SFTTrainer.__init__, trainer_kwargs, model, "model"):
@@ -1049,6 +1075,9 @@ def run_sft(config: dict[str, Any]) -> str:
         SFTTrainer.__init__, trainer_kwargs, dataset, "train_dataset", "dataset"
     ):
         raise SystemExit("SFTTrainer does not accept a dataset argument.")
+    if eval_dataset is not None:
+        if not _set_first_supported(SFTTrainer.__init__, trainer_kwargs, eval_dataset, "eval_dataset"):
+            raise SystemExit("SFTTrainer does not accept an eval_dataset argument.")
     if not _set_first_supported(
         SFTTrainer.__init__, trainer_kwargs, training_args, "args", "training_args"
     ):
@@ -1571,6 +1600,12 @@ def _build_parser(show_advanced: bool) -> argparse.ArgumentParser:
         default=BASE_MODELS[DEFAULT_BASE_MODEL_KEY],
         help="Base HF model name or alias.",
     )
+    sft.add_argument(
+        "--val-data",
+        type=Path,
+        default=None,
+        help="Optional JSONL validation data file (local path under repo).",
+    )
 
     grpo = subparsers.add_parser(
         "grpo",
@@ -1921,12 +1956,19 @@ def main(argv: Sequence[str] | None = None) -> None:
     data_file = None
     output_dir = None
     remote_data_file = None
+    val_data_file = None
+    remote_val_data_file = None
     if args.command in {"sft", "grpo"}:
         data_file = args.data.expanduser().resolve()
         if not data_file.exists():
             raise SystemExit(f"Data file not found: {data_file}")
         output_dir = Path(REMOTE_OUTPUT_PATH) / args.output
         remote_data_file = _resolve_remote_data_file(data_file)
+        if args.command == "sft" and getattr(args, "val_data", None):
+            val_data_file = args.val_data.expanduser().resolve()
+            if not val_data_file.exists():
+                raise SystemExit(f"Validation data file not found: {val_data_file}")
+            remote_val_data_file = _resolve_remote_data_file(val_data_file)
 
     # Resolve training config from file, presets, and CLI args
     training_config = _resolve_training_config(args) if args.command in {"sft", "grpo"} else None
@@ -1941,6 +1983,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                     config = SftConfig(
                         base_model=training_config.resolve_base_model(),
                         data_file=str(remote_data_file),
+                        val_data_file=str(remote_val_data_file) if remote_val_data_file else None,
                         output_dir=str(output_dir),
                         system_prompt=training_config.system_prompt,
                         prompt_field=training_config.data.prompt_field,

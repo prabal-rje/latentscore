@@ -21,8 +21,8 @@ class LoRAConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    r: int = Field(default=16, ge=1, description="LoRA rank (higher = more capacity)")
-    alpha: int = Field(default=16, ge=1, description="LoRA scaling factor")
+    r: int = Field(default=128, ge=1, description="LoRA rank (higher = more capacity)")
+    alpha: int = Field(default=128, ge=1, description="LoRA scaling factor")
     dropout: float = Field(default=0.0, ge=0.0, le=1.0, description="LoRA dropout rate")
     bias: Literal["none", "all", "lora_only"] = Field(
         default="none", description="Bias training mode"
@@ -179,7 +179,7 @@ class TrainingConfig(BaseModel):
         config = TrainingConfig()
 
         # Ablation: try different LoRA ranks
-        for lora_r in [4, 8, 16, 32]:
+        for lora_r in [4, 8, 16, 32, 64, 128]:
             ablation_config = config.model_copy(
                 update={"lora": LoRAConfig(r=lora_r)}
             )
@@ -226,7 +226,9 @@ DEFAULT_TRAINING_CONFIG = TrainingConfig()
 # --- Ablation Presets ---
 
 ABLATION_PRESETS: dict[str, dict[str, TrainingConfig]] = {
-    "lora_rank": {f"r{r}": TrainingConfig(lora=LoRAConfig(r=r)) for r in [4, 8, 16, 32, 64]},
+    "lora_rank": {
+        f"r{r}": TrainingConfig(lora=LoRAConfig(r=r)) for r in [4, 8, 16, 32, 64, 128]
+    },
     "learning_rate": {
         f"lr{lr}": TrainingConfig(optimizer=OptimizerConfig(learning_rate=lr))
         for lr in [1e-5, 5e-5, 1e-4, 2e-4, 5e-4]
