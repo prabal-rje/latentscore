@@ -3,8 +3,8 @@
 # 1. Configuration
 ENV_NAME ?= latentscore
 MODELS_DIR := models
-LLM_DIR := $(MODELS_DIR)/gemma-3-1b-it-qat-8bit
-LLM_REPO := mlx-community/gemma-3-1b-it-qat-8bit
+LLM_DIR := $(MODELS_DIR)/latentscore-gemma3-270m-v5-merged
+LLM_REPO := guprab/latentscore-gemma3-270m-v5-merged
 EMBED_DIR := $(MODELS_DIR)/all-MiniLM-L6-v2
 EMBED_REPO := sentence-transformers/all-MiniLM-L6-v2
 

@@ -13,11 +13,11 @@ class DummyTokenizer:
 def test_mlx_prompt_uses_roles_and_warns(caplog):
     from latentscore import models
 
-    models._mlx_role_warning_emitted = False
+    models._chat_role_warning_emitted = False
     caplog.set_level(logging.WARNING, logger="latentscore.models")
 
     tokenizer = DummyTokenizer()
-    prompt = models._build_mlx_chat_prompt(
+    prompt = models._build_chat_prompt(
         system_prompt="SYS",
         vibe="glow",
         tokenizer=tokenizer,
@@ -25,4 +25,4 @@ def test_mlx_prompt_uses_roles_and_warns(caplog):
     assert prompt == "PROMPT"
     assert tokenizer.messages[0]["role"] == "system"
     assert "<vibe>" in tokenizer.messages[1]["content"]
-    assert "MLX" in caplog.text
+    assert "chat roles" in caplog.text

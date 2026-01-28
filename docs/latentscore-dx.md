@@ -84,7 +84,7 @@ playlist.stream().play()
 ## Model selection
 
 - `"fast"`: local embedding model (default).
-- `"expressive"` or `"local"`: local MLX LLM.
+- `"expressive"` or `"local"`: local LLM (Apple Silicon uses MLX; other platforms use transformers with CUDA if available, otherwise CPU; 4-bit bitsandbytes is used when available).
 - `"external:<model-name>"`: shorthand for `LiteLLMAdapter`.
 
 ```python

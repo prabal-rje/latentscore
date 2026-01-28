@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "latentscore"
-version = "0.1.0"
+version = "0.1.1"
 description = "LatentScore audio synthesis library."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,17 +23,15 @@ dependencies = [
     "torch",
     "scikit-learn",
     "huggingface_hub>=0.20",
-    
-    # --- Apple Silicon (M1/M2/M3) Specifics ---
-    "mlx>=0.22; sys_platform == 'darwin' and platform_machine == 'arm64'",
-    "mlx-lm>=0.22; sys_platform == 'darwin' and platform_machine == 'arm64'",
-    "llm-structured-output; sys_platform == 'darwin' and platform_machine == 'arm64'",
-
-    # --- Outlines (Split Version) ---
-    # Case A: Apple Silicon (Needs MLX extras)
-    "outlines[mlxlm]; sys_platform == 'darwin' and platform_machine == 'arm64'",
-    # Case B: Everyone Else (Standard version)
-    "outlines; sys_platform != 'darwin' or platform_machine != 'arm64'",
+    "transformers>=4.57.0,<5",
+    "tokenizers>=0.20.0",
+    "sentencepiece",
+    "bitsandbytes; sys_platform == 'linux'",
+    "mlx; sys_platform == 'darwin'",
+    "mlx-lm; sys_platform == 'darwin'",
+    "outlines",
+    "instructor",
+    "llama-cpp-python; platform_machine != 'arm64' and sys_platform != 'win32'",
 ]
 
 [project.scripts]

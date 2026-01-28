@@ -63,7 +63,6 @@ def test_stream_accepts_multiple_vibes_list(monkeypatch: pytest.MonkeyPatch) -> 
         ["one", "two"],
         duration=0.2,
         transition=0.0,
-        chunk_seconds=0.1,
         model=_StubModel(),
         hooks=ls.StreamHooks(),
     )
@@ -88,7 +87,6 @@ def test_stream_chunk_assemble_not_normalized(monkeypatch: pytest.MonkeyPatch) -
         "test",
         duration=0.2,
         transition=0.0,
-        chunk_seconds=0.1,
         model=_StubModel(),
         hooks=ls.StreamHooks(),
     )
@@ -113,7 +111,6 @@ async def test_preview_streams_before_warmup(monkeypatch: pytest.MonkeyPatch) ->
     async with aclosing(
         ls.astream_raw(
             items,
-            chunk_seconds=0.1,
             model=model,
             fallback_model=fallback,
             preview=True,
@@ -160,7 +157,6 @@ async def test_preview_prefers_primary_when_fallback_slow(
     async with aclosing(
         ls.astream_raw(
             items,
-            chunk_seconds=0.1,
             model=primary,
             fallback_model=fallback,
             preview=True,
@@ -199,7 +195,6 @@ async def test_preview_event_only_when_preview_used(
     async with aclosing(
         ls.astream_raw(
             items,
-            chunk_seconds=0.1,
             model=primary,
             fallback_model=fallback,
             preview=True,

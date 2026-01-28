@@ -30,7 +30,7 @@ def test_mlx_prompt_uses_roles() -> None:
         def apply_chat_template(self, messages, **_kwargs):
             return "|".join(f"{msg['role']}:{msg['content']}" for msg in messages)
 
-    prompt = models._build_mlx_chat_prompt(
+    prompt = models._build_chat_prompt(
         system_prompt="SYS",
         vibe="vibe",
         tokenizer=DummyTokenizer(),

@@ -7,21 +7,19 @@ soundfile
 sounddevice
 simpleaudio
 
-# --- MLX (Apple Silicon Only) ---
-# These are strictly for Mac M-series chips. Ignored on Linux/Intel.
-mlx>=0.22; sys_platform == "darwin" and platform_machine == "arm64"
-mlx-lm>=0.22; sys_platform == "darwin" and platform_machine == "arm64"
+bitsandbytes; sys_platform == "linux"
+mlx; sys_platform == "darwin"
+mlx-lm; sys_platform == "darwin"
 
 # --- LLM & GenAI ---
-# On Mac: Install outlines with MLX support
-outlines[mlxlm]; sys_platform == "darwin" and platform_machine == "arm64"
-# On Linux/Others: Install standard outlines (avoids build errors)
-outlines; sys_platform != "darwin" or platform_machine != "arm64"
+outlines
+instructor
+llama-cpp-python; platform_machine != "arm64" and sys_platform != "win32"
 
-llm-structured-output
-transformers<5
-huggingface_hub>=0.20
+transformers>=4.57.0,<5
+tokenizers>=0.20.0
 sentencepiece
+huggingface_hub>=0.20
 litellm
 json-repair
 

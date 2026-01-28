@@ -37,6 +37,7 @@ assets/*.mp3
 build/
 dist/
 *.spec
+latentscore.egg-info/
 
 # --- Pytest, Ruff, Coverage ---
 
@@ -75,6 +76,18 @@ data_work/.benchmarks/
 data_work/.modal_outputs/
 data_work/.exports/
 .worktrees/
+
+# README smoke-test helper (local only)
+scripts/run_readme_examples.py
+scripts/outlines_constrained_demo.py
+
+# Local model/data caches (do not commit)
+data_work/.gguf_models/
+data_work/.llama.cpp/
+data_work/.mlx_models/
+datasets/
+latentscore-gemma3-270m-v5-merged/
+latentscore-gemma3-270m-v5-mlx-4bit/
 
 # --- TODO files ---
 

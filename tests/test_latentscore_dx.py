@@ -54,7 +54,6 @@ def test_stream_warns_on_aggressive_timing(
         "vibe",
         duration=0.4,
         transition=0.5,
-        chunk_seconds=0.1,
         model=_StubModel(),
         hooks=ls.StreamHooks(),
     )

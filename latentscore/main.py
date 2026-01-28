@@ -721,6 +721,14 @@ def stream(
 
         if prefetch_depth < 0:
             raise InvalidConfigError("prefetch_depth must be >= 0")
+        if chunk_seconds != 1.0:
+            raise NotImplementedError(
+                "chunk_seconds customization is not implemented yet; use chunk_seconds=1.0"
+            )
+        if prefetch_depth != 1:
+            raise NotImplementedError(
+                "prefetch_depth customization is not implemented yet; use prefetch_depth=1"
+            )
 
         async_iter = astream(
             items,
@@ -1173,6 +1181,14 @@ async def astream(
     should_close = False
     fallback_should_close = False
     try:
+        if chunk_seconds != 1.0:
+            raise NotImplementedError(
+                "chunk_seconds customization is not implemented yet; use chunk_seconds=1.0"
+            )
+        if prefetch_depth != 1:
+            raise NotImplementedError(
+                "prefetch_depth customization is not implemented yet; use prefetch_depth=1"
+            )
         match chunk_seconds:
             case (float() | int()) as value if value <= 0:
                 raise InvalidConfigError("chunk_seconds must be greater than 0")

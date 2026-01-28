@@ -203,7 +203,7 @@ def _demo_render_vibe(vibe: str, *, model: ModelChoice, save: bool) -> None:
 def _demo_external_with_key(model: str, api_key: str, *, save: bool) -> None:
     stream = ls.stream(
         "vinyl crackle midnight jazz",
-        chunk_seconds=2,
+        chunk_seconds=1.0,
         duration=30.0,
         model=ls.ExternalModelSpec(
             model=model, api_key=api_key, litellm_kwargs={"temperature": 0.0}

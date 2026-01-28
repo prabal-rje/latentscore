@@ -98,7 +98,7 @@ __all__ = [
     "stream_updates",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 _configure_logging()
 del _configure_logging

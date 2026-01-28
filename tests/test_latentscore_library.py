@@ -63,8 +63,7 @@ def test_stream_rejects_raw_string() -> None:
 def test_stream_streamable_items() -> None:
     chunks = list(
         stream_raw(
-            [Streamable(content="warm sunrise", duration=0.04, transition_duration=0.0)],
-            chunk_seconds=0.02,
+            [Streamable(content="warm sunrise", duration=1.0, transition_duration=0.0)],
             model=DummyModel(),
         )
     )
@@ -128,10 +127,9 @@ def test_render_hooks_fire() -> None:
 
 
 def test_stream_chunk_length_matches_sample_rate() -> None:
-    chunk_seconds = 0.02
+    chunk_seconds = 1.0
     chunks = stream_raw(
-        [Streamable(content=MusicConfigUpdate(tempo="slow"), duration=0.02)],
-        chunk_seconds=chunk_seconds,
+        [Streamable(content=MusicConfigUpdate(tempo="slow"), duration=1.0)],
         model=DummyModel(),
     )
     chunk = next(iter(chunks))
@@ -155,8 +153,7 @@ def test_stream_texts_wraps_prompts() -> None:
     chunks = list(
         stream_texts(
             ["warm sunrise"],
-            duration=0.04,
-            chunk_seconds=0.02,
+            duration=1.0,
             model=DummyModel(),
         )
     )
@@ -198,7 +195,6 @@ async def test_astream_preview_yields_before_llm_ready() -> None:
     async def first_chunk() -> np.ndarray:
         async for chunk in astream_raw(
             items,
-            chunk_seconds=0.02,
             model=slow,
             preview=True,
             fallback_model=fast,
@@ -219,7 +215,6 @@ async def test_astream_does_not_close_user_model() -> None:
         chunk
         async for chunk in astream_raw(
             items,
-            chunk_seconds=0.02,
             model=model,
         )
     ]
@@ -238,7 +233,6 @@ async def test_astream_fallback_on_error_keeps_streaming() -> None:
         chunk
         async for chunk in astream_raw(
             items,
-            chunk_seconds=0.02,
             model=ErrorModel(),
             fallback="embedding",
             fallback_model=FastModel(),
@@ -256,7 +250,6 @@ async def test_astream_hooks_fire() -> None:
         chunk
         async for chunk in astream_raw(
             items,
-            chunk_seconds=0.02,
             model=DummyModel(),
             hooks=hooks,
         )
