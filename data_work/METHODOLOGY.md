@@ -341,40 +341,42 @@ Get your API key from https://wandb.ai/authorize
 **Training data:** `data_work/2026-01-26_scored/SFT-Train.jsonl`
 **Validation data:** `data_work/2026-01-26_scored/SFT-Val.jsonl`
 
-**Hyperparameters:**
+**Hyperparameters (prod run 2026-01-27):**
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| Epochs | 4 | |
-| Batch size | 16 | Effective batch = 32 with grad_accum=2 |
-| Gradient accumulation | 2 | |
+| Epochs | 3 | |
+| Batch size | 16 | Effective batch = 16 (grad_accum=1) |
+| Gradient accumulation | 1 | |
 | Learning rate | 1e-4 | Conservative for 270M + LoRA |
 | LR scheduler | cosine | |
 | Weight decay | 0.01 | Regularization |
-| LoRA rank | 32 | Balance capacity vs overfit |
-| LoRA alpha | 32 | Matches rank |
+| LoRA rank | 16 | |
+| LoRA alpha | 16 | Matches rank |
 | LoRA dropout | 0.0 | Optimized |
-| Max seq length | 4096 | Fits long JSON outputs (~2k chars) |
+| Max seq length | 4096 | Fits long JSON outputs |
 | Optimizer | adamw_8bit | Memory efficient |
 | Warmup ratio | 0.06 | |
 
 **Debugging:** Add `--debug-prompts` (optionally `--debug-prompts-max`) to print a few
 formatted system/user prompt samples for verification.
 
-**Command:**
+**Command (prod run 2026-01-27):**
 ```bash
-python -m data_work.03_modal_train sft \
+conda run -n latentscore-data python -m data_work.03_modal_train sft \
   --data data_work/2026-01-26_scored/SFT-Train.jsonl \
-  --output prod-sft-gemma3-270m-hq \
+  --val-data data_work/2026-01-26_scored/SFT-Val.jsonl \
+  --output prod-sft-gemma3-270m-v4 \
+  --overwrite \
   --base-model gemma3-270m \
-  --epochs 4 \
+  --epochs 3 \
   --batch-size 16 \
-  --grad-accum 2 \
+  --grad-accum 1 \
   --lr 1e-4 \
   --lr-scheduler cosine \
   --warmup-ratio 0.06 \
   --weight-decay 0.01 \
-  --lora-r 32 \
-  --lora-alpha 32 \
+  --lora-r 16 \
+  --lora-alpha 16 \
   --lora-dropout 0.0 \
   --lora-bias none \
   --max-seq-length 4096 \
@@ -383,7 +385,10 @@ python -m data_work.03_modal_train sft \
   --download-dir data_work/.modal_outputs
 ```
 
-**Status:** [ ] Not started
+**Status:** [x] Complete (2026-01-27)
+**Artifacts:**
+- Modal output: `/outputs/prod-sft-gemma3-270m-v4`
+- Local download: `data_work/.modal_outputs/prod-sft-gemma3-270m-v4`
 
 **Training metrics:**
 - Final train loss: ___
@@ -415,6 +420,77 @@ python -m data_work.03_modal_train sft \
 | Top-p | 0.95 | |
 | Top-k | 64 | |
 | Max completion length | 2048 | |
+
+**Status:** [ ] Skipped for now (compute constraints)
+
+---
+
+### 2.3 Modal SFT inference (batched, constrained)
+
+**Adapter:** `prod-sft-gemma3-270m-v5`  
+**Input:** `data_work/2026-01-26_scored/SFT-Val.jsonl`  
+**Output:** `data_work/.modal_outputs/sftval-100-v5-infer-batch` (JSONL file)
+
+**Command (2026-01-27):**
+```bash
+conda run -n latentscore-data python -m data_work.07_modal_infer_eval \
+  --adapter prod-sft-gemma3-270m-v5 \
+  --input data_work/2026-01-26_scored/SFT-Val.jsonl \
+  --limit 100 \
+  --prompt-field vibe_noisy \
+  --score-vibe-field vibe_original \
+  --do-sample \
+  --max-retries 3 \
+  --batch-size 16 \
+  --log-first-n 10 \
+  --log-every 10 \
+  --output sftval-100-v5-infer-batch
+```
+
+**Notes:**
+- Uses Outlines structured decoding via `outlines.from_transformers(...).batch(...)`.
+- Batched inference enabled; progress logging is in-place.
+- Downloaded output is a JSONL file (not a directory).
+
+---
+
+### 2.4 Audio render (30s) from inference results
+
+**Script:** `data_work/09_render_audio_from_results.py` (new)
+
+**Command (2026-01-27):**
+```bash
+conda run -n latentscore-data python -m data_work.09_render_audio_from_results \
+  --input data_work/.modal_outputs/sftval-100-v5-infer-batch \
+  --output-dir data_work/.audio/sftval-100-v5-30s \
+  --limit 100 \
+  --duration 30
+```
+
+**Artifacts:**
+- `data_work/.audio/sftval-100-v5-30s` (100 WAV files, 30s each)
+
+---
+
+### 2.5 Embedding map export
+
+**Script:** `data_work/10_export_embedding_map.py` (new)
+
+**Input:** `data_work/2026-01-26_scored/_progress.jsonl`  
+**Output:** `data_work/2026-01-26_scored/_progress_embeddings.jsonl`
+
+**Command (2026-01-28):**
+```bash
+conda run -n latentscore-data python -m data_work.10_export_embedding_map \
+  --input data_work/2026-01-26_scored/_progress.jsonl \
+  --output data_work/2026-01-26_scored/_progress_embeddings.jsonl \
+  --batch-size 64
+```
+
+**Notes:**
+- Embeds `vibe_original` using `sentence-transformers/all-MiniLM-L6-v2`.
+- Output rows include: `vibe_original`, `embedding`, `title`, `config`, `palettes`,
+  plus dataset metadata (`dataset`, `id_in_dataset`, `split`).
 
 **Reward weights:**
 | Component | Weight | Description |
@@ -456,7 +532,7 @@ python -m data_work.03_modal_train --advanced grpo \
   --wandb-entity rjeinc
 ```
 
-**Status:** [ ] Not started
+**Status:** [ ] Skipped for now (compute constraints)
 
 **Training metrics:**
 - Final reward mean: ___

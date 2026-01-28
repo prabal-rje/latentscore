@@ -131,6 +131,87 @@ Notes:
 
 ---
 
+## Recent runs (2026-01-27)
+
+### SFT production run (Gemma3-270M)
+
+```bash
+conda run -n latentscore-data python -m data_work.03_modal_train sft \
+  --data data_work/2026-01-26_scored/SFT-Train.jsonl \
+  --val-data data_work/2026-01-26_scored/SFT-Val.jsonl \
+  --output prod-sft-gemma3-270m-v4 \
+  --overwrite \
+  --base-model gemma3-270m \
+  --epochs 3 \
+  --batch-size 16 \
+  --grad-accum 1 \
+  --lr 1e-4 \
+  --lr-scheduler cosine \
+  --warmup-ratio 0.06 \
+  --weight-decay 0.01 \
+  --lora-r 16 \
+  --lora-alpha 16 \
+  --lora-dropout 0.0 \
+  --lora-bias none \
+  --max-seq-length 4096 \
+  --optim adamw_8bit \
+  --seed 42 \
+  --download-dir data_work/.modal_outputs
+```
+
+Outputs:
+- Modal output: `/outputs/prod-sft-gemma3-270m-v4`
+- Local download: `data_work/.modal_outputs/prod-sft-gemma3-270m-v4`
+
+### Modal SFT inference (batched, constrained)
+
+```bash
+conda run -n latentscore-data python -m data_work.07_modal_infer_eval \
+  --adapter prod-sft-gemma3-270m-v5 \
+  --input data_work/2026-01-26_scored/SFT-Val.jsonl \
+  --limit 100 \
+  --prompt-field vibe_noisy \
+  --score-vibe-field vibe_original \
+  --do-sample \
+  --max-retries 3 \
+  --batch-size 16 \
+  --log-first-n 10 \
+  --log-every 10 \
+  --output sftval-100-v5-infer-batch
+```
+
+Outputs:
+- Local download (JSONL file): `data_work/.modal_outputs/sftval-100-v5-infer-batch`
+
+### Render audio from inference (30s)
+
+```bash
+conda run -n latentscore-data python -m data_work.09_render_audio_from_results \
+  --input data_work/.modal_outputs/sftval-100-v5-infer-batch \
+  --output-dir data_work/.audio/sftval-100-v5-30s \
+  --limit 100 \
+  --duration 30
+```
+
+Outputs:
+- `data_work/.audio/sftval-100-v5-30s`
+
+### Export embedding map
+
+```bash
+conda run -n latentscore-data python -m data_work.10_export_embedding_map \
+  --input data_work/2026-01-26_scored/_progress.jsonl \
+  --output data_work/2026-01-26_scored/_progress_embeddings.jsonl \
+  --batch-size 64
+```
+
+Outputs:
+- `data_work/2026-01-26_scored/_progress_embeddings.jsonl`
+
+### GRPO status
+
+Skipped for now due to compute constraints (see `METHODOLOGY.md`).
+
 ## Core ablations
 
 ### SFT vs SFT + GRPO comparison

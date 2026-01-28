@@ -249,6 +249,8 @@ checkpoint path instead so Modal can resolve it.
 Use `--debug-prompts` (optionally with `--debug-prompts-max`) to log a few formatted
 system/user prompt samples so you can verify chat roles and prompt content.
 
+**Note:** GRPO runs are currently skipped due to compute constraints (see `METHODOLOGY.md`).
+
 If `--download-dir` is set, outputs are downloaded into `<download-dir>/<output>`.
 Use `--delete-remote` to remove the Modal volume output after a successful download.
 
@@ -324,6 +326,61 @@ python -m data_work.03_modal_train grpo \
   --max-seq-length 4096 \
   --download-dir data_work/.modal_outputs \
   --delete-remote
+```
+
+### `07_modal_infer_eval`
+
+Runs Modal-based SFT inference with **batched, constrained decoding** (Outlines JSON schema).
+Outputs a JSONL file under `/outputs/<name>` and downloads it locally to `data_work/.modal_outputs`.
+
+Usage example (2026-01-27 run):
+
+```bash
+conda run -n latentscore-data python -m data_work.07_modal_infer_eval \
+  --adapter prod-sft-gemma3-270m-v5 \
+  --input data_work/2026-01-26_scored/SFT-Val.jsonl \
+  --limit 100 \
+  --prompt-field vibe_noisy \
+  --score-vibe-field vibe_original \
+  --do-sample \
+  --max-retries 3 \
+  --batch-size 16 \
+  --log-first-n 10 \
+  --log-every 10 \
+  --output sftval-100-v5-infer-batch
+```
+
+Notes:
+- Default GPU is H100 (override with `MODAL_GPU_TYPE` or `MODAL_GPU_COUNT` env vars).
+- Use `--batch-size` for throughput and `--tqdm/--no-tqdm` for progress display.
+
+### `09_render_audio_from_results`
+
+Renders WAVs from inference JSONL outputs (config payloads).
+
+Usage example (30s renders):
+
+```bash
+conda run -n latentscore-data python -m data_work.09_render_audio_from_results \
+  --input data_work/.modal_outputs/sftval-100-v5-infer-batch \
+  --output-dir data_work/.audio/sftval-100-v5-30s \
+  --limit 100 \
+  --duration 30
+```
+
+### `10_export_embedding_map`
+
+Builds a lookup table of **vibe embeddings + best config payloads** from
+`_progress.jsonl`. Uses a sentence‑transformers encoder to embed `vibe_original`
+and writes a JSONL file that can be used for fast retrieval.
+
+Usage example:
+
+```bash
+conda run -n latentscore-data python -m data_work.10_export_embedding_map \
+  --input data_work/2026-01-26_scored/_progress.jsonl \
+  --output data_work/2026-01-26_scored/_progress_embeddings.jsonl \
+  --batch-size 64
 ```
 
 ### `04_clap_benchmark`
