@@ -153,8 +153,13 @@ Use sensible defaults for any fields not clearly implied by the vibe."""
 async def _vibe_to_config(vibe: str, model: str) -> MusicConfig:
     """Convert vibe text to MusicConfig via LLM."""
     from litellm import acompletion  # type: ignore[import-untyped]
+    from pydantic import ConfigDict
 
-    schema = MusicConfig.model_json_schema()
+    # Create schema with extra="forbid" for OpenAI structured output compatibility
+    class _Schema(MusicConfig):
+        model_config = ConfigDict(extra="forbid")
+
+    schema = _Schema.model_json_schema()
     system = f"{_SYSTEM_PROMPT}\n\nOutput JSON matching:\n{json.dumps(schema, indent=2)}"
 
     resp = await acompletion(  # type: ignore[no-untyped-call]
@@ -163,7 +168,7 @@ async def _vibe_to_config(vibe: str, model: str) -> MusicConfig:
             {"role": "system", "content": system},
             {"role": "user", "content": vibe},
         ],
-        response_format={"type": "json_object"},
+        response_format=_Schema,
     )
     content: str = resp.choices[0].message.content  # type: ignore[union-attr]
     return MusicConfig.model_validate_json(content)
@@ -177,7 +182,8 @@ async def _vibe_to_config(vibe: str, model: str) -> MusicConfig:
 async def aplay(
     source: AsyncIterator[Instruction],
     *,
-    model: str = "gpt-4o-mini",
+    # model: str = "gpt-5.2-2025-12-11",
+    model: str = "claude-sonnet-4-5",
     chunk_seconds: float = 2.0,
     transition_seconds: float = 4.0,  # Should be >= 2*chunk_seconds for smooth fade
     pattern_seconds: float | None = None,
@@ -328,7 +334,12 @@ __all__ = [
 
 if __name__ == "__main__":
     import numpy as np
+    from contextlib import contextmanager
+    from queue import Full, Queue
+    from threading import Event, Thread
+
     from latentscore.audio import ensure_audio_contract
+    from latentscore.playback import play_stream
     from latentscore.synth import SAMPLE_RATE
 
     async def example_composition() -> AsyncIterator[Instruction]:
@@ -343,18 +354,55 @@ if __name__ == "__main__":
             pad="warm_slow",
         )
 
+    # Test: Generate a song and update it at 10s intervals using a generator function
+    ENABLE_GENERATOR_TEST = True  # <-- set to True to enable song update test
+    ENABLE_GENERATOR_PLAYBACK = True  # <-- set to True to play generator composition
+
+    async def generator_composition() -> AsyncIterator[Instruction]:
+        """
+        Example composition for test: starts with a prompt, then updates config at 10s intervals.
+        """
+        # Start with vibe text
+        # yield "soothing dawn ambient"
+        yield "Mario the video game"
+        # await asyncio.sleep(10)  # Simulate 10s pass in "real time" (during chunk streaming)
+        # print("HERE HERE HERE HERE")
+        # yield MusicConfig(
+        #     tempo="fast",
+        #     root="g",
+        #     mode="major",
+        #     brightness="bright",
+        #     density=6,
+        #     pad="warm_slow",
+        # )
+        # return
+        # # yield MusicConfigUpdate(brightness=Step(+1))
+        # await asyncio.sleep(10)
+        # # yield MusicConfigUpdate(tempo=Step(+1))
+        # await asyncio.sleep(10)
+        # # Switch to direct config
+        # yield MusicConfig(
+        #     tempo="fast",
+        #     root="g",
+        #     mode="major",
+        #     brightness="bright",
+        #     density=6,
+        #     pad="airy_layer",
+        # )
+
     import asyncio
 
-    async def get_audio_chunks(chunk_seconds: float, total_seconds: float) -> list[np.ndarray]:
-        """Generate audio chunks using a fixed composition for given chunk size and duration."""
+    async def get_audio_chunks(
+        chunk_seconds: float, total_seconds: float, src_gen
+    ) -> list[np.ndarray]:
+        """Generate audio chunks using a composition source for a given chunk size and duration."""
         chunks = []
         seconds_collected = 0.0
 
         async for chunk in aplay(
-            example_composition(),
+            src_gen(),
             chunk_seconds=chunk_seconds,
         ):
-            # ensure numpy float64 array
             normalized = ensure_audio_contract(chunk, sample_rate=SAMPLE_RATE)
             chunks.append(np.copy(normalized))
             seconds_collected += chunk_seconds
@@ -379,11 +427,112 @@ if __name__ == "__main__":
             corrs.append(float(c))
         return corrs
 
+    def _format_config_label(config: MusicConfig) -> str:
+        return (
+            "tempo="
+            f"{config.tempo} root={config.root} mode={config.mode} "
+            f"brightness={config.brightness} density={config.density} "
+            f"pad={config.pad} bass={config.bass}"
+        )
+
+    @contextmanager
+    def _bridge_async_chunks(async_iter, *, queue_maxsize: int = 4, join_timeout: float = 2.0):
+        sentinel = object()
+        queue: Queue[object] = Queue(maxsize=queue_maxsize)
+        stop_event = Event()
+        loop_ref: dict[str, object] = {}
+        task_ref: dict[str, object] = {}
+
+        def _runner() -> None:
+            async def _run() -> None:
+                try:
+                    while not stop_event.is_set():
+                        try:
+                            chunk = await async_iter.__anext__()
+                        except StopAsyncIteration:
+                            break
+                        while not stop_event.is_set():
+                            try:
+                                queue.put(chunk, timeout=0.1)
+                                break
+                            except Full:
+                                continue
+                except BaseException as exc:
+                    queue.put(exc)
+                finally:
+                    queue.put(sentinel)
+
+            loop = asyncio.new_event_loop()
+            loop_ref["loop"] = loop
+            asyncio.set_event_loop(loop)
+            task = loop.create_task(_run())
+            task_ref["task"] = task
+            try:
+                loop.run_until_complete(task)
+            finally:
+                pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+                for pending_task in pending:
+                    pending_task.cancel()
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                if hasattr(loop, "shutdown_default_executor"):
+                    loop.run_until_complete(loop.shutdown_default_executor())
+                asyncio.set_event_loop(None)
+                loop.close()
+
+        thread = Thread(target=_runner, daemon=True)
+        thread.start()
+
+        def _iter():
+            while True:
+                item = queue.get()
+                if item is sentinel:
+                    return
+                if isinstance(item, BaseException):
+                    raise item
+                yield item
+
+        try:
+            yield _iter()
+        finally:
+            stop_event.set()
+            loop = loop_ref.get("loop")
+            if loop is not None:
+
+                def _cancel() -> None:
+                    task = task_ref.get("task")
+                    if task is not None and not task.done():
+                        task.cancel()
+
+                    async def _aclose() -> None:
+                        aclose = getattr(async_iter, "aclose", None)
+                        if aclose is not None:
+                            try:
+                                await aclose()
+                            except Exception:
+                                pass
+
+                    loop.create_task(_aclose())
+
+                loop.call_soon_threadsafe(_cancel)
+        thread.join(timeout=join_timeout)
+
+    def _limit_chunks(chunks, chunk_seconds: float, total_seconds: float):
+        seconds_collected = 0.0
+        for chunk in chunks:
+            yield chunk
+            seconds_collected += chunk_seconds
+            if seconds_collected >= total_seconds:
+                break
+
     async def run_tests():
-        total_duration = 10.0  # seconds
+        total_duration = 10.0  # seconds (per test)
+
+        # Original energy/correlation demo, for a static config
         for chunk_size in [1.0, 2.0]:
-            print(f"\n== Chunk size: {chunk_size} s ==")
-            chunks = await get_audio_chunks(chunk_size, total_duration)
+            print(f"\n== Chunk size: {chunk_size} s (static example config) ==")
+            chunks = await get_audio_chunks(chunk_size, total_duration, example_composition)
             energies = chunk_energies(chunks)
             corrs = consecutive_correlation(chunks)
             print(f" Energies for {len(energies)} chunks: {[round(e, 5) for e in energies]}")
@@ -393,6 +542,48 @@ if __name__ == "__main__":
                 )
             else:
                 print(" Not enough chunks for correlation")
+
+        # -- Actual generator test for config updates --
+        if ENABLE_GENERATOR_TEST:
+            print("\n== Song update test: generator composition updates every ~10s ==")
+            chunk_size = 2.0
+            song_duration = (
+                36.0  # This accommodates all instructions (3x10s + final; use >30 to catch all)
+            )
+            chunks = await get_audio_chunks(chunk_size, song_duration, generator_composition)
+            print(f" Generated {len(chunks)} chunks.")
+            energies = chunk_energies(chunks)
+            print(" Chunk energies:", [round(e, 5) for e in energies])
+            corrs = consecutive_correlation(chunks)
+            if corrs:
+                print(" Correlations:", [round(c, 5) if not np.isnan(c) else "nan" for c in corrs])
+            else:
+                print(" Not enough chunks for correlation")
+            print(" Done generator composition test.\n")
+
+            if ENABLE_GENERATOR_PLAYBACK:
+                print("== Playback: generator composition ==")
+
+                def _log_event(event: Event) -> None:
+                    if isinstance(event, TransitionStart):
+                        from_label = _format_config_label(event.from_config)
+                        to_label = _format_config_label(event.to_config)
+                        print(f"[transition] {from_label} -> {to_label}")
+
+                hooks = Hooks(on_event=_log_event)
+                with _bridge_async_chunks(
+                    aplay(
+                        generator_composition(),
+                        chunk_seconds=chunk_size,
+                        hooks=hooks,
+                    ),
+                    queue_maxsize=2,
+                ) as playback_chunks:
+                    play_stream(
+                        _limit_chunks(playback_chunks, chunk_size, song_duration),
+                        sample_rate=SAMPLE_RATE,
+                    )
+                print(" Done playback.\n")
 
     if True:
         asyncio.run(run_tests())
