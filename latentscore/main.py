@@ -9,9 +9,10 @@ import os
 from collections import deque
 from collections.abc import AsyncIterable, AsyncIterator, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from queue import Queue
 from threading import Thread, Timer
-from typing import Any, Callable, Coroutine, Literal, TypeGuard, TypeVar
+from typing import Any, Callable, Coroutine, Literal, TypeGuard, TypeVar, get_args
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
@@ -21,14 +22,22 @@ from .config import (
     ConfigInput,
     MusicConfig,
     MusicConfigUpdate,
+    Step,
     SynthConfig,
     UpdateInput,
     _MusicConfigInternal,
     _MusicConfigUpdateInternal,
     coerce_internal_config,
     coerce_internal_update,
+    echo_to_float,
+    human_to_float,
     is_empty_update,
     merge_internal_config,
+    motion_to_float,
+    brightness_to_float,
+    space_to_float,
+    stereo_to_float,
+    tempo_to_float,
 )
 from .errors import InvalidConfigError, ModelNotAvailableError
 from .logging_utils import log_exception
@@ -537,6 +546,68 @@ def _default_internal_config() -> _MusicConfigInternal:
     return MusicConfig().to_internal()
 
 
+def _ordered_literals(annotation: object) -> list[Any]:
+    return list(get_args(annotation))
+
+
+def _closest_label(
+    value: float,
+    labels: list[Any],
+    to_float: Callable[[Any], float],
+) -> Any:
+    if not labels:
+        raise InvalidConfigError("Cannot resolve label: empty label set")
+    return min(labels, key=lambda label: abs(to_float(label) - value))
+
+
+def _approximate_public_config(config: _MusicConfigInternal) -> MusicConfig:
+    data = config.model_dump()
+    data["tempo"] = _closest_label(
+        config.tempo,
+        _ordered_literals(MusicConfig.model_fields["tempo"].annotation),
+        tempo_to_float,
+    )
+    data["brightness"] = _closest_label(
+        config.brightness,
+        _ordered_literals(MusicConfig.model_fields["brightness"].annotation),
+        brightness_to_float,
+    )
+    data["space"] = _closest_label(
+        config.space,
+        _ordered_literals(MusicConfig.model_fields["space"].annotation),
+        space_to_float,
+    )
+    data["motion"] = _closest_label(
+        config.motion,
+        _ordered_literals(MusicConfig.model_fields["motion"].annotation),
+        motion_to_float,
+    )
+    data["stereo"] = _closest_label(
+        config.stereo,
+        _ordered_literals(MusicConfig.model_fields["stereo"].annotation),
+        stereo_to_float,
+    )
+    data["echo"] = _closest_label(
+        config.echo,
+        _ordered_literals(MusicConfig.model_fields["echo"].annotation),
+        echo_to_float,
+    )
+    data["human"] = _closest_label(
+        config.human,
+        _ordered_literals(MusicConfig.model_fields["human"].annotation),
+        human_to_float,
+    )
+    return MusicConfig.model_validate(data)
+
+
+def _has_step(update: MusicConfigUpdate) -> bool:
+    for field_name in update.model_fields:
+        value = getattr(update, field_name)
+        if isinstance(value, Step):
+            return True
+    return False
+
+
 def _apply_update(
     base: _MusicConfigInternal,
     update: UpdateInput | None,
@@ -544,6 +615,12 @@ def _apply_update(
     match update:
         case None:
             return base
+        case MusicConfigUpdate() as update_model:
+            if _has_step(update_model):
+                base_public = _approximate_public_config(base)
+                return update_model.apply_to(base_public).to_internal()
+            internal_update = update_model.to_internal()
+            return merge_internal_config(base, internal_update)
         case _:
             internal_update = coerce_internal_update(update)
             return merge_internal_config(base, internal_update)
@@ -561,6 +638,81 @@ def _transition_steps(transition_duration: float, chunk_seconds: float) -> int:
             return max(1, int(round(duration / max(chunk_seconds, _MIN_CHUNK_SECONDS))))
         case _:
             raise InvalidConfigError("transition_duration must be a number")
+
+
+def _seconds_per_beat(config: SynthConfig) -> float:
+    tempo = float(np.clip(config.tempo, 0.0, 1.0))
+    bpm = 55.0 + 110.0 * tempo
+    return 60.0 / bpm
+
+
+def _default_pattern_seconds(config: SynthConfig, chunk_seconds: float) -> float:
+    beats_per_bar = 4
+    seconds_per_bar = beats_per_bar * _seconds_per_beat(config)
+    phrase_bars = max(2, int(config.phrase_len_bars))
+    min_seconds = max(8.0, chunk_seconds * 4.0)
+    bars = max(phrase_bars, int(np.ceil(min_seconds / seconds_per_bar)))
+    bars = max(1, min(64, bars))
+    return bars * seconds_per_bar
+
+
+@dataclass(slots=True)
+class _ChunkCache:
+    buffer: FloatArray
+    chunk_samples: int
+    cursor: int = 0
+
+    def next_chunk(self) -> FloatArray:
+        if self.chunk_samples <= 0:
+            return np.zeros(0, dtype=self.buffer.dtype)
+        if self.buffer.size == 0:
+            return np.zeros(self.chunk_samples, dtype=np.float64)
+
+        if self.chunk_samples >= self.buffer.size:
+            repeats = int(np.ceil(self.chunk_samples / self.buffer.size))
+            tiled = np.tile(self.buffer, repeats)
+            chunk = tiled[: self.chunk_samples].copy()
+            self.cursor = self.chunk_samples % self.buffer.size
+            return chunk
+
+        end = self.cursor + self.chunk_samples
+        if end <= self.buffer.size:
+            chunk = self.buffer[self.cursor : end].copy()
+            self.cursor = 0 if end == self.buffer.size else end
+            return chunk
+
+        part_a = self.buffer[self.cursor :]
+        part_b = self.buffer[: end - self.buffer.size]
+        chunk = np.concatenate((part_a, part_b)).copy()
+        self.cursor = end - self.buffer.size
+        return chunk
+
+
+async def _build_chunk_cache(
+    config_item: _MusicConfigInternal,
+    *,
+    chunk_seconds: float,
+    pattern_seconds: float | None,
+    t_offset: float,
+) -> _ChunkCache:
+    synth = _to_synth_config(config_item)
+    pattern = pattern_seconds or _default_pattern_seconds(synth, chunk_seconds)
+    pattern = max(pattern, chunk_seconds)
+    buffer = await asyncio.to_thread(
+        lambda: assemble(synth, pattern, normalize=False, t_offset=t_offset)
+    )
+    chunk_samples = max(1, int(round(chunk_seconds * SAMPLE_RATE)))
+    return _ChunkCache(buffer=buffer, chunk_samples=chunk_samples)
+
+
+async def _render_cached_chunk(cache: _ChunkCache) -> FloatArray:
+    return await asyncio.to_thread(
+        lambda: ensure_audio_contract(
+            cache.next_chunk(),
+            sample_rate=SAMPLE_RATE,
+            check_peak=False,
+        )
+    )
 
 
 def _iter_transition_configs(
@@ -699,6 +851,7 @@ def stream(
     items: Iterable[Streamable],
     *,
     chunk_seconds: float = 1.0,
+    pattern_seconds: float | None = None,
     model: ModelSpec = "fast",
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
@@ -733,6 +886,7 @@ def stream(
         async_iter = astream(
             items,
             chunk_seconds=chunk_seconds,
+            pattern_seconds=pattern_seconds,
             model=model,
             config=config,
             update=update,
@@ -756,6 +910,7 @@ def stream_texts(
     duration: float = 60.0,
     transition_duration: float = 1.0,
     chunk_seconds: float = 1.0,
+    pattern_seconds: float | None = None,
     model: ModelSpec = "fast",
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
@@ -780,6 +935,7 @@ def stream_texts(
         return stream(
             items,
             chunk_seconds=chunk_seconds,
+            pattern_seconds=pattern_seconds,
             model=model,
             config=config,
             update=update,
@@ -801,6 +957,7 @@ def stream_configs(
     duration: float = 60.0,
     transition_duration: float = 1.0,
     chunk_seconds: float = 1.0,
+    pattern_seconds: float | None = None,
     model: ModelSpec = "fast",
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
@@ -826,6 +983,7 @@ def stream_configs(
         return stream(
             items,
             chunk_seconds=chunk_seconds,
+            pattern_seconds=pattern_seconds,
             model=model,
             config=config,
             update=update,
@@ -847,6 +1005,7 @@ def stream_updates(
     duration: float = 60.0,
     transition_duration: float = 1.0,
     chunk_seconds: float = 1.0,
+    pattern_seconds: float | None = None,
     model: ModelSpec = "fast",
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
@@ -872,6 +1031,7 @@ def stream_updates(
         return stream(
             items,
             chunk_seconds=chunk_seconds,
+            pattern_seconds=pattern_seconds,
             model=model,
             config=config,
             update=update,
@@ -1098,10 +1258,13 @@ async def _render_chunk(
     config_item: _MusicConfigInternal,
     *,
     chunk_seconds: float,
+    t_offset: float = 0.0,
 ) -> FloatArray:
     return await asyncio.to_thread(
         lambda: ensure_audio_contract(
-            assemble(_to_synth_config(config_item), chunk_seconds, normalize=False),
+            assemble(
+                _to_synth_config(config_item), chunk_seconds, normalize=False, t_offset=t_offset
+            ),
             sample_rate=SAMPLE_RATE,
             check_peak=False,
         )
@@ -1149,12 +1312,16 @@ async def _resolve_target_async(
             )
         case MusicConfigUpdate():
             base = current or _default_internal_config()
-            internal_update = item.to_internal()
-            target = (
-                base
-                if current is None and is_empty_update(item)
-                else merge_internal_config(base, internal_update)
-            )
+            if _has_step(item):
+                base_public = _approximate_public_config(base)
+                target = item.apply_to(base_public).to_internal()
+            else:
+                internal_update = item.to_internal()
+                target = (
+                    base
+                    if current is None and is_empty_update(item)
+                    else merge_internal_config(base, internal_update)
+                )
         case str():
             target = (await model.generate(item)).to_internal()
         case _:
@@ -1167,6 +1334,7 @@ async def astream(
     items: Iterable[Streamable] | AsyncIterable[Streamable],
     *,
     chunk_seconds: float = 1.0,
+    pattern_seconds: float | None = None,
     model: ModelSpec = "fast",
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
@@ -1226,6 +1394,9 @@ async def astream(
         first_config_ready = False
         first_audio_chunk = False
         warned: dict[str, bool] = {"duration": False, "transition": False}
+        cumulative_time: float = 0.0  # Track time for phase continuity
+        chunk_cache: _ChunkCache | None = None
+        cache_config: _MusicConfigInternal | None = None
 
         async def _next_item() -> Streamable | None:
             try:
@@ -1341,10 +1512,17 @@ async def astream(
                     if not first_audio_chunk:
                         _emit_event(hooks, StreamEvent(kind="first_audio_chunk"))
                         first_audio_chunk = True
-                    yield await _render_chunk(config_item, chunk_seconds=chunk_seconds)
+                    yield await _render_chunk(
+                        config_item, chunk_seconds=chunk_seconds, t_offset=cumulative_time
+                    )
+                    cumulative_time += chunk_seconds
                 remaining -= transition_chunks
+                chunk_cache = None
+                cache_config = None
             else:
                 current = target
+                chunk_cache = None
+                cache_config = None
 
             match current:
                 case _MusicConfigInternal() as current_config:
@@ -1358,9 +1536,15 @@ async def astream(
 
             while remaining > 0:
                 # 1. Create the render task but don't await it yet
-                render_task = asyncio.create_task(
-                    _render_chunk(current_config, chunk_seconds=chunk_seconds)
-                )
+                if chunk_cache is None or cache_config is not current_config:
+                    chunk_cache = await _build_chunk_cache(
+                        current_config,
+                        chunk_seconds=chunk_seconds,
+                        pattern_seconds=pattern_seconds,
+                        t_offset=cumulative_time,
+                    )
+                    cache_config = current_config
+                render_task = asyncio.create_task(_render_cached_chunk(chunk_cache))
 
                 # 2. Prepare tasks to wait on
                 waiting_on = {render_task}
@@ -1433,14 +1617,21 @@ async def astream(
                             if not first_audio_chunk:
                                 _emit_event(hooks, StreamEvent(kind="first_audio_chunk"))
                                 first_audio_chunk = True
-                            yield await _render_chunk(config_item, chunk_seconds=chunk_seconds)
+                            yield await _render_chunk(
+                                config_item, chunk_seconds=chunk_seconds, t_offset=cumulative_time
+                            )
+                            cumulative_time += chunk_seconds
                         remaining -= transition
                         current = current_config
+                        chunk_cache = None
+                        cache_config = None
                         continue
 
                     # No transition needed, snap to target
                     current_config = real_target
                     current = real_target
+                    chunk_cache = None
+                    cache_config = None
                     # Loop back to start rendering with the NEW config immediately
                     continue
 
@@ -1451,6 +1642,7 @@ async def astream(
                     first_audio_chunk = True
 
                 yield await render_task
+                cumulative_time += chunk_seconds
                 remaining -= 1
 
             if pending_real_task is not None and not pending_real_task.done():

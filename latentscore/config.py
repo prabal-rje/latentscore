@@ -1,8 +1,20 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Callable, Literal, Mapping, Optional, TypeVar, cast
+from typing import (
+    Any,
+    Callable,
+    Literal,
+    Mapping,
+    Optional,
+    TypeVar,
+    Union,
+    cast,
+    get_args,
+    get_origin,
+)
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -57,6 +69,34 @@ _LOGGER = logging.getLogger("latentscore.config")
 
 
 T = TypeVar("T")
+
+
+# -----------------------------------------------------------------------------
+# Step: relative adjustment for steppable fields
+# -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Step:
+    """Relative adjustment for ordered label fields.
+
+    Used in MusicConfigUpdate to step a field up/down by N levels
+    instead of setting an absolute value.
+
+    Example:
+        update = MusicConfigUpdate(
+            brightness=Step(+1),  # one level brighter
+            tempo=Step(-2),       # two levels slower
+        )
+        new_config = update.apply_to(base_config)
+    """
+
+    delta: int
+
+    def __repr__(self) -> str:
+        sign = "+" if self.delta >= 0 else ""
+        return f"Step({sign}{self.delta})"
+
 
 _TEMPO_MAP: Mapping[TempoLabel, float] = MappingProxyType(
     {
@@ -613,14 +653,31 @@ class _MusicConfigUpdateInternal(BaseModel):
 
 
 class MusicConfigUpdate(BaseModel):
-    """Partial update for human inputs; unknown keys are rejected."""
+    """Partial update for human inputs; unknown keys are rejected.
 
-    tempo: Optional[TempoLabel] = None
-    brightness: Optional[BrightnessLabel] = None
+    Steppable fields (those with ordered levels) accept either an absolute
+    value or a Step for relative adjustment:
+
+        update = MusicConfigUpdate(
+            brightness=Step(+1),  # relative: one level brighter
+            tempo="fast",         # absolute: set to "fast"
+        )
+        new_config = update.apply_to(base_config)
+    """
+
+    # Steppable fields: accept absolute value OR Step
+    tempo: Optional[TempoLabel | Step] = None
+    brightness: Optional[BrightnessLabel | Step] = None
+    space: Optional[SpaceLabel | Step] = None
+    density: Optional[DensityLevel | Step] = None
+    motion: Optional[MotionLabel | Step] = None
+    stereo: Optional[StereoLabel | Step] = None
+    echo: Optional[EchoLabel | Step] = None
+    human: Optional[HumanFeelLabel | Step] = None
+
+    # Non-steppable fields: absolute values only
     root: Optional[RootNote] = None
     mode: Optional[ModeName] = None
-    space: Optional[SpaceLabel] = None
-    density: Optional[DensityLevel] = None
 
     bass: Optional[BassStyle] = None
     pad: Optional[PadStyle] = None
@@ -629,12 +686,8 @@ class MusicConfigUpdate(BaseModel):
     texture: Optional[TextureStyle] = None
     accent: Optional[AccentStyle] = None
 
-    motion: Optional[MotionLabel] = None
     attack: Optional[AttackStyle] = None
-    stereo: Optional[StereoLabel] = None
     depth: Optional[bool] = None
-    echo: Optional[EchoLabel] = None
-    human: Optional[HumanFeelLabel] = None
     grain: Optional[GrainStyle] = None
 
     melody_engine: Optional[MelodyEngine] = None
@@ -656,6 +709,14 @@ class MusicConfigUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     def to_internal(self) -> _MusicConfigUpdateInternal:
+        # Check for unresolved Step values
+        for field_name in self.model_fields:
+            value = getattr(self, field_name)
+            if isinstance(value, Step):
+                raise ValueError(
+                    f"Cannot convert to internal: field '{field_name}' has unresolved Step. "
+                    f"Call apply_to(base_config) first to resolve Step values."
+                )
         return _MusicConfigUpdateInternal(
             tempo=_optional_map(self.tempo, tempo_to_float),
             brightness=_optional_map(self.brightness, brightness_to_float),
@@ -692,6 +753,75 @@ class MusicConfigUpdate(BaseModel):
             chord_change_bars=self.chord_change_bars,
             chord_extensions=self.chord_extensions,
         )
+
+    def apply_to(self, base: MusicConfig) -> MusicConfig:
+        """Apply this update to a base config, resolving any Step values.
+
+        Step values are resolved by finding the current level in the ordered
+        list of valid values and moving up/down by the step delta. Values
+        saturate at the min/max (no overflow/underflow).
+
+        Args:
+            base: The base configuration to update.
+
+        Returns:
+            A new MusicConfig with updates applied.
+
+        Example:
+            >>> base = MusicConfig(brightness="medium")
+            >>> update = MusicConfigUpdate(brightness=Step(+1))
+            >>> new = update.apply_to(base)
+            >>> new.brightness
+            'bright'
+        """
+        updates: dict[str, Any] = {}
+
+        for name, value in self:
+            match value:
+                case None:
+                    continue
+                case Step(delta=d):
+                    levels = _extract_ordered_levels(self.model_fields[name].annotation)
+                    if levels is None:
+                        raise ValueError(f"Field '{name}' has Step but no ordered levels")
+                    current = getattr(base, name)
+                    if current is None:
+                        raise ValueError(f"Cannot step '{name}': base value is None")
+                    try:
+                        idx = levels.index(current)
+                    except ValueError:
+                        raise ValueError(
+                            f"Value '{current}' not in {name} levels: {levels}"
+                        ) from None
+                    updates[name] = levels[max(0, min(idx + d, len(levels) - 1))]
+                case _:
+                    updates[name] = value
+
+        return base.model_copy(update=updates)
+
+
+def _extract_ordered_levels(annotation: Any) -> list[Any] | None:
+    """Extract ordered literal values from a type annotation like Optional[TempoLabel | Step].
+
+    Returns None if the annotation doesn't contain an ordered Literal type.
+    """
+    # Unwrap Optional (Union with None)
+    origin = get_origin(annotation)
+    if origin is Union:
+        args = [a for a in get_args(annotation) if a is not type(None)]
+    else:
+        args = [annotation]
+
+    # Look for a Literal type (not Step)
+    for arg in args:
+        if arg is Step:
+            continue
+        # Check if it's a Literal type
+        literal_args = get_args(arg)
+        if literal_args:
+            return list(literal_args)
+
+    return None
 
 
 ConfigInput = MusicConfig | _MusicConfigInternal
