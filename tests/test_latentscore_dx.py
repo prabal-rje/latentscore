@@ -19,10 +19,12 @@ def _stub_assemble(
     duration: float = 16.0,
     normalize: bool = True,
     rng: np.random.Generator | None = None,
+    t_offset: float = 0.0,
 ) -> np.ndarray:
     _ = config
     _ = normalize
     _ = rng
+    _ = t_offset
     size = max(1, int(ls.SAMPLE_RATE * duration))
     return np.zeros(size, dtype=np.float32)
 

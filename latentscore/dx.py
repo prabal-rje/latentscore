@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import math
 import os
 from collections.abc import AsyncIterable, AsyncIterator, Callable, Iterable, Iterator, Sequence
 from pathlib import Path
+from queue import Full, Queue
+from threading import Event, Thread
 from typing import Any, Literal
 
 import numpy as np
@@ -139,7 +143,7 @@ class Track(BaseModel):
         )
 
 
-StreamItems = Track | TrackContent
+StreamItems = Track | Streamable | TrackContent
 StreamItemsInput = StreamItems | Sequence[StreamItems]
 
 
@@ -156,24 +160,25 @@ class Playlist(BaseModel):
         self,
         *,
         chunk_seconds: float = 1.0,
+        pattern_seconds: float | None = None,
+        transition_seconds: float = 5.0,
         model: ModelSpec = "fast",
         config: ConfigInput | None = None,
         update: UpdateInput | None = None,
-        prefetch_depth: int = 1,
-        preview: bool = False,
         fallback: FallbackInput | None = None,
         fallback_model: ModelSpec = "fast",
         hooks: StreamHooks | None = None,
         queue_maxsize: int = 0,
     ) -> AudioStream:
-        return _stream_from_tracks(
-            list(self.tracks),
+        items = [track.to_streamable() for track in self.tracks]
+        return _stream_from_items(
+            items,
             chunk_seconds=chunk_seconds,
+            pattern_seconds=pattern_seconds,
+            transition_seconds=transition_seconds,
             model=model,
             config=config,
             update=update,
-            prefetch_depth=prefetch_depth,
-            preview=preview,
             fallback=fallback,
             fallback_model=fallback_model,
             hooks=hooks,
@@ -185,6 +190,244 @@ class Playlist(BaseModel):
 
     def play(self, **kwargs: Any) -> None:
         self.stream(**kwargs).play()
+
+
+LiveSource = (
+    Streamable
+    | TrackContent
+    | Track
+    | Iterable[Streamable | TrackContent | Track]
+    | AsyncIterable[Streamable | TrackContent | Track]
+)
+
+
+class LiveStream:
+    """Live streaming wrapper around stream_raw/astream_raw.
+
+    This is a single-use stream: once consumed, it cannot be replayed.
+    """
+
+    def __init__(
+        self,
+        source: LiveSource,
+        *,
+        chunk_seconds: float = 1.0,
+        pattern_seconds: float | None = None,
+        transition_seconds: float = 1.0,
+        model: ModelSpec = "fast",
+        config: ConfigInput | None = None,
+        update: UpdateInput | None = None,
+        fallback: FallbackInput | None = None,
+        fallback_model: ModelSpec = "fast",
+        hooks: StreamHooks | None = None,
+        queue_maxsize: int = 0,
+        sample_rate: int = SAMPLE_RATE,
+    ) -> None:
+        self._source = self._normalize_source(source)
+        self._chunk_seconds = chunk_seconds
+        self._pattern_seconds = pattern_seconds
+        self._transition_seconds = transition_seconds
+        self._model = _coerce_model(model)
+        self._fallback_model = _coerce_model(fallback_model)
+        self._config = config
+        self._update = update
+        self._fallback = fallback
+        self._queue_maxsize = queue_maxsize
+        self.sample_rate = sample_rate
+        self._started = False
+        self._sync_stop: Event | None = None
+        self._sync_thread: Thread | None = None
+        self._indicator = None
+        if hooks is None:
+            self._indicator = RichIndicator()
+            self._hooks = self._indicator.stream_hooks()
+        else:
+            self._hooks = hooks
+
+    def __iter__(self) -> Iterator[FloatArray]:
+        return iter(self.chunks())
+
+    def __aiter__(self) -> AsyncIterator[FloatArray]:
+        return self.achunks()
+
+    def chunks(self, seconds: float | None = None) -> Iterable[FloatArray]:
+        self._claim()
+        max_chunks = _seconds_to_chunks(seconds, self._chunk_seconds)
+        queue: Queue[object] = Queue(maxsize=self._queue_maxsize)
+        sentinel = object()
+        stop_event = Event()
+        self._sync_stop = stop_event
+
+        def _runner() -> None:
+            async def _run() -> None:
+                stream = astream_raw(
+                    self._source,
+                    chunk_seconds=self._chunk_seconds,
+                    pattern_seconds=self._pattern_seconds,
+                    transition_seconds=self._transition_seconds,
+                    model=self._model,
+                    config=self._config,
+                    update=self._update,
+                    fallback=self._fallback,
+                    fallback_model=self._fallback_model,
+                    hooks=self._hooks,
+                )
+                async_iter = stream.__aiter__()
+                count = 0
+                try:
+                    async for chunk in async_iter:
+                        if stop_event.is_set():
+                            break
+                        if max_chunks is not None and count >= max_chunks:
+                            break
+                        count += 1
+                        while True:
+                            try:
+                                queue.put(chunk, timeout=0.1)
+                                break
+                            except Full:
+                                if stop_event.is_set():
+                                    break
+                                continue
+                except BaseException as exc:
+                    queue.put(exc)
+                finally:
+                    aclose = getattr(async_iter, "aclose", None)
+                    if aclose is not None:
+                        try:
+                            await aclose()
+                        except Exception:
+                            pass
+                    queue.put(sentinel)
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(_run())
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                if hasattr(loop, "shutdown_default_executor"):
+                    loop.run_until_complete(loop.shutdown_default_executor())
+            finally:
+                asyncio.set_event_loop(None)
+                loop.close()
+
+        thread = Thread(target=_runner, daemon=True)
+        self._sync_thread = thread
+        thread.start()
+
+        def _iter() -> Iterator[FloatArray]:
+            try:
+                while True:
+                    item = queue.get()
+                    if item is sentinel:
+                        return
+                    if isinstance(item, BaseException):
+                        raise item
+                    yield item
+            finally:
+                stop_event.set()
+                thread.join(timeout=2.0)
+                self._sync_stop = None
+                self._sync_thread = None
+
+        return _iter()
+
+    async def achunks(self, seconds: float | None = None) -> AsyncIterator[FloatArray]:
+        self._claim()
+        max_chunks = _seconds_to_chunks(seconds, self._chunk_seconds)
+        stream = astream_raw(
+            self._source,
+            chunk_seconds=self._chunk_seconds,
+            pattern_seconds=self._pattern_seconds,
+            transition_seconds=self._transition_seconds,
+            model=self._model,
+            config=self._config,
+            update=self._update,
+            fallback=self._fallback,
+            fallback_model=self._fallback_model,
+            hooks=self._hooks,
+        )
+        async_iter = stream.__aiter__()
+        count = 0
+        try:
+            async for chunk in async_iter:
+                yield chunk
+                count += 1
+                if max_chunks is not None and count >= max_chunks:
+                    break
+        finally:
+            aclose = getattr(async_iter, "aclose", None)
+            if aclose is not None:
+                await aclose()
+
+    def collect(self, seconds: float | None = None) -> Audio:
+        chunks = [
+            ensure_audio_contract(chunk, sample_rate=self.sample_rate)
+            for chunk in self.chunks(seconds)
+        ]
+        if not chunks:
+            return Audio(samples=np.array([], dtype=np.float32), sample_rate=self.sample_rate)
+        return Audio(samples=np.concatenate(chunks), sample_rate=self.sample_rate)
+
+    def save(self, path: str | Path, seconds: float | None = None) -> Path:
+        return write_wav(path, self.chunks(seconds), sample_rate=self.sample_rate)
+
+    def play(self, seconds: float | None = None) -> None:
+        from .playback import play_stream
+
+        try:
+            play_stream(self.chunks(seconds), sample_rate=self.sample_rate)
+        except PlaybackError:
+            _LOGGER.info(
+                "Streaming playback unavailable; falling back to buffered play.",
+                exc_info=True,
+            )
+            self.collect(seconds).play()
+
+    async def aplay(self, seconds: float | None = None) -> None:
+        await asyncio.to_thread(self.play, seconds)
+
+    def close(self) -> None:
+        if self._sync_stop is not None:
+            self._sync_stop.set()
+        if self._sync_thread is not None:
+            self._sync_thread.join(timeout=2.0)
+            self._sync_thread = None
+            self._sync_stop = None
+
+    def _claim(self) -> None:
+        if self._started:
+            raise InvalidConfigError("LiveStream can only be consumed once")
+        self._started = True
+
+    def _normalize_source(self, source: LiveSource) -> LiveSource:
+        if isinstance(source, Track):
+            return [source.to_streamable()]
+        if isinstance(source, (str, MusicConfig, MusicConfigUpdate, Streamable)):
+            return [source]
+        if isinstance(source, AsyncIterable):
+
+            async def _aiter() -> AsyncIterator[Streamable | TrackContent]:
+                async for item in source:
+                    if isinstance(item, Track):
+                        yield item.to_streamable()
+                    else:
+                        yield item
+
+            return _aiter()
+
+        if isinstance(source, Iterable):
+
+            def _iter() -> Iterator[Streamable | TrackContent]:
+                for item in source:
+                    if isinstance(item, Track):
+                        yield item.to_streamable()
+                    else:
+                        yield item
+
+            return _iter()
+
+        raise InvalidConfigError("live expects an iterable or async iterable source")
 
 
 def render(
@@ -249,31 +492,54 @@ def render(
         raise
 
 
-def stream(
-    *items: StreamItemsInput,
-    duration: float = 60.0,
-    transition: float = 5.0,
-    chunk_seconds: float = 1.0,
+async def arender(
+    vibe_or_config: TrackContent,
+    *,
+    duration: float = 8.0,
     model: ModelSpec = "fast",
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
-    prefetch_depth: int = 1,
-    preview: bool = False,
+    sample_rate: int = SAMPLE_RATE,
+    hooks: RenderHooks | None = None,
+) -> Audio:
+    return await asyncio.to_thread(
+        render,
+        vibe_or_config,
+        duration=duration,
+        model=model,
+        config=config,
+        update=update,
+        sample_rate=sample_rate,
+        hooks=hooks,
+    )
+
+
+def stream(
+    *items: StreamItemsInput,
+    duration: float | None = None,
+    transition: float = 5.0,
+    chunk_seconds: float = 1.0,
+    pattern_seconds: float | None = None,
+    transition_seconds: float | None = None,
+    model: ModelSpec = "fast",
+    config: ConfigInput | None = None,
+    update: UpdateInput | None = None,
     fallback: FallbackInput | None = None,
     fallback_model: ModelSpec = "fast",
     hooks: StreamHooks | None = None,
     queue_maxsize: int = 0,
 ) -> AudioStream:
     items_list = _normalize_items(items)
-    tracks = _coerce_tracks(items_list, duration=duration, transition=transition)
-    return _stream_from_tracks(
-        tracks,
+    stream_items = _coerce_stream_items(items_list, duration=duration, transition=transition)
+    resolved_transition = transition if transition_seconds is None else transition_seconds
+    return _stream_from_items(
+        stream_items,
         chunk_seconds=chunk_seconds,
+        pattern_seconds=pattern_seconds,
+        transition_seconds=resolved_transition,
         model=model,
         config=config,
         update=update,
-        prefetch_depth=prefetch_depth,
-        preview=preview,
         fallback=fallback,
         fallback_model=fallback_model,
         hooks=hooks,
@@ -305,26 +571,34 @@ def _normalize_items(items: tuple[StreamItemsInput, ...]) -> list[StreamItems]:
     return items_list
 
 
-def _coerce_tracks(
+def _coerce_stream_items(
     items: Sequence[StreamItems],
     *,
-    duration: float,
+    duration: float | None,
     transition: float,
-) -> list[Track]:
+) -> list[Streamable | TrackContent]:
+    if duration is None:
+        stream_items: list[Streamable | TrackContent] = []
+        for item in items:
+            if isinstance(item, Track):
+                stream_items.append(item.to_streamable())
+            else:
+                stream_items.append(item)
+        return stream_items
+
     count = len(items)
     per_track = duration / count
-    tracks: list[Track] = []
+    stream_items = []
     for item in items:
-        if isinstance(item, Track):
-            tracks.append(item)
+        if isinstance(item, Streamable):
+            stream_items.append(item)
+        elif isinstance(item, Track):
+            stream_items.append(item.to_streamable())
         else:
-            tracks.append(Track(content=item, duration=per_track, transition=transition))
-    return tracks
-
-
-def _streamables_for_tracks(tracks: Sequence[Track]) -> Iterable[Streamable]:
-    for track in tracks:
-        yield track.to_streamable()
+            stream_items.append(
+                Track(content=item, duration=per_track, transition=transition).to_streamable()
+            )
+    return stream_items
 
 
 def _emit_render_hooks(
@@ -359,15 +633,15 @@ def _emit_render_hooks(
         _LOGGER.warning("Render hook failed: %s", exc, exc_info=debug)
 
 
-def _stream_from_tracks(
-    tracks: list[Track],
+def _stream_from_items(
+    items: Iterable[Streamable | TrackContent],
     *,
     chunk_seconds: float,
+    pattern_seconds: float | None,
+    transition_seconds: float,
     model: ModelSpec,
     config: ConfigInput | None,
     update: UpdateInput | None,
-    prefetch_depth: int,
-    preview: bool,
     fallback: FallbackInput | None,
     fallback_model: ModelSpec,
     hooks: StreamHooks | None,
@@ -384,13 +658,13 @@ def _stream_from_tracks(
     def sync_factory() -> Iterable[FloatArray]:
         _ = indicator
         return stream_raw(
-            _streamables_for_tracks(tracks),
+            items,
             chunk_seconds=chunk_seconds,
+            pattern_seconds=pattern_seconds,
+            transition_seconds=transition_seconds,
             model=resolved_model,
             config=config,
             update=update,
-            prefetch_depth=prefetch_depth,
-            preview=preview,
             fallback=fallback,
             fallback_model=resolved_fallback,
             hooks=resolved_hooks,
@@ -400,19 +674,58 @@ def _stream_from_tracks(
     def async_factory() -> AsyncIterable[FloatArray]:
         _ = indicator
         return astream_raw(
-            _streamables_for_tracks(tracks),
+            items,
             chunk_seconds=chunk_seconds,
+            pattern_seconds=pattern_seconds,
+            transition_seconds=transition_seconds,
             model=resolved_model,
             config=config,
             update=update,
-            prefetch_depth=prefetch_depth,
-            preview=preview,
             fallback=fallback,
             fallback_model=resolved_fallback,
             hooks=resolved_hooks,
         )
 
     return AudioStream(sync_factory, async_factory, sample_rate=SAMPLE_RATE)
+
+
+def live(
+    source: LiveSource,
+    *,
+    chunk_seconds: float = 1.0,
+    pattern_seconds: float | None = None,
+    transition_seconds: float = 1.0,
+    model: ModelSpec = "fast",
+    config: ConfigInput | None = None,
+    update: UpdateInput | None = None,
+    fallback: FallbackInput | None = None,
+    fallback_model: ModelSpec = "fast",
+    hooks: StreamHooks | None = None,
+    queue_maxsize: int = 0,
+    sample_rate: int = SAMPLE_RATE,
+) -> LiveStream:
+    return LiveStream(
+        source,
+        chunk_seconds=chunk_seconds,
+        pattern_seconds=pattern_seconds,
+        transition_seconds=transition_seconds,
+        model=model,
+        config=config,
+        update=update,
+        fallback=fallback,
+        fallback_model=fallback_model,
+        hooks=hooks,
+        queue_maxsize=queue_maxsize,
+        sample_rate=sample_rate,
+    )
+
+
+def _seconds_to_chunks(seconds: float | None, chunk_seconds: float) -> int | None:
+    if seconds is None:
+        return None
+    if seconds <= 0:
+        return 0
+    return int(math.ceil(seconds / max(chunk_seconds, 1e-6)))
 
 
 def _coerce_model(model: ModelSpec) -> ModelSpec:

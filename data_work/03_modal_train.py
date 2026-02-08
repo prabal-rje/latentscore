@@ -394,9 +394,7 @@ def _select_template_candidate(
         token_ids = tokenizer(candidate, add_special_tokens=False)["input_ids"]
         match_idx = _find_subsequence(list(input_ids), token_ids)
         if match_idx != -1:
-            print(
-                f"[TRAIN_DEBUG] SFT {label}_marker_match={candidate!r} idx={match_idx}"
-            )
+            print(f"[TRAIN_DEBUG] SFT {label}_marker_match={candidate!r} idx={match_idx}")
             return candidate, match_idx
     print(f"[TRAIN_DEBUG] SFT {label}_marker_match=NONE")
     return None, -1
@@ -425,6 +423,7 @@ def _make_marker_candidates(
             if snippet and snippet not in candidates:
                 candidates.append(snippet)
     return candidates
+
 
 def _build_completion_only_collator(
     *,
@@ -982,10 +981,7 @@ def run_sft(config: dict[str, Any]) -> str:
                 if isinstance(best_index, int) and isinstance(candidates, list):
                     if 0 <= best_index < len(candidates):
                         match = candidates[best_index] == payload
-                print(
-                    f"[TRAIN_DEBUG] SFT best_index={best_index} "
-                    f"payload_matches_best={match}"
-                )
+                print(f"[TRAIN_DEBUG] SFT best_index={best_index} payload_matches_best={match}")
             except Exception as exc:
                 print(f"[TRAIN_DEBUG] SFT best_index check failed: {exc}")
         response_start = text.rfind(response)
@@ -1076,7 +1072,9 @@ def run_sft(config: dict[str, Any]) -> str:
     ):
         raise SystemExit("SFTTrainer does not accept a dataset argument.")
     if eval_dataset is not None:
-        if not _set_first_supported(SFTTrainer.__init__, trainer_kwargs, eval_dataset, "eval_dataset"):
+        if not _set_first_supported(
+            SFTTrainer.__init__, trainer_kwargs, eval_dataset, "eval_dataset"
+        ):
             raise SystemExit("SFTTrainer does not accept an eval_dataset argument.")
     if not _set_first_supported(
         SFTTrainer.__init__, trainer_kwargs, training_args, "args", "training_args"
@@ -1099,16 +1097,10 @@ def run_sft(config: dict[str, Any]) -> str:
             labels = sample.get("labels") if isinstance(sample, dict) else None
             if labels is not None:
                 supervised = [tok for tok in labels if tok != -100]
-                print(
-                    f"[TRAIN_DEBUG] SFT supervised_tokens={len(supervised)} "
-                    f"of {len(labels)}"
-                )
+                print(f"[TRAIN_DEBUG] SFT supervised_tokens={len(supervised)} of {len(labels)}")
                 if supervised:
                     decoded = tokenizer.decode(
-                        [
-                            tokenizer.pad_token_id if tok == -100 else tok
-                            for tok in labels
-                        ]
+                        [tokenizer.pad_token_id if tok == -100 else tok for tok in labels]
                     ).replace(tokenizer.pad_token or "", " ")
                     print(
                         f"[TRAIN_DEBUG] SFT supervised_head={_truncate_debug_text(repr(decoded))}"
@@ -1262,11 +1254,7 @@ def run_grpo(config: dict[str, Any]) -> str:
         nonlocal debug_count
         vibe_noisy = str(example[grpo.prompt_field])
         reward_vibe = example.get("vibe_original")
-        reward_vibe_text = (
-            str(reward_vibe)
-            if reward_vibe not in (None, "")
-            else vibe_noisy
-        )
+        reward_vibe_text = str(reward_vibe) if reward_vibe not in (None, "") else vibe_noisy
         user_prompt = wrap_vibe_for_chat(vibe_noisy)
         text = render_chat_prompt(
             system_prompt=grpo.system_prompt,

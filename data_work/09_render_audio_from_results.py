@@ -100,7 +100,7 @@ def main() -> None:
                 title = wrapper.title
             else:
                 prompt_config = MusicConfigPrompt.model_validate(config_payload)
-                title = row.get("title") or f"track_{count+1:03d}"
+                title = row.get("title") or f"track_{count + 1:03d}"
         except Exception:
             continue
 
@@ -110,8 +110,8 @@ def main() -> None:
 
         safe_title = "".join(ch for ch in str(title) if ch.isalnum() or ch in ("-", "_")).strip()
         if not safe_title:
-            safe_title = f"track_{count+1:03d}"
-        output_path = output_dir / f"{count+1:03d}_{safe_title}.wav"
+            safe_title = f"track_{count + 1:03d}"
+        output_path = output_dir / f"{count + 1:03d}_{safe_title}.wav"
         write_wav(output_path, audio)
         count += 1
 

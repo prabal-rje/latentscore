@@ -160,51 +160,19 @@ def test_stream_texts_wraps_prompts() -> None:
     assert len(chunks) >= 1
 
 
-def test_streamable_accepts_fallback_and_preview() -> None:
+def test_streamable_accepts_fallback() -> None:
     item = Streamable(
         content="warm sunrise",
         duration=0.02,
         transition_duration=0.0,
         fallback="keep_last",
-        preview=True,
     )
     assert item.fallback == "keep_last"
-    assert item.preview is True
-
-
-class SlowModel:
-    def __init__(self) -> None:
-        self.ready = asyncio.Event()
-
-    async def generate(self, vibe: str) -> MusicConfig:
-        await self.ready.wait()
-        return MusicConfig(tempo="medium", brightness="bright")
 
 
 class FastModel:
     async def generate(self, vibe: str) -> MusicConfig:
         return MusicConfig(tempo="slow", brightness="dark")
-
-
-@pytest.mark.asyncio
-async def test_astream_preview_yields_before_llm_ready() -> None:
-    slow = SlowModel()
-    fast = FastModel()
-    items = [Streamable(content="warm sunrise", duration=0.04, transition_duration=0.0)]
-
-    async def first_chunk() -> np.ndarray:
-        async for chunk in astream_raw(
-            items,
-            model=slow,
-            preview=True,
-            fallback_model=fast,
-        ):
-            return chunk
-        raise AssertionError("no chunks")
-
-    chunk = await asyncio.wait_for(first_chunk(), timeout=0.5)
-    assert isinstance(chunk, np.ndarray)
-    slow.ready.set()
 
 
 @pytest.mark.asyncio

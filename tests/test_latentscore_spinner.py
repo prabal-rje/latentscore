@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from latentscore import FirstAudioSpinner, Streamable
+from latentscore import FirstAudioSpinner
 from latentscore.spinner import Spinner
 
 
@@ -16,12 +16,6 @@ def test_first_audio_spinner_hooks_noop_when_disabled() -> None:
     hooks = spinner.hooks()
     assert hooks.on_stream_start
     hooks.on_stream_start()
-    assert hooks.on_item_preview_start
-    hooks.on_item_preview_start(
-        0,
-        Streamable(content="vibe", duration=0.01),
-        "embedding",
-    )
     assert hooks.on_first_audio_chunk
     hooks.on_first_audio_chunk()
     assert hooks.on_stream_end

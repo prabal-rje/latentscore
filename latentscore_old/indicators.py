@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from typing import IO
 
-from .main import ModelLoadRole, RenderHooks, StreamContent, Streamable, StreamEvent, StreamHooks
+from .main import ModelLoadRole, RenderHooks, Streamable, StreamEvent, StreamHooks
 from .models import EXTERNAL_PREFIX, ExternalModelSpec, ModelSpec
 from .spinner import Spinner, render_error
 
@@ -21,6 +21,7 @@ class RichIndicator:
         self._spinner = Spinner("Starting", stream=self._stream, enabled=enabled)
         self._started = False
         self._stopped = False
+        self._preview_items: set[int] = set()
 
     def render_hooks(self) -> RenderHooks:
         return RenderHooks(
@@ -42,6 +43,7 @@ class RichIndicator:
             on_item_resolve_start=self._on_item_resolve_start,
             on_item_resolve_success=self._on_item_resolve_success,
             on_item_resolve_error=self._on_item_resolve_error,
+            on_item_preview_start=self._on_item_preview_start,
             on_first_config_ready=self._on_first_config_ready,
             on_first_audio_chunk=self._on_first_audio_chunk,
             on_stream_end=self._on_stream_end,
@@ -109,18 +111,31 @@ class RichIndicator:
     def _on_stream_start(self) -> None:
         self._start("Preparing stream")
 
-    def _on_item_resolve_start(self, index: int, item: Streamable | StreamContent) -> None:
+    def _on_item_resolve_start(self, index: int, item: Streamable) -> None:
         label = _item_action(item)
         self._start(f"{label} (item {index + 1})")
 
-    def _on_item_resolve_success(self, index: int, item: Streamable | StreamContent) -> None:
-        _ = index
+    def _on_item_preview_start(
+        self,
+        index: int,
+        item: Streamable,
+        preview: bool,
+    ) -> None:
         _ = item
+        self._preview_items.add(index)
+        label = "speculative" if preview else "standard"
+        self._start(f"Generating preview ({label}) for item {index + 1}")
+
+    def _on_item_resolve_success(self, index: int, item: Streamable) -> None:
+        _ = item
+        if index in self._preview_items:
+            self._preview_items.discard(index)
+            self._start(f"Applying final config for item {index + 1}")
 
     def _on_item_resolve_error(
         self,
         index: int,
-        item: Streamable | StreamContent,
+        item: Streamable,
         exc: Exception,
         fallback: object | None,
     ) -> None:
@@ -130,7 +145,7 @@ class RichIndicator:
         _ = fallback
         self._start("Config failed; applying fallback")
 
-    def _on_first_config_ready(self, index: int, item: Streamable | StreamContent) -> None:
+    def _on_first_config_ready(self, index: int, item: Streamable) -> None:
         _ = index
         _ = item
         self._start("Generating music")
@@ -154,8 +169,7 @@ def _is_external_model(model: ModelSpec) -> bool:
     return False
 
 
-def _item_action(item: Streamable | StreamContent) -> str:
-    content = item.content if isinstance(item, Streamable) else item
-    if isinstance(content, str):
+def _item_action(item: Streamable) -> str:
+    if isinstance(item.content, str):
         return "Generating config (LLM)"
     return "Applying config"

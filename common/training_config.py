@@ -226,9 +226,7 @@ DEFAULT_TRAINING_CONFIG = TrainingConfig()
 # --- Ablation Presets ---
 
 ABLATION_PRESETS: dict[str, dict[str, TrainingConfig]] = {
-    "lora_rank": {
-        f"r{r}": TrainingConfig(lora=LoRAConfig(r=r)) for r in [4, 8, 16, 32, 64, 128]
-    },
+    "lora_rank": {f"r{r}": TrainingConfig(lora=LoRAConfig(r=r)) for r in [4, 8, 16, 32, 64, 128]},
     "learning_rate": {
         f"lr{lr}": TrainingConfig(optimizer=OptimizerConfig(learning_rate=lr))
         for lr in [1e-5, 5e-5, 1e-4, 2e-4, 5e-4]

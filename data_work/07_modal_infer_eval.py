@@ -76,9 +76,7 @@ class _ModalStubRun:
 
 
 class _ModalStubApp:
-    def function(
-        self, *args: Any, **kwargs: Any
-    ) -> Any:  # pragma: no cover - stub only
+    def function(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - stub only
         def decorator(func: Any) -> Any:
             return func
 

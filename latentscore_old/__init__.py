@@ -23,7 +23,7 @@ from .config import (
     TempoLabel,
     TextureStyle,
 )
-from .dx import Audio, AudioStream, LiveStream, Playlist, Track, arender, live, render, stream
+from .dx import Audio, AudioStream, Playlist, Track, render, stream
 from .logging_utils import configure_logging as _configure_logging
 from .main import (
     FallbackInput,
@@ -84,11 +84,8 @@ __all__ = [
     "RenderHooks",
     "Audio",
     "AudioStream",
-    "LiveStream",
     "Playlist",
     "Track",
-    "arender",
-    "live",
     "astream",
     "astream_raw",
     "render",

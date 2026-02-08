@@ -6,10 +6,10 @@ import json
 import logging
 import os
 import platform
-import re
 import threading
-from collections.abc import Mapping
 from dataclasses import dataclass
+import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable, Literal, Protocol, Sequence, TypeGuard, cast
 
@@ -165,11 +165,6 @@ def _disable_transformers_progress() -> None:
         from transformers.utils import logging as hf_logging  # type: ignore[import]
     except Exception:
         return
-    try:
-        hf_logging.disable_progress_bar()
-        hf_logging.set_verbosity_error()
-    except Exception:
-        return
 
 
 def _ensure_tqdm_lock() -> None:
@@ -183,6 +178,11 @@ def _ensure_tqdm_lock() -> None:
             tqdm.tqdm._lock = None  # type: ignore[attr-defined]
         except Exception:
             return
+    try:
+        hf_logging.disable_progress_bar()
+        hf_logging.set_verbosity_error()
+    except Exception:
+        return
 
 
 _torch_param_patched = False
@@ -1019,8 +1019,8 @@ class ExpressiveMlxModel:
         bnb_config = None
         if use_cuda:
             try:
-                import bitsandbytes  # type: ignore[import]  # noqa: F401
                 from transformers import BitsAndBytesConfig  # type: ignore[import]
+                import bitsandbytes  # type: ignore[import]  # noqa: F401
 
                 use_bnb = True
                 bnb_config = BitsAndBytesConfig(
