@@ -119,8 +119,8 @@ def _sanitize_payload_json(raw: str) -> str:
             changed = True
     return json.dumps(data) if changed else raw
 
-ModelChoice = Literal["fast", "expressive", "local"]
-MODEL_CHOICES: tuple[ModelChoice, ...] = ("fast", "expressive", "local")
+ModelChoice = Literal["fast", "expressive", "expressive_base", "local"]
+MODEL_CHOICES: tuple[ModelChoice, ...] = ("fast", "expressive", "expressive_base", "local")
 EXTERNAL_PREFIX = "external:"
 
 _EXPRESSIVE_REPO = os.environ.get(
@@ -130,6 +130,14 @@ _EXPRESSIVE_REPO = os.environ.get(
 _EXPRESSIVE_DIR = os.environ.get(
     "LATENTSCORE_EXPRESSIVE_DIR",
     "latentscore-gemma3-270m-v5-merged",
+)
+_EXPRESSIVE_BASE_REPO = os.environ.get(
+    "LATENTSCORE_EXPRESSIVE_BASE_REPO",
+    "unsloth/gemma-3-270m-it",
+)
+_EXPRESSIVE_BASE_DIR = os.environ.get(
+    "LATENTSCORE_EXPRESSIVE_BASE_DIR",
+    "gemma-3-270m-it",
 )
 _EXPRESSIVE_MLX_REPO = os.environ.get(
     "LATENTSCORE_EXPRESSIVE_MLX_REPO",
@@ -904,10 +912,14 @@ class ExpressiveMlxModel:
         self,
         *,
         model_dir: Path | None = None,
+        repo: str = _EXPRESSIVE_REPO,
+        repo_dir: str = _EXPRESSIVE_DIR,
         max_retries: int = _DEFAULT_MAX_RETRIES,
         allow_download: bool = True,
     ) -> None:
         self._model_dir = model_dir
+        self._repo = repo
+        self._repo_dir = repo_dir
         self._max_retries = max_retries
         self._allow_download = allow_download
 
@@ -925,7 +937,7 @@ class ExpressiveMlxModel:
             base_dir = Path.home() / ".cache" / "latentscore" / "models"
         if _resolve_backend() == "mlx":
             return base_dir / _EXPRESSIVE_MLX_DIR
-        return base_dir / _EXPRESSIVE_DIR
+        return base_dir / self._repo_dir
 
     def _resolve_mlx_model_dir(self) -> Path:
         if self._model_dir is not None:
@@ -945,19 +957,19 @@ class ExpressiveMlxModel:
             raise ModelNotAvailableError("huggingface_hub is not installed") from exc
 
         _LOGGER.info(
-            "Downloading model weights (~1.2GB). This happens once and is cached at %s.",
+            "Downloading model weights. This happens once and is cached at %s.",
             model_dir.parent,
         )
         model_dir.mkdir(parents=True, exist_ok=True)
         from .spinner import Spinner
 
-        spinner = Spinner("Downloading expressive model (first run)", show_elapsed=True)
+        spinner = Spinner(f"Downloading {self._repo} (first run)", show_elapsed=True)
         spinner.start()
         try:
             _ensure_tqdm_lock()
             with _snapshot_download_lock:
                 snapshot_download(
-                    _EXPRESSIVE_REPO,
+                    self._repo,
                     local_dir=str(model_dir),
                     max_workers=1,
                     resume_download=True,
@@ -1148,6 +1160,15 @@ class ExpressiveMlxModel:
             )
             model.to("cuda" if use_cuda else "cpu")
         model.eval()
+        if not use_cuda:
+            try:
+                if _is_apple_silicon():
+                    torch.backends.quantized.engine = "qnnpack"
+                model = torch.ao.quantization.quantize_dynamic(
+                    model, {torch.nn.Linear}, dtype=torch.qint8
+                )
+            except Exception as exc:
+                _LOGGER.warning("Dynamic int8 quantization failed: %s", exc)
         outlines_any: Any = outlines
         return outlines_any.from_transformers(model, tokenizer), tokenizer, "transformers"
 
@@ -1250,6 +1271,11 @@ def _resolve_builtin_model(choice: ModelChoice) -> ModelForGeneratingMusicConfig
     match choice:
         case "expressive":
             return ExpressiveMlxModel()
+        case "expressive_base":
+            return ExpressiveMlxModel(
+                repo=_EXPRESSIVE_BASE_REPO,
+                repo_dir=_EXPRESSIVE_BASE_DIR,
+            )
         case "local":
             return ExpressiveMlxModel()
         case "fast":
@@ -1296,7 +1322,7 @@ def resolve_model(
                 return _FallbackModel(primary=primary, fallback=_resolve_builtin_model("fast"))
             return primary
         match model:
-            case "expressive" | "local" | "fast":
+            case "expressive" | "expressive_base" | "local" | "fast":
                 primary = _resolve_builtin_model(model)
                 if model != "fast" and _fast_fallback_enabled():
                     return _FallbackModel(primary=primary, fallback=_resolve_builtin_model("fast"))

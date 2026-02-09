@@ -18,7 +18,6 @@ from latentscore.config import Step
 from latentscore.errors import ModelNotAvailableError, PlaybackError
 from latentscore.main import StreamEvent
 
-
 # -----------------------------------------------------------------------------
 # Toggles
 # -----------------------------------------------------------------------------
@@ -31,8 +30,9 @@ RUN_INSTRUCTION_GENERATOR = True
 RUN_STREAMABLE_GENERATOR = True
 
 # Models to try (enable as needed)
-RUN_FAST = True
-RUN_EXPRESSIVE = False
+RUN_FAST = False
+RUN_EXPRESSIVE = True
+RUN_EXPRESSIVE_BASE = False
 RUN_GPT52 = False
 RUN_SONNET = False
 
@@ -57,6 +57,7 @@ STREAMABLE_DURATION_SECONDS = 4.0 if PLAY_AUDIO else 1.0
 GPT52_MODEL = ExternalModelSpec(model="openai/gpt-5.2")
 SONNET_MODEL = ExternalModelSpec(model="anthropic/claude-sonnet-4-5-20250929")
 EXPRESSIVE_MODEL: ModelSpec = "expressive"
+EXPRESSIVE_BASE_MODEL: ModelSpec = "expressive_base"
 
 
 def _guard_env(label: str, required: Iterable[str]) -> bool:
@@ -94,7 +95,7 @@ def _stream_demo(model: ModelSpec) -> None:
     if PLAY_AUDIO:
         stream.play()
         return
-    _ = stream.collect()
+    # _ = stream.collect()
     print("[stream] ok")
 
 
@@ -183,13 +184,13 @@ def _streamable_generator_demo(model: ModelSpec) -> None:
 
 def _run_model(label: str, model: ModelSpec) -> None:
     try:
-        if RUN_RENDER:
-            _render_demo(model)
-        if RUN_ARENDER:
-            _ = asyncio.run(
-                dx.arender("warm sunrise ambient", duration=RENDER_SECONDS, model=model)
-            )
-            print("[arender] ok")
+        # if RUN_RENDER:
+        #     _render_demo(model)
+        # if RUN_ARENDER:
+        #     _ = asyncio.run(
+        #         dx.arender("warm sunrise ambient", duration=RENDER_SECONDS, model=model)
+        #     )
+        #     print("[arender] ok")
         if RUN_STREAM:
             _stream_demo(model)
         if RUN_ASTREAM:
@@ -210,6 +211,9 @@ def main() -> None:
 
     if RUN_EXPRESSIVE:
         _run_model("expressive", EXPRESSIVE_MODEL)
+
+    if RUN_EXPRESSIVE_BASE:
+        _run_model("expressive_base", EXPRESSIVE_BASE_MODEL)
 
     if RUN_GPT52 and _guard_env("gpt-5.2", ["OPENAI_API_KEY"]):
         _run_model("gpt-5.2", GPT52_MODEL)
