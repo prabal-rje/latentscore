@@ -20,8 +20,104 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from common import build_config_generation_prompt
 
-from .config import MusicConfig, MusicConfigPrompt, MusicConfigPromptPayload
+from .config import (
+    MAX_LONG_FIELD_CHARS,
+    MAX_TITLE_CHARS,
+    MAX_TITLE_WORDS,
+    MusicConfig,
+    MusicConfigPrompt,
+    MusicConfigPromptPayload,
+)
 from .errors import ConfigGenerateError, LLMInferenceError, ModelNotAvailableError
+
+try:
+    from json_repair import repair_json  # type: ignore[import]
+except ImportError:
+    repair_json: Callable[[str], str] | None = None
+
+
+def _clamp_int(value: object, lo: int, hi: int) -> int | None:
+    if isinstance(value, int):
+        return max(lo, min(hi, value))
+    if isinstance(value, float):
+        return max(lo, min(hi, int(value)))
+    return None
+
+
+def _sanitize_config(config: dict[str, Any]) -> bool:
+    """Clamp numeric fields and snap invalid labels to defaults. Returns True if changed."""
+    changed = False
+
+    # Numeric fields with ranges.
+    density = _clamp_int(config.get("density"), 2, 6)
+    if density is not None and density != config.get("density"):
+        config["density"] = density
+        changed = True
+
+    for oct_field in ("register_min_oct", "register_max_oct"):
+        clamped = _clamp_int(config.get(oct_field), 1, 8)
+        if clamped is not None and clamped != config.get(oct_field):
+            config[oct_field] = clamped
+            changed = True
+
+    phrase = config.get("phrase_len_bars")
+    if isinstance(phrase, (int, float)) and phrase not in (2, 4, 8):
+        # Snap to nearest valid value.
+        config["phrase_len_bars"] = min((2, 4, 8), key=lambda v: abs(v - int(phrase)))
+        changed = True
+
+    # Label fields: snap to default if value is not in the allowed set.
+    _LABEL_DEFAULTS: dict[str, tuple[Sequence[str], str]] = {
+        "tempo": (("very_slow", "slow", "medium", "fast", "very_fast"), "medium"),
+        "brightness": (("very_dark", "dark", "medium", "bright", "very_bright"), "medium"),
+        "space": (("dry", "small", "medium", "large", "vast"), "medium"),
+        "motion": (("static", "slow", "medium", "fast", "chaotic"), "medium"),
+        "stereo": (("mono", "narrow", "medium", "wide", "ultra_wide"), "medium"),
+        "echo": (("none", "subtle", "medium", "heavy", "infinite"), "medium"),
+        "human": (("robotic", "tight", "natural", "loose", "drunk"), "robotic"),
+        "melody_density": (("very_sparse", "sparse", "medium", "busy", "very_busy"), "medium"),
+        "syncopation": (("straight", "light", "medium", "heavy"), "medium"),
+        "swing": (("none", "light", "medium", "heavy"), "none"),
+        "motif_repeat_prob": (("rare", "sometimes", "often"), "sometimes"),
+        "step_bias": (("step", "balanced", "leapy"), "balanced"),
+        "chromatic_prob": (("none", "light", "medium", "heavy"), "none"),
+        "cadence_strength": (("weak", "medium", "strong"), "medium"),
+        "chord_change_bars": (("very_slow", "slow", "medium", "fast"), "medium"),
+    }
+    for field, (allowed, default) in _LABEL_DEFAULTS.items():
+        value = config.get(field)
+        if isinstance(value, str) and value not in allowed:
+            config[field] = default
+            changed = True
+
+    return changed
+
+
+def _sanitize_payload_json(raw: str) -> str:
+    """Fix out-of-bounds fields so valid configs aren't rejected."""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    if not isinstance(data, dict):
+        return raw
+    changed = False
+    title = data.get("title")
+    if isinstance(title, str):
+        words = title.strip().split()
+        if len(words) > MAX_TITLE_WORDS or len(title) > MAX_TITLE_CHARS:
+            truncated = " ".join(words[:MAX_TITLE_WORDS])[:MAX_TITLE_CHARS].rstrip()
+            data["title"] = truncated or "Untitled"
+            changed = True
+    thinking = data.get("thinking")
+    if isinstance(thinking, str) and len(thinking) > MAX_LONG_FIELD_CHARS:
+        data["thinking"] = thinking[:MAX_LONG_FIELD_CHARS]
+        changed = True
+    config = data.get("config")
+    if isinstance(config, dict):
+        if _sanitize_config(config):
+            changed = True
+    return json.dumps(data) if changed else raw
 
 ModelChoice = Literal["fast", "expressive", "local"]
 MODEL_CHOICES: tuple[ModelChoice, ...] = ("fast", "expressive", "local")
@@ -1037,18 +1133,18 @@ class ExpressiveMlxModel:
             self._download_expressive(model_dir)
 
         tokenizer: Any = AutoTokenizer.from_pretrained(str(model_dir))
-        torch_dtype: Any = torch.float16 if use_cuda else torch.float32
+        dtype: Any = torch.float16 if use_cuda else torch.float32
         if use_bnb and bnb_config is not None:
             model: Any = AutoModelForCausalLM.from_pretrained(
                 str(model_dir),
                 device_map="auto",
-                torch_dtype=torch.float16,
+                dtype=torch.float16,
                 quantization_config=bnb_config,
             )
         else:
             model = AutoModelForCausalLM.from_pretrained(
                 str(model_dir),
-                torch_dtype=torch_dtype,
+                dtype=dtype,
             )
             model.to("cuda" if use_cuda else "cpu")
         model.eval()
@@ -1098,6 +1194,7 @@ class ExpressiveMlxModel:
         if backend == "gguf":
             return self._generate_sync_gguf(cast(_GgufInstructorModel, model), vibe)
         last_error: Exception | None = None
+        raw: str = ""
         for _ in range(self._max_retries):
             prompt = self._build_prompt(tokenizer, vibe)
             try:
@@ -1124,10 +1221,20 @@ class ExpressiveMlxModel:
                         prompt,
                         output_type=MusicConfigPromptPayload,
                         max_new_tokens=_LLM_MAX_TOKENS,
+                        do_sample=False,
+                        repetition_penalty=_MLX_REPETITION_PENALTY,
                     )
-                payload = MusicConfigPromptPayload.model_validate_json(raw)
+                sanitized = _sanitize_payload_json(raw)
+                payload = MusicConfigPromptPayload.model_validate_json(sanitized)
                 return payload.config.to_config()
             except ValidationError as exc:
+                if repair_json is not None:
+                    try:
+                        repaired = repair_json(raw)
+                        payload = MusicConfigPromptPayload.model_validate_json(repaired)
+                        return payload.config.to_config()
+                    except Exception:
+                        pass
                 _LOGGER.warning("Expressive model returned invalid JSON: %s", exc, exc_info=True)
                 last_error = exc
             except Exception as exc:  # pragma: no cover - model provider errors
