@@ -100,3 +100,4 @@ data_work/_experiments/
 
 # --- Extraneous files containing info. for LLM context ---
 llm_files/
+submissions/

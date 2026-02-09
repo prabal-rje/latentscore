@@ -57,9 +57,10 @@ class EvalSource(BaseModel):
 
 def load_eval_set(path: Path) -> list[EvalPrompt]:
     """Load an evaluation set from a JSONL file."""
-    prompts = []
+    prompts: list[EvalPrompt] = []
     for record in iter_jsonl(path):
-        prompts.append(EvalPrompt(**record))
+        # iter_jsonl yields a dict[str, JsonValue]; let Pydantic do the coercion.
+        prompts.append(EvalPrompt.model_validate(record))
     return prompts
 
 
@@ -77,7 +78,7 @@ def check_field_matches(
     expected_fields: dict[str, str],
 ) -> dict[str, bool]:
     """Check if config fields match expected values."""
-    matches = {}
+    matches: dict[str, bool] = {}
     for field, expected in expected_fields.items():
         actual = config.get(field)
         if actual is None:
@@ -151,15 +152,11 @@ def run_local_inference(
 def run_baseline_inference(
     *,
     prompt: str,
-    baseline_type: str,
+    baseline: Any,
 ) -> tuple[dict[str, Any] | None, str | None, float]:
     """Run inference with a baseline. Returns (config dict, error, time_ms)."""
     start = time.perf_counter()
     try:
-        # Import baselines lazily to avoid circular imports
-        from data_work.lib.baselines import get_baseline
-
-        baseline = get_baseline(baseline_type)
         payload = baseline.generate(prompt)
         # Convert Pydantic model to dict for consistency with other sources
         config = payload.model_dump()
@@ -186,7 +183,14 @@ async def evaluate_source(
     duration: float,
 ) -> list[EvalResult]:
     """Evaluate a single source on all prompts."""
-    results = []
+    results: list[EvalResult] = []
+
+    baseline = None
+    if source.kind == "baseline":
+        # Construct once per source; some baselines are expensive (e.g., retrieval).
+        from data_work.lib.baselines import get_baseline
+
+        baseline = get_baseline(source.model or "random")
 
     for prompt in prompts:
         config: dict[str, Any] | None = None
@@ -214,9 +218,10 @@ async def evaluate_source(
                     temperature=temperature,
                 )
         elif source.kind == "baseline":
+            assert baseline is not None
             config, error, time_ms = run_baseline_inference(
                 prompt=prompt.prompt,
-                baseline_type=source.model or "random",
+                baseline=baseline,
             )
 
         # Compute validity metrics

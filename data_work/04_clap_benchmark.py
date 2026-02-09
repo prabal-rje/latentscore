@@ -8,9 +8,10 @@ import json
 import logging
 import tempfile
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict
 
 if __package__ is None and __name__ == "__main__":
@@ -23,7 +24,6 @@ from data_work.lib.clap_scorer import ClapScore, ClapScorer
 from data_work.lib.jsonl_io import iter_jsonl
 from data_work.lib.llm_client import (
     LocalHFClient,
-    format_prompt_json,
     litellm_structured_completion,
     load_env_file,
     normalize_model_and_base,
@@ -119,16 +119,17 @@ def _extract_config(value: Any) -> dict[str, Any]:
         case _:
             parsed = value
 
-    match parsed:
-        case {"config": dict() as inner_config}:
-            return inner_config
-        case dict():
-            return parsed
-        case _:
-            raise ValueError("Config payload was not a JSON object.")
+    if isinstance(parsed, dict):
+        parsed_dict = cast(dict[str, Any], parsed)
+        inner = parsed_dict.get("config")
+        if isinstance(inner, dict):
+            return cast(dict[str, Any], inner)
+        return parsed_dict
+
+    raise ValueError("Config payload was not a JSON object.")
 
 
-def _config_to_audio(config_payload: Mapping[str, Any], duration: float) -> np.ndarray:
+def _config_to_audio(config_payload: Mapping[str, Any], duration: float) -> NDArray[np.float64]:
     config_dict = dict(config_payload)
     # Try MusicConfigPrompt first (string labels like "sparse", "light")
     # then convert to MusicConfig via to_config() which handles the label->float mapping
@@ -366,6 +367,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         raise SystemExit("--model-kwargs must be valid JSON.") from exc
     if not isinstance(model_kwargs, dict):
         raise SystemExit("--model-kwargs must be a JSON object.")
+    model_kwargs = cast(dict[str, Any], model_kwargs)
 
     litellm_models: list[tuple[str, str | None]] = []
     for source in litellm_sources:
@@ -390,6 +392,14 @@ def main(argv: Sequence[str] | None = None) -> None:
             max_new_tokens=args.local_max_new_tokens,
             temperature=args.local_temperature,
         )
+
+    baseline_clients: dict[str, Any] = {}
+    if baseline_sources:
+        from data_work.lib.baselines import get_baseline
+
+        for source in baseline_sources:
+            assert source.model is not None
+            baseline_clients[source.label] = get_baseline(source.model)
 
     scorer = ClapScorer()
     results: list[BenchmarkResult] = []
@@ -435,10 +445,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                         payload = client.generate_structured(prompt, MusicConfigPromptPayload)
                         config_payload = payload.config.model_dump()
                     case "baseline":
-                        from data_work.lib.baselines import get_baseline
-
                         assert source.model is not None
-                        baseline = get_baseline(source.model)
+                        baseline = baseline_clients[source.label]
                         baseline_payload = baseline.generate(vibe)
                         config_payload = baseline_payload.config.model_dump()
                     case _:

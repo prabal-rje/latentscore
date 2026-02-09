@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import functools
+import json
+import os
 import random
 import re
 from abc import ABC, abstractmethod
-from typing import Sequence, TypeVar, get_args  # noqa: F401 (TypeVar used in generic)
+from pathlib import Path
+from typing import Any, Mapping, Sequence, TypeVar, cast, get_args  # noqa: F401 (TypeVar used in generic)
 
 from common.music_schema import (
     MAX_TITLE_CHARS,
@@ -83,6 +87,10 @@ CADENCE_VALUES: Sequence[CadenceLabel] = get_args(CadenceLabel)
 
 _TITLE_FALLBACK = "Ambient Mood Study"
 _TITLE_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9']+")
+
+_DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+_DEFAULT_EMBED_MAP_REPO = "guprab/latentscore-data"
+_DEFAULT_EMBED_MAP_FILE = "2026-01-26_scored/_progress_embeddings.jsonl"
 
 
 def _make_title(vibe: str) -> str:
@@ -169,6 +177,10 @@ class RandomConfigBaseline(ConfigBaseline):
         colors = self.rng.sample(HEX_COLORS, k=5)
         weights = self.rng.sample(list(WEIGHT_VALUES), k=5)
         return Palette(colors=[PaletteColor(hex=c, weight=w) for c, w in zip(colors, weights)])
+
+    def random_palette(self) -> Palette:
+        """Public wrapper for palette generation (used by other baselines)."""
+        return self._random_palette()
 
     def _random_config(self) -> MusicConfigPrompt:
         """Generate a random MusicConfigPrompt."""
@@ -290,7 +302,7 @@ class RuleBasedBaseline(ConfigBaseline):
     def _match_keywords(
         self,
         vibe: str,
-        keyword_map: dict[_T, list[str]],
+        keyword_map: Mapping[_T, Sequence[str]],
         default: _T,
     ) -> _T:
         """Find the best matching value based on keywords."""
@@ -322,10 +334,13 @@ class RuleBasedBaseline(ConfigBaseline):
         _DEFAULT_SPACE: SpaceLabel = "medium"
 
         # Create a mutable copy of the config with overrides
-        tempo = self._match_keywords(vibe, TEMPO_KEYWORDS, _DEFAULT_TEMPO)
-        brightness = self._match_keywords(vibe, BRIGHTNESS_KEYWORDS, _DEFAULT_BRIGHTNESS)
-        mode = self._match_keywords(vibe, MODE_KEYWORDS, _DEFAULT_MODE)
-        space = self._match_keywords(vibe, SPACE_KEYWORDS, _DEFAULT_SPACE)
+        tempo = cast(TempoLabel, self._match_keywords(vibe, TEMPO_KEYWORDS, _DEFAULT_TEMPO))
+        brightness = cast(
+            BrightnessLabel,
+            self._match_keywords(vibe, BRIGHTNESS_KEYWORDS, _DEFAULT_BRIGHTNESS),
+        )
+        mode = cast(ModeName, self._match_keywords(vibe, MODE_KEYWORDS, _DEFAULT_MODE))
+        space = cast(SpaceLabel, self._match_keywords(vibe, SPACE_KEYWORDS, _DEFAULT_SPACE))
 
         # Adjust motion based on tempo
         motion: MotionLabel = "medium"
@@ -449,11 +464,223 @@ class ModeConfigBaseline(ConfigBaseline):
         )
 
 
+class _RetrievalExample:
+    def __init__(
+        self,
+        *,
+        vibe: str,
+        config: MusicConfigPrompt,
+        palettes: list[Palette],
+    ) -> None:
+        self.vibe = vibe
+        self.config = config
+        self.palettes = palettes
+
+
+class _EmbeddingLookupIndex:
+    def __init__(self, *, embed_map_path: Path) -> None:
+        self._embed_map_path = embed_map_path
+        self._encoder: Any | None = None
+        self._examples: list[_RetrievalExample] = []
+        self._matrix: Any | None = None
+
+    def warmup(self) -> None:
+        _ = self._load()
+
+    def lookup(self, vibe: str) -> _RetrievalExample:
+        index = self._load()
+        return index._lookup_impl(vibe)
+
+    def _load_encoder(self) -> Any:
+        if self._encoder is not None:
+            return self._encoder
+        try:
+            from sentence_transformers import SentenceTransformer  # type: ignore[import]
+        except ImportError as exc:  # pragma: no cover - environment mismatch
+            raise RuntimeError(
+                "sentence-transformers is required for retrieval baseline."
+            ) from exc
+        self._encoder = cast(Any, SentenceTransformer(_DEFAULT_EMBED_MODEL))
+        return cast(Any, self._encoder)
+
+    def _load(self) -> "_EmbeddingLookupIndex":
+        if self._matrix is not None and self._examples:
+            return self
+
+        try:
+            import numpy as np
+        except ImportError as exc:  # pragma: no cover - environment mismatch
+            raise RuntimeError("numpy is required for retrieval baseline.") from exc
+
+        from pydantic import ValidationError
+
+        # Reuse random palettes if a row doesn't have valid ones.
+        palette_fallback = RandomConfigBaseline(seed=42)
+
+        vibes: list[str] = []
+        examples: list[_RetrievalExample] = []
+        embeddings: list[list[float]] = []
+
+        with self._embed_map_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    row_obj: object = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(row_obj, dict):
+                    continue
+                row = cast(dict[str, Any], row_obj)
+
+                # Build the lookup index from non-test splits only (avoid leakage).
+                split = row.get("split")
+                if isinstance(split, str) and split.upper() == "TEST":
+                    continue
+
+                vibe_value = row.get("vibe_original") or row.get("vibe") or row.get("vibe_noisy")
+                config_value = row.get("config")
+                if not isinstance(vibe_value, str) or not vibe_value.strip():
+                    continue
+                if not isinstance(config_value, dict):
+                    continue
+
+                try:
+                    config = MusicConfigPrompt.model_validate(config_value)
+                except ValidationError:
+                    continue
+
+                palettes_value = row.get("palettes")
+                palettes: list[Palette] = []
+                if isinstance(palettes_value, list):
+                    palettes_list = cast(list[Any], palettes_value)
+                    for item in palettes_list:
+                        if not isinstance(item, dict):
+                            palettes = []
+                            break
+                        try:
+                            palettes.append(Palette.model_validate(item))
+                        except ValidationError:
+                            palettes = []
+                            break
+
+                if len(palettes) != 3:
+                    palettes = [palette_fallback.random_palette() for _ in range(3)]
+
+                vibes.append(vibe_value)
+                examples.append(
+                    _RetrievalExample(
+                        vibe=vibe_value,
+                        config=config,
+                        palettes=palettes,
+                    )
+                )
+
+                embed_value = row.get("embedding")
+                if isinstance(embed_value, list):
+                    embed_list = cast(list[Any], embed_value)
+                    try:
+                        embeddings.append([float(x) for x in embed_list])
+                    except (TypeError, ValueError):
+                        embeddings.append([])
+
+        if not examples:
+            raise RuntimeError(f"No usable examples found in embedding map: {self._embed_map_path}")
+
+        matrix = None
+        if len(embeddings) == len(examples) and embeddings and all(embeddings):
+            mat = np.asarray(embeddings, dtype=np.float32)
+            norms = np.linalg.norm(mat, axis=1, keepdims=True)
+            norms[norms == 0] = 1.0
+            matrix = mat / norms
+        else:
+            encoder = self._load_encoder()
+            vecs = encoder.encode(vibes, normalize_embeddings=True)
+            matrix = np.asarray(vecs, dtype=np.float32)
+
+        self._examples = examples
+        self._matrix = matrix
+        return self
+
+    def _lookup_impl(self, vibe: str) -> _RetrievalExample:
+        if self._matrix is None or not self._examples:
+            self._load()
+        assert self._matrix is not None
+        assert self._examples
+
+        import numpy as np
+
+        encoder = self._load_encoder()
+        query = encoder.encode([vibe], normalize_embeddings=True)
+        query_vec = np.asarray(query, dtype=np.float32)[0]
+        scores = self._matrix @ query_vec
+        best_idx = int(np.argmax(scores))
+        return self._examples[best_idx]
+
+
+def _resolve_embed_map_path() -> Path:
+    explicit = os.environ.get("LATENTSCORE_EMBED_MAP", "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+
+    repo = os.environ.get("LATENTSCORE_EMBED_MAP_REPO", _DEFAULT_EMBED_MAP_REPO)
+    filename = os.environ.get("LATENTSCORE_EMBED_MAP_FILE", _DEFAULT_EMBED_MAP_FILE)
+
+    try:
+        from huggingface_hub import hf_hub_download  # type: ignore[import]
+    except ImportError as exc:  # pragma: no cover - environment mismatch
+        raise RuntimeError(
+            "huggingface_hub is required to download the embedding map. "
+            "Either install huggingface_hub or set LATENTSCORE_EMBED_MAP to a local file."
+        ) from exc
+
+    base_dir = Path(os.environ.get("LATENTSCORE_MODEL_DIR", "")).expanduser()
+    if not base_dir:
+        base_dir = Path.home() / ".cache" / "latentscore" / "models"
+    cache_dir = base_dir / "datasets"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    return Path(
+        hf_hub_download(
+            repo_id=repo,
+            repo_type="dataset",
+            filename=filename,
+            cache_dir=str(cache_dir),
+        )
+    )
+
+
+@functools.lru_cache(maxsize=1)
+def _get_retrieval_index() -> _EmbeddingLookupIndex:
+    return _EmbeddingLookupIndex(embed_map_path=_resolve_embed_map_path())
+
+
+class EmbeddingLookupBaseline(ConfigBaseline):
+    """Nearest-neighbor lookup baseline using the synthetic embedding map.
+
+    This is the "fast" tier described in the paper: CPU-only retrieval from a
+    synthetic vibe-to-config dataset using sentence-transformers embeddings.
+    """
+
+    def __init__(self) -> None:
+        self._index = _get_retrieval_index()
+
+    def generate(self, vibe: str) -> MusicConfigPromptPayload:
+        example = self._index.lookup(vibe)
+        return MusicConfigPromptPayload(
+            thinking="Nearest-neighbor retrieval from embedding map (fast tier).",
+            title=_make_title(vibe),
+            config=example.config,
+            palettes=example.palettes,
+        )
+
+
 # Registry of available baselines
 BASELINES: dict[str, type[ConfigBaseline]] = {
     "random": RandomConfigBaseline,
     "rule_based": RuleBasedBaseline,
     "mode": ModeConfigBaseline,
+    "retrieval": EmbeddingLookupBaseline,
 }
 
 
