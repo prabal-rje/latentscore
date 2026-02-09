@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportUnknownParameterType=false
 from __future__ import annotations
 
 import asyncio
@@ -245,14 +246,6 @@ def get_runtime_info() -> RuntimeInfo:
     return RuntimeInfo(os_name=os_name, gpu_type="cpu")
 
 
-def _should_use_mlx() -> bool:
-    return _resolve_backend() == "mlx"
-
-
-def _should_use_gguf() -> bool:
-    return _resolve_backend() == "gguf"
-
-
 def _resolve_backend() -> Literal["mlx", "transformers", "gguf"]:
     forced = os.environ.get("LATENTSCORE_FORCE_BACKEND", "").strip().lower()
     if forced:
@@ -335,7 +328,7 @@ def _make_mlx_repetition_penalty_sampler(penalty: float) -> Callable[[Any], Any]
 
     seen_tokens: list[int] = []
 
-    def sampler(logprobs: mx.array) -> mx.array:
+    def sampler(logprobs: Any) -> Any:
         nonlocal seen_tokens
 
         logprobs_flat = cast(list[float], logprobs.squeeze().tolist())
@@ -346,8 +339,8 @@ def _make_mlx_repetition_penalty_sampler(penalty: float) -> Callable[[Any], Any]
             else:
                 logprobs_flat[tok] *= penalty
 
-        penalized = mx.array(logprobs_flat)
-        result = mx.argmax(penalized, axis=-1, keepdims=True)
+        penalized: Any = mx.array(logprobs_flat)
+        result: Any = mx.argmax(penalized, axis=-1, keepdims=True)
         seen_tokens.append(int(result.item()))
         return result
 
@@ -526,13 +519,14 @@ FAST_EXAMPLES: tuple[ExampleConfig, ...] = (
 @functools.lru_cache(maxsize=1)
 def _fast_track_examples() -> tuple[ExampleConfig, ...]:
     try:
-        from .prompt_examples import FEW_SHOT_EXAMPLES
+        from .prompt_examples import FEW_SHOT_EXAMPLES  # type: ignore[reportMissingImports]
     except Exception as exc:  # pragma: no cover - optional import
         _LOGGER.warning("Fast track examples unavailable: %s", exc, exc_info=True)
         return FAST_EXAMPLES
 
     examples: list[ExampleConfig] = []
-    for match in _TRACK_EXAMPLE_PATTERN.finditer(FEW_SHOT_EXAMPLES):
+    few_shot: str = FEW_SHOT_EXAMPLES
+    for match in _TRACK_EXAMPLE_PATTERN.finditer(few_shot):
         input_text = match.group("input").strip()
         payload = match.group("json").strip()
         if not input_text or not payload:
@@ -707,9 +701,9 @@ class FastEmbeddingModel:
                         except ValidationError:
                             continue
                     examples.append(ExampleConfig(vibe=str(vibe), config=music_config))
-                    embed = row.get("embedding")
+                    embed: object = row.get("embedding")
                     if isinstance(embed, list):
-                        embeddings.append([float(x) for x in embed])
+                        embeddings.append([float(v) for v in cast(list[Any], embed)])
         except OSError as exc:  # pragma: no cover - filesystem edge case
             _LOGGER.warning("Failed reading embedding map: %s", exc, exc_info=True)
             return _fast_track_examples(), None
@@ -798,16 +792,16 @@ class ExpressiveMlxModel:
         except ImportError as exc:
             raise ModelNotAvailableError("transformers is not installed") from exc
 
-        version = transformers.__version__.split(".")[0]
+        version: str = transformers.__version__.split(".")[0]
         if version.isdigit() and int(version) >= 5:
             raise ModelNotAvailableError("transformers>=5 is not supported; install transformers<5")
         try:
-            from transformers import AutoTokenizer
+            from transformers import AutoTokenizer  # type: ignore[import]
         except Exception as exc:  # pragma: no cover - dependency mismatch
             raise ModelNotAvailableError(
                 "transformers is missing AutoTokenizer; install transformers<5"
             ) from exc
-        _ = AutoTokenizer
+        _: Any = AutoTokenizer
         # bitsandbytes is optional; we fall back to fp16/fp32 if unavailable.
 
     def __init__(
@@ -966,9 +960,9 @@ class ExpressiveMlxModel:
             _warn_cpu_backend_once(
                 "Using CPU-only GGUF inference. Set LATENTSCORE_GGUF_GPU_LAYERS>0 to enable GPU offload."
             )
-        llama = llama_cpp.Llama(**llama_kwargs)
+        llama: Any = llama_cpp.Llama(**llama_kwargs)
 
-        create = instructor.patch(
+        create: Any = instructor.patch(
             create=llama.create_chat_completion_openai_v1,
             mode=instructor.Mode.JSON_SCHEMA,
         )
@@ -1000,10 +994,11 @@ class ExpressiveMlxModel:
                     )
                 self._download_expressive_mlx(model_dir)
 
-            model, tokenizer = mlx_lm.load(
+            mlx_result: Any = mlx_lm.load(
                 str(model_dir),
                 tokenizer_config={"fix_mistral_regex": True},
             )
+            model, tokenizer = mlx_result[0], mlx_result[1]
             return outlines.from_mlxlm(model, tokenizer), tokenizer, "mlx"
 
         import torch  # type: ignore[import]
@@ -1041,10 +1036,10 @@ class ExpressiveMlxModel:
                 )
             self._download_expressive(model_dir)
 
-        tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
-        torch_dtype = torch.float16 if use_cuda else torch.float32
+        tokenizer: Any = AutoTokenizer.from_pretrained(str(model_dir))
+        torch_dtype: Any = torch.float16 if use_cuda else torch.float32
         if use_bnb and bnb_config is not None:
-            model = AutoModelForCausalLM.from_pretrained(
+            model: Any = AutoModelForCausalLM.from_pretrained(
                 str(model_dir),
                 device_map="auto",
                 torch_dtype=torch.float16,

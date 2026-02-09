@@ -27,7 +27,7 @@ from .config import (
 )
 from .errors import InvalidConfigError, ModelNotAvailableError, PlaybackError
 from .indicators import RichIndicator
-from .main import FallbackInput, RenderHooks, Streamable, StreamHooks
+from .main import FallbackInput, RenderHooks, Streamable, StreamContent, StreamHooks
 from .main import (
     astream as astream_raw,
 )
@@ -200,6 +200,8 @@ LiveSource = (
     | AsyncIterable[Streamable | TrackContent | Track]
 )
 
+_NormalizedSource = Iterable[Streamable | StreamContent] | AsyncIterable[Streamable | StreamContent]
+
 
 class LiveStream:
     """Live streaming wrapper around stream_raw/astream_raw.
@@ -223,15 +225,15 @@ class LiveStream:
         queue_maxsize: int = 0,
         sample_rate: int = SAMPLE_RATE,
     ) -> None:
-        self._source = self._normalize_source(source)
+        self._source: _NormalizedSource = self._normalize_source(source)
         self._chunk_seconds = chunk_seconds
         self._pattern_seconds = pattern_seconds
         self._transition_seconds = transition_seconds
-        self._model = _coerce_model(model)
-        self._fallback_model = _coerce_model(fallback_model)
+        self._model: ModelSpec = _coerce_model(model)
+        self._fallback_model: ModelSpec = _coerce_model(fallback_model)
         self._config = config
         self._update = update
-        self._fallback = fallback
+        self._fallback: FallbackInput | None = fallback
         self._queue_maxsize = queue_maxsize
         self.sample_rate = sample_rate
         self._started = False
@@ -323,6 +325,7 @@ class LiveStream:
                         return
                     if isinstance(item, BaseException):
                         raise item
+                    assert isinstance(item, np.ndarray)
                     yield item
             finally:
                 stop_event.set()
@@ -400,7 +403,7 @@ class LiveStream:
             raise InvalidConfigError("LiveStream can only be consumed once")
         self._started = True
 
-    def _normalize_source(self, source: LiveSource) -> LiveSource:
+    def _normalize_source(self, source: LiveSource) -> _NormalizedSource:
         if isinstance(source, Track):
             return [source.to_streamable()]
         if isinstance(source, (str, MusicConfig, MusicConfigUpdate, Streamable)):
@@ -416,18 +419,14 @@ class LiveStream:
 
             return _aiter()
 
-        if isinstance(source, Iterable):
+        def _iter() -> Iterator[Streamable | TrackContent]:
+            for item in source:
+                if isinstance(item, Track):
+                    yield item.to_streamable()
+                else:
+                    yield item
 
-            def _iter() -> Iterator[Streamable | TrackContent]:
-                for item in source:
-                    if isinstance(item, Track):
-                        yield item.to_streamable()
-                    else:
-                        yield item
-
-            return _iter()
-
-        raise InvalidConfigError("live expects an iterable or async iterable source")
+        return _iter()
 
 
 def render(

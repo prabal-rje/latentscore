@@ -14,6 +14,7 @@ from threading import Thread, Timer
 from typing import Any, Callable, Coroutine, Literal, TypeGuard, TypeVar, get_args
 
 import numpy as np
+from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from .audio import SAMPLE_RATE, AudioNumbers, FloatArray, ensure_audio_contract, write_wav
@@ -26,6 +27,7 @@ from .config import (
     UpdateInput,
     _MusicConfigInternal,
     _MusicConfigUpdateInternal,
+    brightness_to_float,
     coerce_internal_config,
     coerce_internal_update,
     echo_to_float,
@@ -33,7 +35,6 @@ from .config import (
     is_empty_update,
     merge_internal_config,
     motion_to_float,
-    brightness_to_float,
     space_to_float,
     stereo_to_float,
     tempo_to_float,
@@ -536,7 +537,7 @@ def _approximate_public_config(config: _MusicConfigInternal) -> MusicConfig:
 
 
 def _has_step(update: MusicConfigUpdate) -> bool:
-    for field_name in update.model_fields:
+    for field_name in MusicConfigUpdate.model_fields:
         value = getattr(update, field_name)
         if isinstance(value, Step):
             return True
@@ -593,15 +594,15 @@ def _default_pattern_seconds(config: SynthConfig, chunk_seconds: float) -> float
 
 @dataclass(slots=True)
 class _ChunkCache:
-    buffer: FloatArray
+    buffer: NDArray[Any]
     chunk_samples: int
     cursor: int = 0
 
-    def next_chunk(self) -> FloatArray:
+    def next_chunk(self) -> NDArray[Any]:
         if self.chunk_samples <= 0:
             return np.zeros(0, dtype=self.buffer.dtype)
         if self.buffer.size == 0:
-            return np.zeros(self.chunk_samples, dtype=np.float64)
+            return np.zeros(self.chunk_samples, dtype=np.float32)
 
         if self.chunk_samples >= self.buffer.size:
             repeats = int(np.ceil(self.chunk_samples / self.buffer.size))
@@ -633,7 +634,7 @@ async def _build_chunk_cache(
     synth = _to_synth_config(config_item)
     pattern = pattern_seconds or _default_pattern_seconds(synth, chunk_seconds)
     pattern = max(pattern, chunk_seconds)
-    buffer = await asyncio.to_thread(
+    buffer: NDArray[Any] = await asyncio.to_thread(
         lambda: assemble(synth, pattern, normalize=False, t_offset=t_offset)
     )
     chunk_samples = max(1, int(round(chunk_seconds * SAMPLE_RATE)))
@@ -1306,12 +1307,12 @@ async def astream(
 
             if queued is not None and (current_remaining is None or current_remaining <= 0):
                 transition_steps = 0
-                if current is not None:
+                if current is not None:  # pyright: ignore[reportUnnecessaryComparison]
                     transition_steps = _transition_steps(queued.transition_seconds, chunk_seconds)
                     if queued.remaining_chunks is not None:
                         transition_steps = min(queued.remaining_chunks, transition_steps)
 
-                if transition_steps > 0 and current is not None:
+                if transition_steps > 0 and current is not None:  # pyright: ignore[reportUnnecessaryComparison]
                     remaining_after_transition = (
                         queued.remaining_chunks - transition_steps
                         if queued.remaining_chunks is not None
@@ -1352,7 +1353,7 @@ async def astream(
             match current:
                 case _MusicConfigInternal() as current_config:
                     pass
-                case None:
+                case None:  # pyright: ignore[reportUnnecessaryComparison]
                     raise InvalidConfigError("Stream exhausted without a current config")
                 case _:
                     raise InvalidConfigError("Stream exhausted with an invalid config")

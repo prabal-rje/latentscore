@@ -674,10 +674,8 @@ def _rhythm_slot_times(
     # Otherwise, start at the next slot
     if abs(global_slot_start - t_offset) < 1e-9:
         first_slot = slot_at_offset
-        first_local_time = 0.0
     else:
         first_slot = slot_at_offset + 1
-        first_local_time = first_slot * slot_dur - t_offset
 
     # Generate slot times aligned to the global grid
     times: list[float] = []
@@ -1895,7 +1893,9 @@ def rhythm_minimal(
     pattern = (1, 0, 0, 0, 0, 0, 0, 0)
 
     if TEMPO_AWARE_RHYTHM:
-        slot_times, slot_offset = _rhythm_slot_times(config, dur, slots_per_beat=2, t_offset=t_offset)
+        slot_times, slot_offset = _rhythm_slot_times(
+            config, dur, slots_per_beat=2, t_offset=t_offset
+        )
         for i, t in enumerate(slot_times):
             if not pattern[(slot_offset + i) % len(pattern)]:
                 continue
@@ -1944,7 +1944,9 @@ def rhythm_heartbeat(
     pattern = (1, 1, 0, 0, 0, 0, 0, 0)
 
     if TEMPO_AWARE_RHYTHM:
-        slot_times, slot_offset = _rhythm_slot_times(config, dur, slots_per_beat=2, t_offset=t_offset)
+        slot_times, slot_offset = _rhythm_slot_times(
+            config, dur, slots_per_beat=2, t_offset=t_offset
+        )
         for i, t in enumerate(slot_times):
             if not pattern[(slot_offset + i) % len(pattern)]:
                 continue
@@ -1989,7 +1991,9 @@ def rhythm_soft_four(
     # Kick on every beat (4-on-the-floor)
     if TEMPO_AWARE_RHYTHM:
         # slots_per_beat=1 means one slot per beat = quarter notes
-        slot_times, _slot_offset = _rhythm_slot_times(config, dur, slots_per_beat=1, t_offset=t_offset)
+        slot_times, _slot_offset = _rhythm_slot_times(
+            config, dur, slots_per_beat=1, t_offset=t_offset
+        )
         for t in slot_times:
             start = int(t * sr)
             kick_dur = 0.18
@@ -2032,7 +2036,9 @@ def rhythm_hats_only(
 
     # 16th note hats (4 subdivisions per beat)
     if TEMPO_AWARE_RHYTHM:
-        slot_times, _slot_offset = _rhythm_slot_times(config, dur, slots_per_beat=4, t_offset=t_offset)
+        slot_times, _slot_offset = _rhythm_slot_times(
+            config, dur, slots_per_beat=4, t_offset=t_offset
+        )
         for t in slot_times:
             start = int(t * sr)
             hat_dur = 0.05
@@ -2076,7 +2082,9 @@ def rhythm_electronic(
     hat_pattern = (0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0)
 
     if TEMPO_AWARE_RHYTHM:
-        slot_times, slot_offset = _rhythm_slot_times(config, dur, slots_per_beat=4, t_offset=t_offset)
+        slot_times, slot_offset = _rhythm_slot_times(
+            config, dur, slots_per_beat=4, t_offset=t_offset
+        )
         for i, t in enumerate(slot_times):
             idx = (slot_offset + i) % len(kick_pattern)
             start = int(t * sr)

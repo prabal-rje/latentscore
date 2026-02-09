@@ -1,4 +1,4 @@
-"""Simpler end-user DX examples.
+"""End-user DX examples.
 
 Focus: render, stream, astream, arender, and generator patterns.
 """
@@ -13,8 +13,10 @@ from typing import Iterable
 import latentscore as ls
 import latentscore.dx as dx
 from latentscore import ExternalModelSpec, ModelSpec, MusicConfig, MusicConfigUpdate, Streamable
+from latentscore.audio import FloatArray
 from latentscore.config import Step
 from latentscore.errors import ModelNotAvailableError, PlaybackError
+from latentscore.main import StreamEvent
 
 
 # -----------------------------------------------------------------------------
@@ -65,7 +67,7 @@ def _guard_env(label: str, required: Iterable[str]) -> bool:
     return True
 
 
-def _play_chunks(chunks, *, label: str) -> None:
+def _play_chunks(chunks: list[FloatArray], *, label: str) -> None:
     if not PLAY_AUDIO:
         return
     from latentscore.playback import play_stream
@@ -98,7 +100,7 @@ def _stream_demo(model: ModelSpec) -> None:
 
 async def _astream_demo(model: ModelSpec) -> None:
     total_seconds = STREAM_SECONDS
-    chunks = []
+    chunks: list[FloatArray] = []
     async for chunk in ls.astream_raw(
         ["warm sunrise ambient"],
         model=model,
@@ -128,7 +130,7 @@ async def _instruction_generator_demo(model: ModelSpec) -> None:
     total_seconds = INSTRUCTION_HOLD_SECONDS * 2 + INSTRUCTION_TAIL_SECONDS
     start = time.monotonic()
 
-    def _log_event(event) -> None:
+    def _log_event(event: StreamEvent) -> None:
         if event.kind == "item_resolve_success":
             elapsed = time.monotonic() - start
             print(f"[instruction] resolved item {event.index} at {elapsed:.1f}s")

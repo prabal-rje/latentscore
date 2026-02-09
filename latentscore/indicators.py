@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from typing import IO
 
-from .main import ModelLoadRole, RenderHooks, StreamContent, Streamable, StreamEvent, StreamHooks
+from .main import ModelLoadRole, RenderHooks, Streamable, StreamContent, StreamEvent, StreamHooks
 from .models import EXTERNAL_PREFIX, ExternalModelSpec, ModelSpec
 from .spinner import Spinner, render_error
 

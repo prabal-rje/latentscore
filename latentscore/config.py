@@ -710,13 +710,22 @@ class MusicConfigUpdate(BaseModel):
 
     def to_internal(self) -> _MusicConfigUpdateInternal:
         # Check for unresolved Step values
-        for field_name in self.model_fields:
+        for field_name in MusicConfigUpdate.model_fields:
             value = getattr(self, field_name)
             if isinstance(value, Step):
                 raise ValueError(
                     f"Cannot convert to internal: field '{field_name}' has unresolved Step. "
                     f"Call apply_to(base_config) first to resolve Step values."
                 )
+        # After the Step guard above, all steppable fields hold their label type (or None).
+        assert not isinstance(self.tempo, Step)
+        assert not isinstance(self.brightness, Step)
+        assert not isinstance(self.space, Step)
+        assert not isinstance(self.density, Step)
+        assert not isinstance(self.motion, Step)
+        assert not isinstance(self.stereo, Step)
+        assert not isinstance(self.echo, Step)
+        assert not isinstance(self.human, Step)
         return _MusicConfigUpdateInternal(
             tempo=_optional_map(self.tempo, tempo_to_float),
             brightness=_optional_map(self.brightness, brightness_to_float),
@@ -781,7 +790,9 @@ class MusicConfigUpdate(BaseModel):
                 case None:
                     continue
                 case Step(delta=d):
-                    levels = _extract_ordered_levels(self.model_fields[name].annotation)
+                    levels = _extract_ordered_levels(
+                        MusicConfigUpdate.model_fields[name].annotation
+                    )
                     if levels is None:
                         raise ValueError(f"Field '{name}' has Step but no ordered levels")
                     current = getattr(base, name)
