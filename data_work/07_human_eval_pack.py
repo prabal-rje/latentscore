@@ -187,7 +187,9 @@ def _select_prompts(
             continue
         filtered.append((record_id, vibe))
     if not filtered:
-        raise SystemExit("No prompts left after filtering. Relax --min-chars/--max-chars/--ascii-only.")
+        raise SystemExit(
+            "No prompts left after filtering. Relax --min-chars/--max-chars/--ascii-only."
+        )
 
     rng = random.Random(seed)
     rng.shuffle(filtered)
@@ -276,13 +278,17 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--api-key", type=str, default=None)
     generate.add_argument("--api-key-env", type=str, default="OPENROUTER_API_KEY")
     generate.add_argument("--api-base", type=str, default=None)
-    generate.add_argument("--model-kwargs", type=str, default="{}", help="JSON dict of LiteLLM kwargs.")
+    generate.add_argument(
+        "--model-kwargs", type=str, default="{}", help="JSON dict of LiteLLM kwargs."
+    )
 
     generate.add_argument("--local-device", type=str, default=None)
     generate.add_argument("--local-max-new-tokens", type=int, default=3000)
     generate.add_argument("--local-temperature", type=float, default=0.0)
     generate.add_argument("--local-force-cpu", action="store_true", help="Force CPU inference.")
-    generate.add_argument("--local-4bit", action="store_true", help="4-bit NF4 quantization (CUDA).")
+    generate.add_argument(
+        "--local-4bit", action="store_true", help="4-bit NF4 quantization (CUDA)."
+    )
 
     analyze = subparsers.add_parser("analyze", help="Analyze forced-choice responses (simple).")
     analyze.add_argument("--key", type=Path, required=True, help="Path to key.jsonl")

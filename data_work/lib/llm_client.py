@@ -387,7 +387,9 @@ def _sanitize_payload_json(raw: str) -> str:
     if isinstance(title, str):
         words = title.strip().split()
         if len(words) > MAX_TITLE_WORDS or len(title) > MAX_TITLE_CHARS:
-            data["title"] = " ".join(words[:MAX_TITLE_WORDS])[:MAX_TITLE_CHARS].rstrip() or "Untitled"
+            data["title"] = (
+                " ".join(words[:MAX_TITLE_WORDS])[:MAX_TITLE_CHARS].rstrip() or "Untitled"
+            )
             changed = True
     thinking = data.get("thinking")
     if isinstance(thinking, str) and len(thinking) > 2000:
@@ -432,11 +434,7 @@ class LocalHFClient:
                 "Install them in the data_work environment."
             ) from exc
 
-        use_cuda = (
-            not force_cpu
-            and device != "cpu"
-            and torch.cuda.is_available()
-        )
+        use_cuda = not force_cpu and device != "cpu" and torch.cuda.is_available()
 
         self._model_name = model_path
         self._tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -444,9 +442,7 @@ class LocalHFClient:
 
         if quantize_4bit:
             if not use_cuda:
-                LOGGER.warning(
-                    "4-bit quantization requires CUDA GPU; falling back to CPU float32."
-                )
+                LOGGER.warning("4-bit quantization requires CUDA GPU; falling back to CPU float32.")
                 quantize_4bit = False
 
         if quantize_4bit:
@@ -479,7 +475,9 @@ class LocalHFClient:
                         model = torch.ao.quantization.quantize_dynamic(  # pyright: ignore[reportDeprecated]
                             model, {torch.nn.Linear}, dtype=torch.qint8
                         )
-                        LOGGER.info("Applied dynamic int8 quantization (qnnpack) for %s.", model_path)
+                        LOGGER.info(
+                            "Applied dynamic int8 quantization (qnnpack) for %s.", model_path
+                        )
                     except Exception as exc:
                         LOGGER.warning("Dynamic int8 quantization failed: %s", exc)
                 elif no_int8:
@@ -575,7 +573,9 @@ class LocalHFClient:
                         pass
                 LOGGER.warning(
                     "Local model attempt %d/%d failed: %s",
-                    attempt + 1, _LOCAL_MAX_RETRIES, exc,
+                    attempt + 1,
+                    _LOCAL_MAX_RETRIES,
+                    exc,
                 )
                 last_error = exc
 

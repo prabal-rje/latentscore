@@ -323,16 +323,17 @@ def run_sft_infer(config: dict[str, Any]) -> str:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     LOGGER.setLevel(logging.INFO)
     import random
+
+    import outlines
     import torch
     from peft import PeftModel
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-    import outlines
     from tqdm import tqdm
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     from data_work.lib.clap_scorer import ClapScorer, score_config
 
     cfg = InferConfig.model_validate(config)
-    rng = random.Random(cfg.seed)
+    _ = random.Random(cfg.seed)  # seed consumed by torch below
     torch.manual_seed(cfg.seed)
     torch.set_float32_matmul_precision("high")
 

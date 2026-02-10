@@ -150,16 +150,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--baseline", action="append", default=[], help="Baseline name[:label].")
     parser.add_argument("--local-model", action="append", default=[], help="Model path[:label].")
-    parser.add_argument("--litellm-model", action="append", default=[], help="LiteLLM model[:label].")
+    parser.add_argument(
+        "--litellm-model", action="append", default=[], help="LiteLLM model[:label]."
+    )
 
     parser.add_argument("--system-prompt", type=str, default=DEFAULT_SYSTEM_PROMPT)
     parser.add_argument("--env-file", type=Path, default=None, help="Optional .env file to load.")
     parser.add_argument("--api-key", type=str, default=None, help="Optional API key override.")
     parser.add_argument("--api-key-env", type=str, default="OPENROUTER_API_KEY")
     parser.add_argument("--api-base", type=str, default=None, help="Optional API base override.")
-    parser.add_argument("--model-kwargs", type=str, default="{}", help="JSON dict of LiteLLM kwargs.")
+    parser.add_argument(
+        "--model-kwargs", type=str, default="{}", help="JSON dict of LiteLLM kwargs."
+    )
 
-    parser.add_argument("--local-device", type=str, default=None, help="Device for local HF models.")
+    parser.add_argument(
+        "--local-device", type=str, default=None, help="Device for local HF models."
+    )
     parser.add_argument("--local-max-new-tokens", type=int, default=3000)
     parser.add_argument("--local-temperature", type=float, default=0.0)
     parser.add_argument("--local-force-cpu", action="store_true", help="Force CPU inference.")
@@ -377,9 +383,23 @@ def main(argv: Sequence[str] | None = None) -> None:
     }
 
     for label, rows in by_source.items():
-        config_ms = [r.config_time_ms for r in rows if r.config_time_ms is not None and r.config_error is None]
-        first_ms = [r.total_first_chunk_ms for r in rows if r.total_first_chunk_ms is not None and r.synth_error is None and r.config_error is None]
-        full_ms = [r.total_full_ms for r in rows if r.total_full_ms is not None and r.synth_error is None and r.config_error is None]
+        config_ms = [
+            r.config_time_ms
+            for r in rows
+            if r.config_time_ms is not None and r.config_error is None
+        ]
+        first_ms = [
+            r.total_first_chunk_ms
+            for r in rows
+            if r.total_first_chunk_ms is not None
+            and r.synth_error is None
+            and r.config_error is None
+        ]
+        full_ms = [
+            r.total_full_ms
+            for r in rows
+            if r.total_full_ms is not None and r.synth_error is None and r.config_error is None
+        ]
         rtf_synth = [r.rtf_synth_only for r in rows if r.rtf_synth_only is not None]
         rtf_total = [r.rtf_total for r in rows if r.rtf_total is not None]
         summary["per_source"][label] = {

@@ -9,8 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from datasets import Dataset, get_dataset_config_names, get_dataset_infos, load_dataset
 from pydantic import BaseModel
+
+from datasets import Dataset, get_dataset_config_names, get_dataset_infos, load_dataset
 
 DATASETS: tuple[str, ...] = (
     "common-pile/news_filtered",

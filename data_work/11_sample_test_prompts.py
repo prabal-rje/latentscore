@@ -120,7 +120,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
 
-    embed_map_path = args.embed_map.expanduser().resolve() if args.embed_map else _resolve_embed_map_path()
+    embed_map_path = (
+        args.embed_map.expanduser().resolve() if args.embed_map else _resolve_embed_map_path()
+    )
     if not embed_map_path.exists():
         raise SystemExit(f"Embedding map not found: {embed_map_path}")
 
@@ -140,7 +142,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         candidates.append(row)
 
     if not candidates:
-        raise SystemExit("No candidates found. Try relaxing filters (--min-chars/--max-chars/--ascii-only).")
+        raise SystemExit(
+            "No candidates found. Try relaxing filters (--min-chars/--max-chars/--ascii-only)."
+        )
 
     rng = random.Random(args.seed)
     rng.shuffle(candidates)
@@ -183,4 +187,3 @@ def main(argv: Sequence[str] | None = None) -> None:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     main()
-

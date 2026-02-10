@@ -10,7 +10,14 @@ import random
 import re
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Mapping, Sequence, TypeVar, cast, get_args  # noqa: F401 (TypeVar used in generic)
+from typing import (  # noqa: F401 (TypeVar used in generic)
+    Any,
+    Mapping,
+    Sequence,
+    TypeVar,
+    cast,
+    get_args,
+)
 
 from common.music_schema import (
     MAX_TITLE_CHARS,
@@ -498,9 +505,7 @@ class _EmbeddingLookupIndex:
         try:
             from sentence_transformers import SentenceTransformer  # type: ignore[import]
         except ImportError as exc:  # pragma: no cover - environment mismatch
-            raise RuntimeError(
-                "sentence-transformers is required for retrieval baseline."
-            ) from exc
+            raise RuntimeError("sentence-transformers is required for retrieval baseline.") from exc
         self._encoder = cast(Any, SentenceTransformer(_DEFAULT_EMBED_MODEL))
         return cast(Any, self._encoder)
 
@@ -618,16 +623,12 @@ class _EmbeddingLookupIndex:
         best_idx = int(np.argmax(scores))
         return self._examples[best_idx]
 
-    def lookup_top_k(
-        self, vibe: str, k: int = 3
-    ) -> tuple[list[_RetrievalExample], list[float]]:
+    def lookup_top_k(self, vibe: str, k: int = 3) -> tuple[list[_RetrievalExample], list[float]]:
         """Return top-k nearest examples with normalized similarity weights."""
         index = self._load()
         return index._lookup_top_k_impl(vibe, k)
 
-    def _lookup_top_k_impl(
-        self, vibe: str, k: int
-    ) -> tuple[list[_RetrievalExample], list[float]]:
+    def _lookup_top_k_impl(self, vibe: str, k: int) -> tuple[list[_RetrievalExample], list[float]]:
         if self._matrix is None or not self._examples:
             self._load()
         assert self._matrix is not None
@@ -722,7 +723,11 @@ _BASELINE_ORDINAL_MAPS: dict[str, dict[str, float]] = {
     "echo": {"none": 0.0, "subtle": 0.25, "medium": 0.5, "heavy": 0.75, "infinite": 0.95},
     "human": {"robotic": 0.0, "tight": 0.15, "natural": 0.3, "loose": 0.5, "drunk": 0.8},
     "melody_density": {
-        "very_sparse": 0.15, "sparse": 0.30, "medium": 0.50, "busy": 0.70, "very_busy": 0.85,
+        "very_sparse": 0.15,
+        "sparse": 0.30,
+        "medium": 0.50,
+        "busy": 0.70,
+        "very_busy": 0.85,
     },
     "syncopation": {"straight": 0.0, "light": 0.2, "medium": 0.5, "heavy": 0.8},
     "swing": {"none": 0.0, "light": 0.2, "medium": 0.5, "heavy": 0.8},
@@ -733,11 +738,24 @@ _BASELINE_ORDINAL_MAPS: dict[str, dict[str, float]] = {
     "chord_change_bars": {"very_slow": 4.0, "slow": 2.0, "medium": 1.0, "fast": 0.5},
 }
 
-_BASELINE_NOMINAL_FIELDS = frozenset({
-    "root", "mode", "bass", "pad", "melody", "rhythm", "texture", "accent",
-    "attack", "grain", "melody_engine", "tension_curve", "harmony_style",
-    "chord_extensions",
-})
+_BASELINE_NOMINAL_FIELDS = frozenset(
+    {
+        "root",
+        "mode",
+        "bass",
+        "pad",
+        "melody",
+        "rhythm",
+        "texture",
+        "accent",
+        "attack",
+        "grain",
+        "melody_engine",
+        "tension_curve",
+        "harmony_style",
+        "chord_extensions",
+    }
+)
 
 _VALID_PHRASE_BARS = (2, 4, 8)
 _MIN_DENSITY = 2
@@ -816,9 +834,7 @@ class EmbeddingInterpBaseline(ConfigBaseline):
         # phrase_len_bars: Literal[2,4,8] -> snap
         plb_vals = [e.config.phrase_len_bars for e in examples]
         plb_avg = sum(v * w for v, w in zip(plb_vals, weights))
-        config_data["phrase_len_bars"] = min(
-            _VALID_PHRASE_BARS, key=lambda v: abs(v - plb_avg)
-        )
+        config_data["phrase_len_bars"] = min(_VALID_PHRASE_BARS, key=lambda v: abs(v - plb_avg))
 
         # register octaves: int, clamp 1-8, ensure min <= max
         min_oct_vals = [e.config.register_min_oct for e in examples]
@@ -892,9 +908,7 @@ class SemanticMatchBaseline(ConfigBaseline):
 
     def __init__(self) -> None:
         self._encoder: Any | None = None
-        self._cached_field_embeddings: (
-            dict[str, tuple[list[object], Any]] | None
-        ) = None
+        self._cached_field_embeddings: dict[str, tuple[list[object], Any]] | None = None
 
     def _load_encoder(self) -> Any:
         if self._encoder is not None:
@@ -902,9 +916,7 @@ class SemanticMatchBaseline(ConfigBaseline):
         try:
             from sentence_transformers import SentenceTransformer  # type: ignore[import]
         except ImportError as exc:  # pragma: no cover - environment mismatch
-            raise RuntimeError(
-                "sentence-transformers is required for semantic baseline."
-            ) from exc
+            raise RuntimeError("sentence-transformers is required for semantic baseline.") from exc
         self._encoder = cast(Any, SentenceTransformer(_DEFAULT_EMBED_MODEL))
         return cast(Any, self._encoder)
 
@@ -957,12 +969,8 @@ class SemanticMatchBaseline(ConfigBaseline):
                 (True, "deep layered sound"),
                 (False, "flat simple sound"),
             ],
-            "register_min_oct": [
-                (i, f"octave {i} register") for i in range(1, 9)
-            ],
-            "register_max_oct": [
-                (i, f"octave {i} register") for i in range(1, 9)
-            ],
+            "register_min_oct": [(i, f"octave {i} register") for i in range(1, 9)],
+            "register_max_oct": [(i, f"octave {i} register") for i in range(1, 9)],
         }
 
         result: dict[str, tuple[list[object], Any]] = {}

@@ -188,7 +188,11 @@ async def evaluate_source(
     baseline = None
     if source.kind == "baseline":
         # Construct once per source; some baselines are expensive (e.g., retrieval).
-        from data_work.lib.baselines import EMBEDDING_LOOKUP_WARNING, get_baseline, is_embedding_lookup
+        from data_work.lib.baselines import (
+            EMBEDDING_LOOKUP_WARNING,
+            get_baseline,
+            is_embedding_lookup,
+        )
 
         baseline_name = source.model or "random"
         if is_embedding_lookup(baseline_name):

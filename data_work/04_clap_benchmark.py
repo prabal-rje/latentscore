@@ -412,7 +412,11 @@ def _worker_fn(config: WorkerConfig) -> list[dict[str, Any]]:
                 elapsed = time.monotonic() - t0
                 logger.info(
                     "[%s] [%s] done in %.1fs (config=%.1fs, synth=%.1fs)",
-                    worker_tag, source.label, elapsed, t_config, t_synth,
+                    worker_tag,
+                    source.label,
+                    elapsed,
+                    t_config,
+                    t_synth,
                 )
                 results.append(
                     BenchmarkResult(
@@ -511,9 +515,13 @@ def _summarize(results: Sequence[BenchmarkResult]) -> dict[str, ModelSummary]:
             succeeded=succeeded,
             failed=failed,
             success_rate=succeeded / total if total else 0.0,
-            mean_clap_reward=_mean_or_zero([r.clap_reward for r in ok if r.clap_reward is not None]),
+            mean_clap_reward=_mean_or_zero(
+                [r.clap_reward for r in ok if r.clap_reward is not None]
+            ),
             mean_elapsed_s=_mean_or_zero([r.elapsed_s for r in ok if r.elapsed_s is not None]),
-            mean_config_gen_s=_mean_or_zero([r.config_gen_s for r in ok if r.config_gen_s is not None]),
+            mean_config_gen_s=_mean_or_zero(
+                [r.config_gen_s for r in ok if r.config_gen_s is not None]
+            ),
             mean_audio_synth_s=_mean_or_zero(
                 [r.audio_synth_s for r in ok if r.audio_synth_s is not None]
             ),

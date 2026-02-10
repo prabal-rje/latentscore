@@ -835,11 +835,12 @@ def run_sft(config: dict[str, Any]) -> str:
     from unsloth import FastLanguageModel, FastModel
     # isort: on
 
-    import datasets
     import torch
     import wandb
     from transformers import TrainingArguments
     from trl import SFTTrainer
+
+    import datasets
 
     sft = SftConfig.model_validate(config)
     _ensure_output_dir(Path(sft.output_dir), sft.overwrite)
@@ -1133,12 +1134,13 @@ def run_grpo(config: dict[str, Any]) -> str:
     from unsloth import FastLanguageModel, FastModel
     # isort: on
 
-    import datasets
     import torch
     import wandb
     from peft.utils import load_peft_weights, set_peft_model_state_dict
     from transformers import TrainingArguments
     from trl import GRPOTrainer
+
+    import datasets
 
     try:
         from trl import GRPOConfig
