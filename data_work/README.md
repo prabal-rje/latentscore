@@ -424,6 +424,28 @@ python -m data_work.04_clap_benchmark \
   --limit 10
 ```
 
+Final benchmark (2026-02-10, 6 sources, 200 TEST rows, no CLAP prefix, audio saved):
+
+```bash
+conda run -n latentscore-data python -m data_work.04_clap_benchmark \
+  --input data_work/.experiments/eval_assets/test_subset_200.jsonl \
+  --baseline random \
+  --baseline embedding_lookup \
+  --litellm-model gemini/gemini-3-flash-preview:gemini_flash \
+  --litellm-model anthropic/claude-opus-4-5-20251101:opus_4.5 \
+  --local-model guprab/latentscore-gemma3-270m-v5-merged:sft_finetuned \
+  --local-model unsloth/gemma-3-270m-it:base_untrained \
+  --local-temperature 1.0 \
+  --limit 200 --workers 5 --duration 60 \
+  --keep-audio \
+  --output-dir data_work/.experiments/eval_assets/clap_200row_final_noprefix \
+  --env-file .env
+```
+
+Results: embedding_lookup (0.1628) > gemini_flash (0.1576) > sft_finetuned (0.1401) >
+random (0.1388) > opus_4.5 (0.1367) > base_untrained (0.1171).
+Full results and audio: [guprab/latentscore-clap-benchmark](https://huggingface.co/datasets/guprab/latentscore-clap-benchmark)
+
 ### `05_export_models`
 
 Merges LoRA adapters into full-precision checkpoints and optionally exports

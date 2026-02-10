@@ -571,14 +571,41 @@ python -m data_work.04_clap_benchmark \
   --limit 100
 ```
 
-**Status:** [ ] Not started
+**Status:** [x] Complete (2026-02-10)
+
+**Final benchmark command (no CLAP prefix, 6 sources, 200 TEST rows):**
+```bash
+conda run -n latentscore-data python -m data_work.04_clap_benchmark \
+  --input data_work/.experiments/eval_assets/test_subset_200.jsonl \
+  --baseline random \
+  --baseline embedding_lookup \
+  --litellm-model gemini/gemini-3-flash-preview:gemini_flash \
+  --litellm-model anthropic/claude-opus-4-5-20251101:opus_4.5 \
+  --local-model guprab/latentscore-gemma3-270m-v5-merged:sft_finetuned \
+  --local-model unsloth/gemma-3-270m-it:base_untrained \
+  --local-temperature 1.0 \
+  --limit 200 --workers 5 --duration 60 \
+  --keep-audio \
+  --output-dir data_work/.experiments/eval_assets/clap_200row_final_noprefix \
+  --env-file .env
+```
+
+Local model inference settings per Gemma 3 team / Unsloth recommendations:
+temp=1.0, top_k=64, top_p=0.95, min_p=0.0, repetition_penalty=1.0.
+Quantization: dynamic int8 (PyTorch qnnpack on Apple Silicon).
 
 **Results:**
-| Source | CLAP Score (mean) | CLAP Score (std) |
-|--------|-------------------|------------------|
-| Production model | ___ | ___ |
-| Random baseline | ___ | ___ |
-| Rule-based baseline | ___ | ___ |
+| Source | Type | CLAP Reward (mean) | Success Rate |
+|--------|------|-------------------|-------------|
+| embedding_lookup | retrieval | **0.1628** | 100% |
+| gemini_flash | LLM (API) | 0.1576 | 89% |
+| sft_finetuned | LLM (local) | 0.1401 | 91% |
+| random | baseline | 0.1388 | 100% |
+| opus_4.5 | LLM (API) | 0.1367 | 100% |
+| base_untrained | LLM (local) | 0.1171 | 100% |
+
+**Output:** `data_work/.experiments/eval_assets/clap_200row_final_noprefix/`
+**HuggingFace:** [guprab/latentscore-clap-benchmark](https://huggingface.co/datasets/guprab/latentscore-clap-benchmark)
 
 ---
 
@@ -630,6 +657,7 @@ Track actual runs here as they complete.
 | 2026-01-26 | 02a | `02a_extract_vibes --limit 160 --max-vibes 14000` | `data_work/2026-01-26_vibes` | 160 texts → 14,035 vibes → 10,558 post-dedupe |
 | 2026-01-26 | 02b | `02b_generate_configs --num-candidates 5 --max-concurrency 500` | `data_work/2026-01-26_processed` | Gemini Flash, N=5, ~$230 cost |
 | 2026-01-26 | 02c | `02c_score_configs --scorers clap` | `data_work/2026-01-26_scored` | ~9 hours, Best-of-5 +28% improvement |
+| 2026-02-10 | 04 | `04_clap_benchmark` (6 sources, 200 rows, no prefix, --keep-audio) | `data_work/.experiments/eval_assets/clap_200row_final_noprefix/` | embedding_lookup best (0.1628), sft_finetuned ~ random. [HF dataset](https://huggingface.co/datasets/guprab/latentscore-clap-benchmark) |
 
 ---
 
@@ -653,3 +681,6 @@ Document key decisions made during the process.
 | Separate scoring script (02c) | Decouples scoring from config generation. Can re-run scoring with different methods. Supports multiple scorers in one pass. | 2026-01-18 |
 | Config payload uses `thinking` and `title` | Aligns prompt outputs with new naming. | 2026-01-19 |
 | Quality-based Best-of-N selection in 02c | 02b does validation-only selection (first valid). 02c scores ALL valid candidates with CLAP and re-selects based on highest quality score. This ensures selected config is not just valid, but best quality among valid options. Per-candidate scores stored in `candidate_scores` for analysis. | 2026-01-25 |
+| Embedding lookup as production model | CLAP benchmark (2026-02-10) showed simple retrieval (0.1628) outperforms all LLM-based approaches including Gemini Flash (0.1576), Opus 4.5 (0.1367), and SFT fine-tuned Gemma 3 (0.1401). Fast (1.2s/row), 100% success rate, no API costs. | 2026-02-10 |
+| No CLAP prefix for evaluation | Adding "electronic music representing: " prefix compresses score distribution and reduces discriminative power between sources (10.2% vs 23.4% relative gap). Raw vibe text gives clearer signal. | 2026-02-10 |
+| Gemma 3 inference: Unsloth defaults | Per Gemma 3 team / Unsloth: temp=1.0, top_k=64, top_p=0.95, repetition_penalty=1.0. Previous arbitrary settings (temp=0.2, rep_penalty=1.35) were not tuned for this model. | 2026-02-10 |

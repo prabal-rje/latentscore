@@ -1588,3 +1588,60 @@ conda run -n latentscore-data python -m data_work.03_modal_train sft \
 Run notes (2026-01-17):
 - default prompt: OK (smoke run; output `/outputs/exp-sft-prompt-default-smoke`)
 - detailed prompt: OK (smoke run; output `/outputs/exp-sft-prompt-detailed-smoke`)
+
+---
+
+## Final CLAP Benchmark (2026-02-10)
+
+### Setup
+
+- **N:** 200 TEST-split rows
+- **Duration:** 60s per sample
+- **CLAP prefix:** None (raw vibe text — prefix compresses score distribution)
+- **Workers:** 5 parallel processes
+- **Hardware:** Apple M4 Pro, 48GB RAM
+- **Local model quantization:** Dynamic int8 (PyTorch qnnpack)
+- **Local model inference settings** (per Gemma 3 team / Unsloth):
+  temp=1.0, top_k=64, top_p=0.95, min_p=0.0, repetition_penalty=1.0
+
+### Command
+
+```bash
+conda run -n latentscore-data python -m data_work.04_clap_benchmark \
+  --input data_work/.experiments/eval_assets/test_subset_200.jsonl \
+  --baseline random \
+  --baseline embedding_lookup \
+  --litellm-model gemini/gemini-3-flash-preview:gemini_flash \
+  --litellm-model anthropic/claude-opus-4-5-20251101:opus_4.5 \
+  --local-model guprab/latentscore-gemma3-270m-v5-merged:sft_finetuned \
+  --local-model unsloth/gemma-3-270m-it:base_untrained \
+  --local-temperature 1.0 \
+  --limit 200 --workers 5 --duration 60 \
+  --keep-audio \
+  --output-dir data_work/.experiments/eval_assets/clap_200row_final_noprefix \
+  --env-file .env
+```
+
+### Results
+
+| Source | Type | CLAP Reward (mean) | Success Rate | Avg Time/Row |
+|--------|------|-------------------|-------------|-------------|
+| embedding_lookup | retrieval | **0.1628** | 100% | 1.2s |
+| gemini_flash | LLM (API) | 0.1576 | 89% | 6.5s |
+| sft_finetuned | LLM (local) | 0.1401 | 91% | 100.2s |
+| random | baseline | 0.1388 | 100% | 0.7s |
+| opus_4.5 | LLM (API) | 0.1367 | 100% | 12.6s |
+| base_untrained | LLM (local) | 0.1171 | 100% | 59.7s |
+
+### Key Findings
+
+- Embedding lookup wins: simple retrieval outperforms all LLMs including frontier models.
+- Gemini Flash close second but 11% failure rate (density field validation errors).
+- SFT fine-tuned Gemma 3 270M barely beats random (0.1401 vs 0.1388) — mode collapse.
+- Opus 4.5 underperforms random — surprising.
+- Base untrained clearly worst — well separated from all others.
+
+### Output
+
+- Local: `data_work/.experiments/eval_assets/clap_200row_final_noprefix/`
+- HuggingFace: [guprab/latentscore-clap-benchmark](https://huggingface.co/datasets/guprab/latentscore-clap-benchmark)
