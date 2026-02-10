@@ -476,16 +476,23 @@ conda run -n latentscore-data python -m data_work.09_render_audio_from_results \
 
 **Script:** `data_work/10_export_embedding_map.py` (new)
 
-**Input:** `data_work/2026-01-26_scored/_progress.jsonl`  
-**Output:** `data_work/2026-01-26_scored/_progress_embeddings.jsonl`
+**Input:** `data_work/2026-01-26_scored/_progress.jsonl`
+**Output:** `data_work/2026-01-26_scored/vibe_and_embeddings_to_config_map.jsonl`
 
-**Command (2026-01-28):**
+**Command (2026-01-28, original):**
 ```bash
 conda run -n latentscore-data python -m data_work.10_export_embedding_map \
   --input data_work/2026-01-26_scored/_progress.jsonl \
   --output data_work/2026-01-26_scored/_progress_embeddings.jsonl \
   --batch-size 64
 ```
+
+**Fix (2026-02-09):** The original `_progress_embeddings.jsonl` had empty `split`
+fields because `_progress.jsonl` is written during LLM processing *before* splits
+are assigned. The canonical file is now `vibe_and_embeddings_to_config_map.jsonl`
+(10,558 rows), built by concatenating the authoritative split files
+(`SFT-Train.jsonl`, `SFT-Val.jsonl`, `GRPO.jsonl`, `TEST.jsonl`) and re-running
+the embedding export.
 
 **Notes:**
 - Embeds `vibe_original` using `sentence-transformers/all-MiniLM-L6-v2`.
@@ -547,6 +554,12 @@ python -m data_work.03_modal_train --advanced grpo \
 
 **Eval set:** `data_work/2026-01-26_scored/TEST.jsonl`
 
+Supports `--workers N` for multiprocess parallelism (splits rows across N
+workers, each loading its own models). Per-sample results include timing
+fields (`config_gen_s`, `audio_synth_s`, `elapsed_s`) and a `success` flag.
+`ModelSummary` reports: `total`, `succeeded`, `failed`, `success_rate`,
+`mean_clap_reward`, `mean_elapsed_s`, `mean_config_gen_s`, `mean_audio_synth_s`.
+
 **Command:**
 ```bash
 python -m data_work.04_clap_benchmark \
@@ -554,6 +567,7 @@ python -m data_work.04_clap_benchmark \
   --local-model data_work/.modal_outputs/prod-grpo-gemma3-270m:production \
   --baseline random \
   --baseline rule_based \
+  --workers 4 \
   --limit 100
 ```
 

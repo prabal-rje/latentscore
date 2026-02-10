@@ -371,15 +371,19 @@ conda run -n latentscore-data python -m data_work.09_render_audio_from_results \
 ### `10_export_embedding_map`
 
 Builds a lookup table of **vibe embeddings + best config payloads** from
-`_progress.jsonl`. Uses a sentence‑transformers encoder to embed `vibe_original`
+scored split files. Uses a sentence‑transformers encoder to embed `vibe_original`
 and writes a JSONL file that can be used for fast retrieval.
+
+The canonical output is `vibe_and_embeddings_to_config_map.jsonl` (10,558 rows
+with correct split assignments). Legacy `_progress_embeddings.jsonl` had empty
+splits and should not be used.
 
 Usage example:
 
 ```bash
 conda run -n latentscore-data python -m data_work.10_export_embedding_map \
   --input data_work/2026-01-26_scored/_progress.jsonl \
-  --output data_work/2026-01-26_scored/_progress_embeddings.jsonl \
+  --output data_work/2026-01-26_scored/vibe_and_embeddings_to_config_map.jsonl \
   --batch-size 64
 ```
 
@@ -388,6 +392,10 @@ conda run -n latentscore-data python -m data_work.10_export_embedding_map \
 Scores configs with LAION-CLAP. You can benchmark dataset configs, LiteLLM
 models, and local HF models by supplying multiple sources.
 Defaults to the clean vibe column (`vibe_original`) for inference.
+Supports `--workers N` for multiprocess parallelism (splits rows across N
+workers, each loading its own models). Tracks per-sample timing
+(`config_gen_s`, `audio_synth_s`, `elapsed_s`) and a `success` flag per
+result, with `success_rate` reported in the summary.
 
 **Label syntax:** Arguments use `value:label` format where `:label` is an optional
 display name for the benchmark output. For example:
@@ -435,12 +443,12 @@ GGUF/MLC artifacts. The default merged output path is `data_work/.exports/combin
 - Default temperature: 0.8 (for diversity in candidates)
 
 **API keys:**
-- You must explicitly set `--api-key-env` to match your model's provider:
+- Native providers (`anthropic/`, `gemini/`) auto-detect API keys from
+  environment variables via LiteLLM, so `--api-key-env` is optional for them.
+- Other providers require explicit `--api-key-env`:
   - `openai/...` models: `--api-key-env OPENAI_API_KEY`
   - `openrouter/...` models: `--api-key-env OPENROUTER_API_KEY`
-  - `anthropic/...` models: `--api-key-env ANTHROPIC_API_KEY`
-  - `gemini/...` models: `--api-key-env GEMINI_API_KEY`
-- The script will error if the specified env var is not set.
+- The script will error if a required env var is not set.
 
 ### Output format
 

@@ -188,9 +188,12 @@ async def evaluate_source(
     baseline = None
     if source.kind == "baseline":
         # Construct once per source; some baselines are expensive (e.g., retrieval).
-        from data_work.lib.baselines import get_baseline
+        from data_work.lib.baselines import EMBEDDING_LOOKUP_WARNING, get_baseline, is_embedding_lookup
 
-        baseline = get_baseline(source.model or "random")
+        baseline_name = source.model or "random"
+        if is_embedding_lookup(baseline_name):
+            LOGGER.warning(EMBEDDING_LOOKUP_WARNING)
+        baseline = get_baseline(baseline_name)
 
     for prompt in prompts:
         config: dict[str, Any] | None = None
@@ -560,7 +563,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--baseline",
         action="append",
         default=[],
-        help="Baseline type (random, rule_based). Format: type[:label]. Can be repeated.",
+        help=(
+            "Baseline type. Format: type[:label]. Can be repeated. "
+            "Available: random, rule_based, mode, embedding_lookup. "
+            "embedding_lookup retrieves configs from a fixed synthetic dataset "
+            "(HF: guprab/latentscore-data), excluding TEST-split rows to prevent data leakage."
+        ),
     )
 
     # Audio scoring
@@ -629,6 +637,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.0,
         help="Temperature for local models (0 = greedy).",
+    )
+    parser.add_argument(
+        "--local-force-cpu",
+        action="store_true",
+        help="Force CPU inference for local models.",
+    )
+    parser.add_argument(
+        "--local-4bit",
+        action="store_true",
+        help="4-bit NF4 quantization (requires CUDA + bitsandbytes).",
     )
 
     # Other
@@ -716,6 +734,8 @@ async def main_async(args: argparse.Namespace) -> None:
                 device=args.local_device,
                 max_new_tokens=args.local_max_new_tokens,
                 temperature=args.local_temperature,
+                force_cpu=args.local_force_cpu,
+                quantize_4bit=args.local_4bit,
             )
             break
 

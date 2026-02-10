@@ -184,13 +184,13 @@ def _streamable_generator_demo(model: ModelSpec) -> None:
 
 def _run_model(label: str, model: ModelSpec) -> None:
     try:
-        # if RUN_RENDER:
-        #     _render_demo(model)
-        # if RUN_ARENDER:
-        #     _ = asyncio.run(
-        #         dx.arender("warm sunrise ambient", duration=RENDER_SECONDS, model=model)
-        #     )
-        #     print("[arender] ok")
+        if RUN_RENDER:
+            _render_demo(model)
+        if RUN_ARENDER:
+            _ = asyncio.run(
+                dx.arender("warm sunrise ambient", duration=RENDER_SECONDS, model=model)
+            )
+            print("[arender] ok")
         if RUN_STREAM:
             _stream_demo(model)
         if RUN_ASTREAM:

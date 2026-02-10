@@ -160,8 +160,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-kwargs", type=str, default="{}", help="JSON dict of LiteLLM kwargs.")
 
     parser.add_argument("--local-device", type=str, default=None, help="Device for local HF models.")
-    parser.add_argument("--local-max-new-tokens", type=int, default=512)
+    parser.add_argument("--local-max-new-tokens", type=int, default=3000)
     parser.add_argument("--local-temperature", type=float, default=0.0)
+    parser.add_argument("--local-force-cpu", action="store_true", help="Force CPU inference.")
+    parser.add_argument("--local-4bit", action="store_true", help="4-bit NF4 quantization (CUDA).")
 
     return parser
 
@@ -228,6 +230,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             device=args.local_device,
             max_new_tokens=args.local_max_new_tokens,
             temperature=args.local_temperature,
+            force_cpu=args.local_force_cpu,
+            quantize_4bit=args.local_4bit,
         )
 
     baseline_clients: dict[str, Any] = {}

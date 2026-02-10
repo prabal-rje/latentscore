@@ -15,7 +15,7 @@ from data_work.lib.jsonl_io import iter_jsonl
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_INPUT = Path("data_work/2026-01-26_scored/_progress.jsonl")
-DEFAULT_OUTPUT = Path("data_work/2026-01-26_scored/_progress_embeddings.jsonl")
+DEFAULT_OUTPUT = Path("data_work/2026-01-26_scored/vibe_and_embeddings_to_config_map.jsonl")
 DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_BATCH_SIZE = 64
 

@@ -28,7 +28,7 @@ Notes:
 - Run notes reflect prior tiny-run validation; re-verify for IRL.
 - Run notes are stale after chat-template + adapter-init alignment; re-run before relying on them.
 - Config generation prompts use system-role instructions with `<vibe>` in the user role; batching uses `<vibe_input index=...>` and prompt caching on the system message.
-- `04_clap_benchmark` LiteLLM sources follow the same system/user role contract (`<vibe>` in user role).
+- `04_clap_benchmark` LiteLLM sources follow the same system/user role contract (`<vibe>` in user role). Supports `--workers N` for multiprocess parallelism. Tracks per-sample timing (`config_gen_s`, `audio_synth_s`, `elapsed_s`), `success` flag, and `success_rate` in `ModelSummary`.
 - Config generation prompt caching can be disabled with `--no-prompt-caching` in `02b_generate_configs`.
 - Config payloads use `thinking` and `title`.
 - LLM judge `final_score` is the harmonic mean of `vibe_match` and `audio_quality`.
@@ -198,6 +198,7 @@ Outputs:
 
 ### Export embedding map
 
+Original (had empty splits — see METHODOLOGY.md §2.5 for fix):
 ```bash
 conda run -n latentscore-data python -m data_work.10_export_embedding_map \
   --input data_work/2026-01-26_scored/_progress.jsonl \
@@ -205,8 +206,16 @@ conda run -n latentscore-data python -m data_work.10_export_embedding_map \
   --batch-size 64
 ```
 
+Fixed (2026-02-09) — concatenate split files first, then export:
+```bash
+conda run -n latentscore-data python -m data_work.10_export_embedding_map \
+  --input data_work/.experiments/combined_scored_splits.jsonl \
+  --output data_work/2026-01-26_scored/vibe_and_embeddings_to_config_map.jsonl \
+  --batch-size 64
+```
+
 Outputs:
-- `data_work/2026-01-26_scored/_progress_embeddings.jsonl`
+- `data_work/2026-01-26_scored/vibe_and_embeddings_to_config_map.jsonl` (10,558 rows, correct splits)
 
 ### GRPO status
 

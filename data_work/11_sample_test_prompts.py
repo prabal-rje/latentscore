@@ -22,7 +22,7 @@ from typing import Any, Iterable, Sequence
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_EMBED_MAP_REPO = "guprab/latentscore-data"
-DEFAULT_EMBED_MAP_FILE = "2026-01-26_scored/_progress_embeddings.jsonl"
+DEFAULT_EMBED_MAP_FILE = "2026-01-26_scored/vibe_and_embeddings_to_config_map.jsonl"
 
 
 def _resolve_embed_map_path() -> Path:
@@ -112,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--embed-map",
         type=Path,
         default=None,
-        help="Optional path to _progress_embeddings.jsonl. If omitted, downloads via HF Hub.",
+        help="Optional path to embedding map JSONL. If omitted, downloads via HF Hub.",
     )
     return parser
 
