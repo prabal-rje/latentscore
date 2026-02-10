@@ -594,6 +594,22 @@ class MusicConfigPromptPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class GenerateResult(BaseModel):
+    """Result from a model generate() call, carrying optional LLM metadata.
+
+    For embedding-based models (fast), only ``config`` is populated.
+    For LLM-based models (external), ``title``, ``thinking``, and ``palettes``
+    are also available when the LLM returns them.
+    """
+
+    config: MusicConfig
+    title: Optional[str] = None
+    thinking: Optional[str] = None
+    palettes: tuple[Palette, ...] = ()
+
+    model_config = ConfigDict(frozen=True)
+
+
 def _assert_prompt_schema_parity() -> None:
     prompt_fields = set(MusicConfigPrompt.model_fields)
     config_fields = set(MusicConfig.model_fields)

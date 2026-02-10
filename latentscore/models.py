@@ -26,6 +26,7 @@ from .config import (
     MAX_LONG_FIELD_CHARS,
     MAX_TITLE_CHARS,
     MAX_TITLE_WORDS,
+    GenerateResult,
     MusicConfig,
     MusicConfigPrompt,
     MusicConfigPromptPayload,
@@ -121,13 +122,26 @@ def _sanitize_payload_json(raw: str) -> str:
             changed = True
     return json.dumps(data) if changed else raw
 
+
 ModelChoice = Literal[
-    "fast", "fast_no_test", "interp", "interp_no_test", "semantic",
-    "expressive", "expressive_base", "local",
+    "fast",
+    "fast_no_test",
+    "interp",
+    "interp_no_test",
+    "semantic",
+    "expressive",
+    "expressive_base",
+    "local",
 ]
 MODEL_CHOICES: tuple[ModelChoice, ...] = (
-    "fast", "fast_no_test", "interp", "interp_no_test", "semantic",
-    "expressive", "expressive_base", "local",
+    "fast",
+    "fast_no_test",
+    "interp",
+    "interp_no_test",
+    "semantic",
+    "expressive",
+    "expressive_base",
+    "local",
 )
 EXTERNAL_PREFIX = "external:"
 
@@ -220,7 +234,7 @@ class _FallbackModel:
                         exc_info=True,
                     )
 
-    async def generate(self, vibe: str) -> MusicConfig:
+    async def generate(self, vibe: str) -> MusicConfig | GenerateResult:
         try:
             return await self._primary.generate(vibe)
         except Exception as exc:
@@ -384,7 +398,7 @@ def _resolve_backend() -> Literal["mlx", "transformers", "gguf"]:
 
 
 class ModelForGeneratingMusicConfig(Protocol):
-    async def generate(self, vibe: str) -> MusicConfig: ...
+    async def generate(self, vibe: str) -> MusicConfig | GenerateResult: ...
 
 
 class ExternalModelSpec(BaseModel):
@@ -894,16 +908,36 @@ _INTERP_ORDINAL_MAPS: dict[str, dict[str, float]] = {
     "human": {"robotic": 0.0, "tight": 0.15, "natural": 0.3, "loose": 0.5, "drunk": 0.8},
 }
 
-_INTERP_FLOAT_FIELDS = frozenset({
-    "melody_density", "syncopation", "swing", "motif_repeat_prob",
-    "step_bias", "chromatic_prob", "cadence_strength",
-})
+_INTERP_FLOAT_FIELDS = frozenset(
+    {
+        "melody_density",
+        "syncopation",
+        "swing",
+        "motif_repeat_prob",
+        "step_bias",
+        "chromatic_prob",
+        "cadence_strength",
+    }
+)
 
-_INTERP_NOMINAL_FIELDS = frozenset({
-    "root", "mode", "bass", "pad", "melody", "rhythm", "texture", "accent",
-    "attack", "grain", "melody_engine", "tension_curve", "harmony_style",
-    "chord_extensions",
-})
+_INTERP_NOMINAL_FIELDS = frozenset(
+    {
+        "root",
+        "mode",
+        "bass",
+        "pad",
+        "melody",
+        "rhythm",
+        "texture",
+        "accent",
+        "attack",
+        "grain",
+        "melody_engine",
+        "tension_curve",
+        "harmony_style",
+        "chord_extensions",
+    }
+)
 
 _VALID_PHRASE_BARS = (2, 4, 8)
 _MIN_DENSITY = 2
@@ -1021,9 +1055,7 @@ class InterpEmbeddingModel(FastEmbeddingModel):
 
         # chord_change_bars: positive int
         ccb_vals = [c.chord_change_bars for c in configs]
-        data["chord_change_bars"] = max(
-            1, round(sum(v * w for v, w in zip(ccb_vals, weights)))
-        )
+        data["chord_change_bars"] = max(1, round(sum(v * w for v, w in zip(ccb_vals, weights))))
 
         # depth: weighted probability
         depth_vals = [c.depth for c in configs]
@@ -1628,9 +1660,21 @@ def resolve_model(
                 return _FallbackModel(primary=primary, fallback=_resolve_builtin_model("fast"))
             return primary
         match model:
-            case "expressive" | "expressive_base" | "local" | "fast" | "fast_no_test" | "interp" | "interp_no_test" | "semantic":
+            case (
+                "expressive"
+                | "expressive_base"
+                | "local"
+                | "fast"
+                | "fast_no_test"
+                | "interp"
+                | "interp_no_test"
+                | "semantic"
+            ):
                 primary = _resolve_builtin_model(model)
-                if model not in ("fast", "fast_no_test", "interp", "interp_no_test", "semantic") and _fast_fallback_enabled():
+                if (
+                    model not in ("fast", "fast_no_test", "interp", "interp_no_test", "semantic")
+                    and _fast_fallback_enabled()
+                ):
                     return _FallbackModel(primary=primary, fallback=_resolve_builtin_model("fast"))
                 return primary
             case _:

@@ -45,40 +45,31 @@ latentscore demo      # render a sample and play it
 
 ```python
 import latentscore as ls
+from latentscore import Audio
 
-audio = ls.render("warm sunrise over water")
-audio.play()          # plays on your speakers
-audio.save("output.wav")  # save to a WAV file
+audio: Audio = ls.render("warm sunrise over water")
+audio.play()              # plays on your speakers
+audio.save("output.wav")  # save to WAV
 ```
 
 ### Stream multiple vibes with crossfade
 
 ```python
 import latentscore as ls
+from latentscore import Audio, AudioStream
 
-ls.stream(
+stream: AudioStream = ls.stream(
     "morning coffee",
     "afternoon focus",
     "evening wind-down",
     duration=60,       # 60 seconds per vibe
     transition=5.0,    # 5-second crossfade between vibes
-).play()
-```
+)
+stream.play()
 
-### Build a playlist
-
-```python
-import latentscore as ls
-
-playlist = ls.Playlist(tracks=(
-    ls.Track(content="morning energy", duration=60),
-    ls.Track(content="deep focus", duration=120),
-    ls.Track(content="evening calm", duration=60),
-))
-playlist.play()
-
-# Or save the whole thing
-playlist.render().save("my_playlist.wav")
+# Or collect to a single Audio and save
+collected: Audio = stream.collect()
+collected.save("session.wav")
 ```
 
 ---
@@ -100,6 +91,8 @@ This approach is **instant** (sub-second), **100% reliable** (no LLM hallucinati
 Just describe what you want:
 
 ```python
+import latentscore as ls
+
 ls.render("jazz cafe at midnight").play()
 ls.render("thunderstorm on a tin roof").play()
 ls.render("lo-fi study beats").play()
@@ -110,9 +103,10 @@ ls.render("lo-fi study beats").play()
 For precise control, build a `MusicConfig` directly:
 
 ```python
-from latentscore import MusicConfig
+from latentscore import Audio, MusicConfig
+import latentscore as ls
 
-config = MusicConfig(
+config: MusicConfig = MusicConfig(
     tempo="slow",            # very_slow, slow, medium, fast, very_fast
     brightness="dark",       # very_dark, dark, medium, bright, very_bright
     space="vast",            # dry, small, medium, large, vast
@@ -127,19 +121,20 @@ config = MusicConfig(
     mode="minor",            # major, minor, dorian, mixolydian
 )
 
-ls.render(config).play()
+audio: Audio = ls.render(config)
+audio.play()
 ```
 
-### Tweak an existing vibe with MusicConfigUpdate
+### Tweak a vibe with MusicConfigUpdate
 
-Start from a vibe and adjust specific parameters using relative steps:
+Start from a vibe and nudge specific parameters using relative steps:
 
 ```python
-from latentscore import MusicConfigUpdate
+import latentscore as ls
+from latentscore import Audio, MusicConfigUpdate
 from latentscore.config import Step
 
-# Start with "morning coffee shop" and make it brighter and more spacious
-audio = ls.render(
+audio: Audio = ls.render(
     "morning coffee shop",
     update=MusicConfigUpdate(
         brightness=Step(+2),   # two levels brighter
@@ -149,50 +144,177 @@ audio = ls.render(
 audio.play()
 ```
 
-`Step(+1)` moves one level up the scale, `Step(-1)` moves one level down. The scales saturate at their boundaries (you can't go brighter than `very_bright`).
+`Step(+1)` moves one level up the scale, `Step(-1)` moves one level down. Scales saturate at their boundaries (you can't go brighter than `very_bright`).
 
-### Mix vibes and configs in a playlist
+You can also set absolute values instead of relative steps:
 
 ```python
-playlist = ls.Playlist(tracks=(
-    ls.Track(content="sunset vibes", duration=60),
-    ls.Track(content=MusicConfig(tempo="slow", brightness="dark"), duration=60),
-    ls.Track(content="ocean waves at night", duration=60),
-))
-playlist.play()
+from latentscore import MusicConfigUpdate
+
+update: MusicConfigUpdate = MusicConfigUpdate(
+    brightness="very_bright",
+    rhythm="electronic",
+)
 ```
 
 ---
 
-## Reference: All Config Labels
+## Streaming
 
-Every `MusicConfig` field uses human-readable labels. Here's the full reference:
+### Stream vibes with crossfade
 
-| Field | Labels |
-|-------|--------|
-| `tempo` | `very_slow` `slow` `medium` `fast` `very_fast` |
-| `brightness` | `very_dark` `dark` `medium` `bright` `very_bright` |
-| `space` | `dry` `small` `medium` `large` `vast` |
-| `motion` | `static` `slow` `medium` `fast` `chaotic` |
-| `stereo` | `mono` `narrow` `medium` `wide` `ultra_wide` |
-| `echo` | `none` `subtle` `medium` `heavy` `infinite` |
-| `human` | `robotic` `tight` `natural` `loose` `drunk` |
-| `attack` | `soft` `medium` `sharp` |
-| `grain` | `clean` `warm` `gritty` |
-| `density` | `2` `3` `4` `5` `6` |
-| `root` | `c` `c#` `d` ... `a#` `b` |
-| `mode` | `major` `minor` `dorian` `mixolydian` |
+```python
+import latentscore as ls
+from latentscore import AudioStream
 
-**Layer styles:**
+stream: AudioStream = ls.stream(
+    "morning coffee",
+    "afternoon focus",
+    "evening wind-down",
+    duration=60,
+    transition=5.0,
+)
+stream.play()
+```
 
-| Layer | Styles |
-|-------|--------|
-| `bass` | `drone` `sustained` `pulsing` `walking` `fifth_drone` `sub_pulse` `octave` `arp_bass` |
-| `pad` | `warm_slow` `dark_sustained` `cinematic` `thin_high` `ambient_drift` `stacked_fifths` `bright_open` |
-| `melody` | `procedural` `contemplative` `rising` `falling` `minimal` `ornamental` `arp_melody` `contemplative_minor` `call_response` `heroic` |
-| `rhythm` | `none` `minimal` `heartbeat` `soft_four` `hats_only` `electronic` `kit_light` `kit_medium` `military` `tabla_essence` `brush` |
-| `texture` | `none` `shimmer` `shimmer_slow` `vinyl_crackle` `breath` `stars` `glitch` `noise_wash` `crystal` `pad_whisper` |
-| `accent` | `none` `bells` `pluck` `chime` `bells_dense` `blip` `blip_random` `brass_hit` `wind` `arp_accent` `piano_note` |
+### Save a stream to file
+
+```python
+stream: AudioStream = ls.stream(
+    "rainy window",
+    "thunder rolling",
+    duration=30,
+    transition=3.0,
+)
+stream.save("rain_to_thunder.wav")
+```
+
+---
+
+## Live Streaming with Generators
+
+For dynamic, interactive applications (games, installations, adaptive UIs), use generators to feed vibes and steer the music in real time.
+
+### Sync generator
+
+```python
+from collections.abc import Iterator
+
+import latentscore as ls
+import latentscore.dx as dx
+from latentscore import LiveStream, MusicConfigUpdate, Streamable
+from latentscore.config import Step
+
+
+def ambient_journey() -> Iterator[Streamable]:
+    # Start with a vibe
+    yield Streamable(content="warm sunrise ambient", duration=30, transition_duration=3)
+
+    # Steer brighter and faster using relative steps
+    yield Streamable(
+        content=MusicConfigUpdate(brightness=Step(+2), tempo=Step(+1)),
+        duration=30,
+        transition_duration=3,
+    )
+
+    # Switch to a completely different vibe
+    yield Streamable(content="late night neon", duration=30, transition_duration=5)
+
+
+live: LiveStream = dx.live(ambient_journey(), chunk_seconds=1.0, transition_seconds=3.0)
+live.play()
+```
+
+### Async generator
+
+Async generators let you await external events (sensor data, user input, API calls) between yields:
+
+```python
+import asyncio
+from collections.abc import AsyncIterator
+
+import latentscore as ls
+import latentscore.dx as dx
+from latentscore import LiveStream, MusicConfigUpdate, Streamable
+from latentscore.config import Step
+
+
+async def reactive_journey() -> AsyncIterator[Streamable]:
+    yield Streamable(content="warm sunrise ambient", duration=30, transition_duration=3)
+
+    await asyncio.sleep(5)  # wait for sensor/user input/API response
+
+    # Steer with a relative step
+    yield Streamable(
+        content=MusicConfigUpdate(brightness=Step(+2)),
+        duration=30,
+        transition_duration=3,
+    )
+
+    await asyncio.sleep(5)
+
+    # Or steer with absolute config values
+    yield Streamable(
+        content=MusicConfigUpdate(brightness="very_bright", rhythm="electronic"),
+        duration=30,
+        transition_duration=3,
+    )
+
+
+live: LiveStream = dx.live(reactive_journey(), chunk_seconds=1.0, transition_seconds=3.0)
+live.play()
+```
+
+The generator is consumed lazily &mdash; you can yield items based on user input, sensor data, time of day, or anything else.
+
+---
+
+## Async API
+
+For web servers, async apps, or when you need non-blocking audio generation:
+
+### arender
+
+```python
+import asyncio
+
+import latentscore as ls
+from latentscore import Audio
+
+
+async def main() -> None:
+    audio: Audio = await ls.arender("neon city rain")
+    audio.save("neon.wav")
+
+
+asyncio.run(main())
+```
+
+### astream
+
+```python
+import asyncio
+from collections.abc import AsyncIterator
+
+import numpy as np
+from numpy.typing import NDArray
+
+import latentscore as ls
+from latentscore import Streamable
+
+
+async def main() -> None:
+    async def vibes() -> AsyncIterator[Streamable]:
+        yield Streamable(content="deep ocean ambient", duration=30, transition_duration=3)
+        yield Streamable(content="forest rain", duration=30, transition_duration=3)
+
+    async for chunk in ls.astream(vibes(), chunk_seconds=1.0, transition_seconds=3.0):
+        samples: NDArray[np.float32] = chunk
+        process(samples)  # your processing logic here
+
+
+asyncio.run(main())
+```
 
 ---
 
@@ -227,7 +349,7 @@ LiteLLM reads API keys from environment variables automatically (`GEMINI_API_KEY
 ```python
 from latentscore import ExternalModelSpec
 
-spec = ExternalModelSpec(
+spec: ExternalModelSpec = ExternalModelSpec(
     model="gemini/gemini-3-flash-preview",
     api_key="your-api-key-here",
 )
@@ -238,7 +360,9 @@ ls.render("late night neon", model=spec).play()
 For advanced LiteLLM options (timeouts, retries, custom base URLs):
 
 ```python
-spec = ExternalModelSpec(
+from latentscore import ExternalModelSpec
+
+spec: ExternalModelSpec = ExternalModelSpec(
     model="openai/gpt-4o",
     api_key="...",
     litellm_kwargs={"timeout": 60, "max_retries": 3},
@@ -247,52 +371,61 @@ spec = ExternalModelSpec(
 
 > **Note:** LLM-based models are slower than the default `fast` model (network round-trips) and can occasionally fail due to API errors or output validation issues. The `fast` model is recommended for production use.
 
----
+### Accessing LLM Metadata
 
-## Async API
-
-For web servers, async apps, or when you need non-blocking audio generation:
+When using an external LLM, the model returns rich metadata alongside the music config: a title, reasoning, color palettes, and the full config it chose. Access it via `audio.metadata`:
 
 ```python
-import asyncio
-import latentscore as ls
+from latentscore import Audio, GenerateResult, Palette
 
-async def main():
-    # Async render
-    audio = await ls.arender("neon city rain")
-    audio.save("neon.wav")
+audio: Audio = ls.render(
+    "cyberpunk rain on neon streets",
+    model="external:gemini/gemini-3-flash-preview",
+)
 
-    # Async streaming
-    async for chunk in ls.astream_raw(
-        ["warm sunrise ambient"],
-        model="fast",
-        chunk_seconds=1.0,
-    ):
-        process(chunk)  # each chunk is a numpy float32 array
-
-asyncio.run(main())
+metadata: GenerateResult | None = audio.metadata
+if metadata is not None:
+    print(metadata.title)      # e.g. "Neon Rain Drift"
+    print(metadata.thinking)   # the LLM's reasoning
+    print(metadata.config)     # the MusicConfig it chose
+    palettes: tuple[Palette, ...] = metadata.palettes
+    for palette in palettes:
+        print([c.hex for c in palette.colors])
 ```
+
+The `metadata` field is `None` when using the default `fast` model (which doesn't produce metadata).
 
 ---
 
-## Live Streaming
+## Config Reference
 
-For dynamic, interactive applications (games, installations, adaptive UIs), use a generator to feed vibes in real time:
+Every `MusicConfig` field uses human-readable labels. Here's the full reference:
 
-```python
-import latentscore as ls
-import latentscore.dx as dx
+| Field | Labels |
+|-------|--------|
+| `tempo` | `very_slow` `slow` `medium` `fast` `very_fast` |
+| `brightness` | `very_dark` `dark` `medium` `bright` `very_bright` |
+| `space` | `dry` `small` `medium` `large` `vast` |
+| `motion` | `static` `slow` `medium` `fast` `chaotic` |
+| `stereo` | `mono` `narrow` `medium` `wide` `ultra_wide` |
+| `echo` | `none` `subtle` `medium` `heavy` `infinite` |
+| `human` | `robotic` `tight` `natural` `loose` `drunk` |
+| `attack` | `soft` `medium` `sharp` |
+| `grain` | `clean` `warm` `gritty` |
+| `density` | `2` `3` `4` `5` `6` |
+| `root` | `c` `c#` `d` ... `a#` `b` |
+| `mode` | `major` `minor` `dorian` `mixolydian` |
 
-def ambient_journey():
-    yield ls.Streamable(content="warm sunrise ambient", duration=30, transition_duration=3)
-    yield ls.Streamable(content="midday energy", duration=30, transition_duration=3)
-    yield ls.Streamable(content="late night neon", duration=30, transition_duration=3)
+**Layer styles:**
 
-live = dx.live(ambient_journey(), model="fast", chunk_seconds=1.0, transition_seconds=3.0)
-live.play()
-```
-
-The generator is consumed lazily &mdash; you can yield items based on user input, sensor data, time of day, or anything else.
+| Layer | Styles |
+|-------|--------|
+| `bass` | `drone` `sustained` `pulsing` `walking` `fifth_drone` `sub_pulse` `octave` `arp_bass` |
+| `pad` | `warm_slow` `dark_sustained` `cinematic` `thin_high` `ambient_drift` `stacked_fifths` `bright_open` |
+| `melody` | `procedural` `contemplative` `rising` `falling` `minimal` `ornamental` `arp_melody` `contemplative_minor` `call_response` `heroic` |
+| `rhythm` | `none` `minimal` `heartbeat` `soft_four` `hats_only` `electronic` `kit_light` `kit_medium` `military` `tabla_essence` `brush` |
+| `texture` | `none` `shimmer` `shimmer_slow` `vinyl_crackle` `breath` `stars` `glitch` `noise_wash` `crystal` `pad_whisper` |
+| `accent` | `none` `bells` `pluck` `chime` `bells_dense` `blip` `blip_random` `brass_hit` `wind` `arp_accent` `piano_note` |
 
 ---
 
@@ -302,7 +435,6 @@ The generator is consumed lazily &mdash; you can yield items based on user input
 latentscore demo                         # render and play a sample
 latentscore demo --duration 30           # 30-second demo
 latentscore demo --output ambient.wav    # save to file
-latentscore download expressive          # download local LLM weights
 latentscore doctor                       # check setup and model availability
 ```
 
@@ -321,30 +453,31 @@ Access the raw array directly:
 
 ```python
 import numpy as np
+from numpy.typing import NDArray
 
-audio = ls.render("deep ocean")
-samples = np.asarray(audio)  # shape: (n,), dtype: float32
+import latentscore as ls
+from latentscore import Audio
+
+audio: Audio = ls.render("deep ocean")
+samples: NDArray[np.float32] = np.asarray(audio)
 ```
 
 ---
 
 ## Local LLM (Expressive Mode)
 
-> **Warning:** Expressive mode runs a 270M-parameter LLM (Gemma 3) locally on your CPU. This is **experimental** and comes with significant caveats. For most users, the default `fast` model produces better results faster.
+> **Not recommended.** The default `fast` model is faster, more reliable, and produces higher-quality results. Expressive mode exists for experimentation only.
 
-> **Performance:** On macOS Apple Silicon, inference uses MLX and takes ~5-15 seconds per render. On CPU-only Linux/Windows, it uses transformers and can take **30-120 seconds**. There is no GPU acceleration on most setups.
+> **Slow.** Runs a 270M-parameter Gemma 3 LLM locally on CPU. On macOS Apple Silicon, inference uses MLX (~5-15s). On CPU-only Linux/Windows, it uses transformers (**30-120 seconds** per render).
 
-> **Reliability:** The local LLM can produce invalid configs, hallucinate parameter values, or mode-collapse into repetitive outputs. Our benchmarks showed the fine-tuned local model barely outperforms a random baseline.
+> **Unreliable.** The local LLM can produce invalid configs, hallucinate parameter values, or mode-collapse into repetitive outputs. Our benchmarks showed the fine-tuned local model barely outperforms a random baseline.
 
-> **Architecture:** LLM inference runs in a Python thread. Due to the GIL, this blocks other Python code. Do not use expressive mode in latency-sensitive applications.
+> **Blocking.** LLM inference runs in a Python thread. Due to the GIL, this blocks other Python code. Do not use in latency-sensitive applications.
 
 If you still want to try it:
 
 ```bash
-# Install the optional expressive dependencies
 pip install 'latentscore[expressive]'
-
-# Download the model weights (~500MB)
 latentscore download expressive
 ```
 
@@ -352,12 +485,6 @@ latentscore download expressive
 import latentscore as ls
 
 ls.render("jazz cafe at midnight", model="expressive").play()
-```
-
-For the base (non-fine-tuned) model:
-
-```python
-ls.render("jazz cafe at midnight", model="expressive_base").play()
 ```
 
 ---

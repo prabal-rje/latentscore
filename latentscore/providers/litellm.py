@@ -10,7 +10,7 @@ from typing import Any, Callable, Coroutine, Literal, cast
 
 from pydantic import BaseModel, ValidationError
 
-from ..config import MusicConfig, MusicConfigPromptPayload
+from ..config import GenerateResult, MusicConfig, MusicConfigPromptPayload
 from ..errors import ConfigGenerateError, LLMInferenceError, ModelNotAvailableError
 from ..models import EXTERNAL_PREFIX, build_litellm_prompt
 
@@ -288,7 +288,7 @@ class LiteLLMAdapter:
         except Exception as exc:
             _LOGGER.warning("LiteLLM close failed: %s", exc, exc_info=True)
 
-    async def generate(self, vibe: str) -> MusicConfig:
+    async def generate(self, vibe: str) -> MusicConfig | GenerateResult:
         try:
             import litellm  # type: ignore[import]
             from litellm import acompletion  # type: ignore[import]
@@ -336,7 +336,6 @@ class LiteLLMAdapter:
             if not isinstance(raw_content, str) or not raw_content.strip():
                 raise ConfigGenerateError("LiteLLM returned empty content")
             content = raw_content.strip()
-            print(self._parse_config_payload(content))
             return self._parse_config_payload(content)
         except ValidationError as exc:
             extracted = _extract_json_payload(content)
@@ -357,7 +356,7 @@ class LiteLLMAdapter:
             _LOGGER.warning("LiteLLM returned invalid JSON: %s", snippet)
             raise ConfigGenerateError(f"LiteLLM returned non-JSON content: {snippet}") from exc
 
-    def _parse_config_payload(self, payload: str) -> MusicConfig:
+    def _parse_config_payload(self, payload: str) -> MusicConfig | GenerateResult:
         if self._response_format is MusicConfigPromptPayload:
             try:
                 wrapper = MusicConfigPromptPayload.model_validate_json(payload)
@@ -366,5 +365,11 @@ class LiteLLMAdapter:
                 if config_payload is not None:
                     return MusicConfig.model_validate(config_payload)
                 return MusicConfig.model_validate_json(payload)
-            return wrapper.config.to_config()
+            config = wrapper.config.to_config()
+            return GenerateResult(
+                config=config,
+                title=wrapper.title,
+                thinking=wrapper.thinking,
+                palettes=tuple(wrapper.palettes),
+            )
         return MusicConfig.model_validate_json(payload)

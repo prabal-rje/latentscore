@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from common.music_schema import Palette, PaletteColor
+
 from .audio import SAMPLE_RATE
 from .config import (
     AccentStyle,
@@ -8,6 +10,7 @@ from .config import (
     BrightnessLabel,
     DensityLevel,
     EchoLabel,
+    GenerateResult,
     GrainStyle,
     HumanFeelLabel,
     MelodyStyle,
@@ -58,6 +61,7 @@ __all__ = [
     "BrightnessLabel",
     "DensityLevel",
     "EchoLabel",
+    "GenerateResult",
     "GrainStyle",
     "HumanFeelLabel",
     "MelodyStyle",
@@ -66,6 +70,8 @@ __all__ = [
     "MusicConfig",
     "MusicConfigUpdate",
     "ModelSpec",
+    "Palette",
+    "PaletteColor",
     "ModelForGeneratingMusicConfig",
     "ExternalModelSpec",
     "PadStyle",

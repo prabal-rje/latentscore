@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 from .audio import SAMPLE_RATE, AudioNumbers, FloatArray, ensure_audio_contract, write_wav
 from .config import (
     ConfigInput,
+    GenerateResult,
     MusicConfig,
     MusicConfigUpdate,
     Step,
@@ -713,6 +714,7 @@ def render(
     config: ConfigInput | None = None,
     update: UpdateInput | None = None,
     hooks: RenderHooks | None = None,
+    _result_meta: list[GenerateResult] | None = None,
 ) -> FloatArray:
     _emit_render(hooks, kind="start")
     try:
@@ -721,7 +723,7 @@ def render(
             should_close = _should_auto_close_model(model)
             _emit_render(hooks, kind="model_start", model=model)
 
-            async def _generate_with_cleanup() -> MusicConfig:
+            async def _generate_with_cleanup() -> MusicConfig | GenerateResult:
                 try:
                     return await resolved.generate(vibe)
                 finally:
@@ -729,7 +731,13 @@ def render(
                         await _maybe_close_model(resolved)
 
             try:
-                base = _run_async(_generate_with_cleanup()).to_internal()
+                gen_result = _run_async(_generate_with_cleanup())
+                if isinstance(gen_result, GenerateResult):
+                    if _result_meta is not None:
+                        _result_meta.append(gen_result)
+                    base = gen_result.config.to_internal()
+                else:
+                    base = gen_result.to_internal()
             finally:
                 _emit_render(hooks, kind="model_end", model=model)
         else:
@@ -1032,6 +1040,8 @@ async def _resolve_fallback(
             _LOGGER.warning("Fallback generation failed: %s", exc, exc_info=True)
             base = current or _default_internal_config()
             return _apply_update(base, update)
+        if isinstance(target, GenerateResult):
+            return _apply_update(target.config.to_internal(), update)
         return _apply_update(target.to_internal(), update)
     if fallback_load is not None and isinstance(fallback, str):
         try:
@@ -1115,7 +1125,11 @@ async def _resolve_target_async(
                     else merge_internal_config(base, internal_update)
                 )
         case str():
-            target = (await model.generate(item)).to_internal()
+            gen_result = await model.generate(item)
+            if isinstance(gen_result, GenerateResult):
+                target = gen_result.config.to_internal()
+            else:
+                target = gen_result.to_internal()
         case _:
             raise InvalidConfigError(f"Unsupported input type: {type(item).__name__}")
 

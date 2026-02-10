@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from .audio import SAMPLE_RATE, FloatArray, ensure_audio_contract, write_wav
 from .config import (
     ConfigInput,
+    GenerateResult,
     MusicConfig,
     MusicConfigUpdate,
     SynthConfig,
@@ -49,6 +50,7 @@ _LOGGER = logging.getLogger("latentscore.dx")
 class Audio(BaseModel):
     samples: FloatArray
     sample_rate: int = SAMPLE_RATE
+    metadata: GenerateResult | None = None
 
     model_config = ConfigDict(
         frozen=True,
@@ -448,6 +450,7 @@ def render(
 
     if isinstance(vibe_or_config, str):
         resolved_model = _coerce_model(model)
+        meta_box: list[GenerateResult] = []
         audio = render_raw(
             vibe_or_config,
             duration=duration,
@@ -455,8 +458,10 @@ def render(
             config=config,
             update=update,
             hooks=resolved_hooks,
+            _result_meta=meta_box,
         )
-        return Audio(samples=audio, sample_rate=sample_rate)
+        metadata = meta_box[0] if meta_box else None
+        return Audio(samples=audio, sample_rate=sample_rate, metadata=metadata)
 
     base = coerce_internal_config(config) if config is not None else MusicConfig().to_internal()
     match vibe_or_config:
