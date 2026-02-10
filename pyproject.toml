@@ -5,11 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "latentscore"
 version = "0.1.2"
-description = "LatentScore audio synthesis library."
+description = "Generate ambient music from text. Locally. No GPU required."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
-    "numpy",
+    "numpy<2",
     "scipy",
     "soundfile",
     "sounddevice",
@@ -26,11 +26,16 @@ dependencies = [
     "transformers>=4.57.0,<5",
     "tokenizers>=0.20.0",
     "sentencepiece",
-    "bitsandbytes; sys_platform == 'linux'",
-    "mlx; sys_platform == 'darwin'",
-    "mlx-lm; sys_platform == 'darwin'",
+]
+
+[project.optional-dependencies]
+# Local LLM inference (expressive mode) - CPU-only, uses huggingface transformers
+expressive = [
     "outlines",
     "instructor",
+    "bitsandbytes; sys_platform == 'linux'",
+    "mlx; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "mlx-lm; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "llama-cpp-python; platform_machine != 'arm64' and sys_platform != 'win32'",
 ]
 

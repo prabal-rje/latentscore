@@ -1,5 +1,5 @@
 # --- Core Numerics ---
-numpy
+numpy<2
 scipy
 
 # --- Audio ---
@@ -8,8 +8,8 @@ sounddevice
 simpleaudio
 
 bitsandbytes; sys_platform == "linux"
-mlx; sys_platform == "darwin"
-mlx-lm; sys_platform == "darwin"
+mlx; sys_platform == "darwin" and platform_machine == "arm64"
+mlx-lm; sys_platform == "darwin" and platform_machine == "arm64"
 
 # --- LLM & GenAI ---
 outlines
