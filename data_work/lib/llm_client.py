@@ -6,6 +6,7 @@ import inspect
 import json
 import logging
 import os
+import platform
 from pathlib import Path
 from typing import Any, Mapping, Sequence, TypeVar
 from urllib.parse import urlparse
@@ -54,13 +55,15 @@ def normalize_model_and_base(model: str, api_base: str | None) -> tuple[str, str
     return model, api_base
 
 
-def requires_api_key(model: str, api_base: str | None) -> bool:
+def requires_explicit_api_key(model: str, api_base: str | None) -> bool:
+    """Check if a model needs an explicit api_key param (vs env-var auto-detect).
+
+    Native providers (anthropic/, gemini/, openai/) auto-detect their own
+    env vars (ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY) via LiteLLM.
+    Only openrouter-style routing needs an explicit key passed through.
+    """
     match model:
         case _ if model.startswith("openrouter/"):
-            return True
-        case _ if model.startswith("openai/"):
-            return True
-        case _ if model.startswith("anthropic/"):
             return True
         case _:
             return api_base is not None and "openrouter.ai" in api_base
@@ -159,7 +162,7 @@ def resolve_api_key_for_models(
 ) -> str | None:
     if api_key:
         return api_key
-    required = [model for model, api_base in models if requires_api_key(model, api_base)]
+    required = [model for model, api_base in models if requires_explicit_api_key(model, api_base)]
     env_value = os.environ.get(api_key_env)
     if env_value:
         if required:
@@ -365,8 +368,47 @@ async def litellm_structured_completion(
     )
 
 
+def _is_apple_silicon() -> bool:
+    return platform.system() == "Darwin" and platform.machine() in ("arm64", "aarch64")
+
+
+def _sanitize_payload_json(raw: str) -> str:
+    """Truncate over-long title/thinking so Pydantic validation passes."""
+    from common.music_schema import MAX_TITLE_CHARS, MAX_TITLE_WORDS
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    if not isinstance(data, dict):
+        return raw
+    changed = False
+    title = data.get("title")
+    if isinstance(title, str):
+        words = title.strip().split()
+        if len(words) > MAX_TITLE_WORDS or len(title) > MAX_TITLE_CHARS:
+            data["title"] = " ".join(words[:MAX_TITLE_WORDS])[:MAX_TITLE_CHARS].rstrip() or "Untitled"
+            changed = True
+    thinking = data.get("thinking")
+    if isinstance(thinking, str) and len(thinking) > 2000:
+        data["thinking"] = thinking[:2000]
+        changed = True
+    return json.dumps(data) if changed else raw
+
+
+# Gemma 3 recommended inference settings from Unsloth:
+# https://docs.unsloth.ai/basics/all-parameters#chat-templates-and-templates
+_LOCAL_MAX_RETRIES = 3
+_LOCAL_REPETITION_PENALTY = 1.0
+_LOCAL_TOP_K = 64
+_LOCAL_MIN_P = 0.0
+_LOCAL_TOP_P = 0.95
+_LOCAL_RETRY_TEMPERATURE = 0.3
+_LOCAL_RETRY_TOP_P = 0.95
+
+
 class LocalHFClient:
-    """Simple local Hugging Face model wrapper for JSON outputs."""
+    """Local Hugging Face model wrapper with Outlines-constrained JSON generation."""
 
     def __init__(
         self,
@@ -375,25 +417,78 @@ class LocalHFClient:
         device: str | None,
         max_new_tokens: int,
         temperature: float,
+        force_cpu: bool = False,
+        quantize_4bit: bool = False,
+        no_int8: bool = False,
     ) -> None:
         try:
+            import outlines  # type: ignore[import]
             import torch
             from transformers import AutoModelForCausalLM, AutoTokenizer
         except ImportError as exc:
-            LOGGER.warning("transformers/torch not installed: %s", exc)
+            LOGGER.warning("transformers/torch/outlines not installed: %s", exc)
             raise SystemExit(
-                "Local models require transformers + torch. "
+                "Local models require transformers + torch + outlines. "
                 "Install them in the data_work environment."
             ) from exc
 
-        self._device = torch.device(device) if device else None
+        use_cuda = (
+            not force_cpu
+            and device != "cpu"
+            and torch.cuda.is_available()
+        )
+
         self._model_name = model_path
         self._tokenizer = AutoTokenizer.from_pretrained(model_path)
         normalize_tokenizer_for_model(self._tokenizer, model_path)
-        model = AutoModelForCausalLM.from_pretrained(model_path)
-        if self._device is not None:
-            model = model.to(self._device)
+
+        if quantize_4bit:
+            if not use_cuda:
+                LOGGER.warning(
+                    "4-bit quantization requires CUDA GPU; falling back to CPU float32."
+                )
+                quantize_4bit = False
+
+        if quantize_4bit:
+            from transformers import BitsAndBytesConfig  # type: ignore[import]
+
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=torch.float16,
+            )
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                device_map="auto",
+                torch_dtype=torch.float16,
+                quantization_config=bnb_config,
+            )
+            LOGGER.info("Loaded %s with 4-bit NF4 quantization on CUDA.", model_path)
+        else:
+            model = AutoModelForCausalLM.from_pretrained(model_path)
+            if device:
+                model.to(device)
+            elif use_cuda:
+                model.to("cuda")
+            else:
+                model.to("cpu")
+                if _is_apple_silicon() and not no_int8:
+                    try:
+                        torch.backends.quantized.engine = "qnnpack"
+                        model = torch.ao.quantization.quantize_dynamic(  # pyright: ignore[reportDeprecated]
+                            model, {torch.nn.Linear}, dtype=torch.qint8
+                        )
+                        LOGGER.info("Applied dynamic int8 quantization (qnnpack) for %s.", model_path)
+                    except Exception as exc:
+                        LOGGER.warning("Dynamic int8 quantization failed: %s", exc)
+                elif no_int8:
+                    LOGGER.info("Skipping int8 quantization for %s (--local-no-int8).", model_path)
+
+        model.eval()
+        self._device = torch.device(device) if device else None
         self._model = model
+        self._outlines_model: Any = outlines.from_transformers(model, self._tokenizer)
         self._max_new_tokens = max_new_tokens
         self._temperature = temperature
 
@@ -413,6 +508,7 @@ class LocalHFClient:
         max_new_tokens: int | None = None,
         temperature: float | None = None,
     ) -> str:
+        """Unconstrained text generation (no JSON enforcement)."""
         inputs = self._tokenizer(prompt, return_tensors="pt")
         if self._device is not None:
             inputs = {key: value.to(self._device) for key, value in inputs.items()}
@@ -431,6 +527,58 @@ class LocalHFClient:
         return self._tokenizer.decode(generated_ids, skip_special_tokens=True)
 
     def generate_structured(self, prompt: str, response_model: type[T]) -> T:
-        text = self.generate_text(prompt)
-        parsed = _parse_json_payload(text)
-        return response_model.model_validate(parsed)
+        """Outlines-constrained generation with retry loop."""
+        import torch
+
+        last_error: Exception | None = None
+        for attempt in range(_LOCAL_MAX_RETRIES):
+            try:
+                gen_kwargs: dict[str, Any] = {
+                    "max_new_tokens": self._max_new_tokens,
+                    "repetition_penalty": _LOCAL_REPETITION_PENALTY,
+                }
+                if attempt == 0:
+                    gen_kwargs["do_sample"] = self._temperature > 0
+                    if self._temperature > 0:
+                        gen_kwargs["temperature"] = self._temperature
+                        gen_kwargs["top_k"] = _LOCAL_TOP_K
+                        gen_kwargs["min_p"] = _LOCAL_MIN_P
+                        gen_kwargs["top_p"] = _LOCAL_TOP_P
+                else:
+                    gen_kwargs["do_sample"] = True
+                    gen_kwargs["temperature"] = _LOCAL_RETRY_TEMPERATURE
+                    gen_kwargs["top_p"] = _LOCAL_RETRY_TOP_P
+
+                with torch.no_grad():
+                    raw = self._outlines_model(
+                        prompt,
+                        output_type=response_model,
+                        **gen_kwargs,
+                    )
+
+                if isinstance(raw, BaseModel):
+                    return raw  # type: ignore[return-value]
+                if isinstance(raw, dict):
+                    return response_model.model_validate(raw)
+                text = str(raw)
+                sanitized = _sanitize_payload_json(text)
+                return response_model.model_validate_json(sanitized)
+            except Exception as exc:
+                # Last-resort: try json_repair if available.
+                if isinstance(raw, str):
+                    try:
+                        from json_repair import repair_json  # type: ignore[import]
+
+                        repaired = _sanitize_payload_json(repair_json(raw))
+                        return response_model.model_validate_json(repaired)
+                    except Exception:
+                        pass
+                LOGGER.warning(
+                    "Local model attempt %d/%d failed: %s",
+                    attempt + 1, _LOCAL_MAX_RETRIES, exc,
+                )
+                last_error = exc
+
+        raise LLMResponseError(
+            f"Local model failed after {_LOCAL_MAX_RETRIES} attempts"
+        ) from last_error

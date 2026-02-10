@@ -5,14 +5,16 @@ import asyncio
 import functools
 import json
 import logging
+import math
 import os
 import platform
+import random
 import re
 import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Literal, Protocol, Sequence, TypeGuard, cast
+from typing import Any, Callable, Literal, Protocol, Sequence, TypeGuard, cast, get_args
 
 import numpy as np
 from numpy.typing import NDArray
@@ -119,8 +121,14 @@ def _sanitize_payload_json(raw: str) -> str:
             changed = True
     return json.dumps(data) if changed else raw
 
-ModelChoice = Literal["fast", "expressive", "expressive_base", "local"]
-MODEL_CHOICES: tuple[ModelChoice, ...] = ("fast", "expressive", "expressive_base", "local")
+ModelChoice = Literal[
+    "fast", "fast_no_test", "interp", "interp_no_test", "semantic",
+    "expressive", "expressive_base", "local",
+]
+MODEL_CHOICES: tuple[ModelChoice, ...] = (
+    "fast", "fast_no_test", "interp", "interp_no_test", "semantic",
+    "expressive", "expressive_base", "local",
+)
 EXTERNAL_PREFIX = "external:"
 
 _EXPRESSIVE_REPO = os.environ.get(
@@ -167,7 +175,7 @@ _EMBED_MAP_REPO = os.environ.get(
 )
 _EMBED_MAP_FILE = os.environ.get(
     "LATENTSCORE_EMBED_MAP_FILE",
-    "2026-01-26_scored/_progress_embeddings.jsonl",
+    "2026-01-26_scored/vibe_and_embeddings_to_config_map.jsonl",
 )
 _LOGGER = logging.getLogger("latentscore.models")
 _chat_role_warning_emitted = False
@@ -259,9 +267,11 @@ def _env_float(name: str, default: float) -> float:
 _GGUF_CTX = _env_int("LATENTSCORE_GGUF_CTX", 4096)
 _GGUF_GPU_LAYERS = _env_int("LATENTSCORE_GGUF_GPU_LAYERS", 0)
 _GGUF_THREADS = _env_int("LATENTSCORE_GGUF_THREADS", 0)
-_GGUF_TEMPERATURE = _env_float("LATENTSCORE_GGUF_TEMPERATURE", 0.2)
-_GGUF_TOP_P = _env_float("LATENTSCORE_GGUF_TOP_P", 0.9)
-_MLX_REPETITION_PENALTY = _env_float("LATENTSCORE_MLX_REPETITION_PENALTY", 1.35)
+# Gemma 3 recommended inference settings from Unsloth:
+# https://docs.unsloth.ai/basics/all-parameters#chat-templates-and-templates
+_GGUF_TEMPERATURE = _env_float("LATENTSCORE_GGUF_TEMPERATURE", 1.0)
+_GGUF_TOP_P = _env_float("LATENTSCORE_GGUF_TOP_P", 0.95)
+_MLX_REPETITION_PENALTY = _env_float("LATENTSCORE_MLX_REPETITION_PENALTY", 1.0)
 
 
 def _disable_transformers_progress() -> None:
@@ -722,8 +732,14 @@ def _heuristic_config(vibe: str) -> MusicConfig:
 class FastEmbeddingModel:
     """Embeddings-backed config selection with a heuristic fallback."""
 
-    def __init__(self, model_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        model_dir: Path | None = None,
+        *,
+        exclude_splits: frozenset[str] = frozenset(),
+    ) -> None:
         self._model_dir = model_dir
+        self._exclude_splits = exclude_splits
 
     def warmup(self) -> None:
         _ = self._example_matrix()
@@ -792,6 +808,8 @@ class FastEmbeddingModel:
                         row = json.loads(line)
                     except json.JSONDecodeError:
                         continue
+                    if self._exclude_splits and row.get("split") in self._exclude_splits:
+                        continue
                     vibe = row.get("vibe_original") or row.get("vibe") or row.get("vibe_noisy")
                     config = row.get("config")
                     if not vibe or not isinstance(config, dict):
@@ -858,6 +876,284 @@ class FastEmbeddingModel:
                 exc_info=True,
             )
             return None
+
+
+# ---------------------------------------------------------------------------
+# Interpolated embedding model: top-K blending
+# ---------------------------------------------------------------------------
+
+_INTERP_TOP_K = 3
+
+_INTERP_ORDINAL_MAPS: dict[str, dict[str, float]] = {
+    "tempo": {"very_slow": 0.15, "slow": 0.3, "medium": 0.5, "fast": 0.7, "very_fast": 0.9},
+    "brightness": {"very_dark": 0.1, "dark": 0.3, "medium": 0.5, "bright": 0.7, "very_bright": 0.9},
+    "space": {"dry": 0.1, "small": 0.3, "medium": 0.5, "large": 0.7, "vast": 0.95},
+    "motion": {"static": 0.1, "slow": 0.3, "medium": 0.5, "fast": 0.7, "chaotic": 0.9},
+    "stereo": {"mono": 0.0, "narrow": 0.25, "medium": 0.5, "wide": 0.75, "ultra_wide": 1.0},
+    "echo": {"none": 0.0, "subtle": 0.25, "medium": 0.5, "heavy": 0.75, "infinite": 0.95},
+    "human": {"robotic": 0.0, "tight": 0.15, "natural": 0.3, "loose": 0.5, "drunk": 0.8},
+}
+
+_INTERP_FLOAT_FIELDS = frozenset({
+    "melody_density", "syncopation", "swing", "motif_repeat_prob",
+    "step_bias", "chromatic_prob", "cadence_strength",
+})
+
+_INTERP_NOMINAL_FIELDS = frozenset({
+    "root", "mode", "bass", "pad", "melody", "rhythm", "texture", "accent",
+    "attack", "grain", "melody_engine", "tension_curve", "harmony_style",
+    "chord_extensions",
+})
+
+_VALID_PHRASE_BARS = (2, 4, 8)
+_MIN_DENSITY = 2
+_MAX_DENSITY = 6
+_MIN_OCTAVE = 1
+_MAX_OCTAVE = 8
+
+
+def _log_inverse_weights(scores: Sequence[float]) -> list[float]:
+    """Convert cosine similarities to log-inverse weights: w_i = 1/|log(s_i)|.
+
+    Amplifies small differences in high-similarity regimes where linear
+    normalization produces near-uniform weights.
+    """
+    _EPS = 1e-9
+    raw = [1.0 / max(abs(math.log(max(s, _EPS))), _EPS) for s in scores]
+    total = sum(raw)
+    if total <= 0:
+        return [1.0 / len(scores)] * len(scores)
+    return [w / total for w in raw]
+
+
+def _interp_ordinal(
+    values: Sequence[str],
+    weights: Sequence[float],
+    label_map: dict[str, float],
+) -> str:
+    """Weighted average of ordinal labels via float mapping, snap to nearest."""
+    avg = sum(label_map.get(v, 0.5) * w for v, w in zip(values, weights))
+    return min(label_map, key=lambda k: abs(label_map[k] - avg))
+
+
+def _interp_nominal(
+    values: Sequence[str],
+    weights: Sequence[float],
+    rng: random.Random,
+) -> str:
+    """Weighted random selection among nominal values."""
+    return rng.choices(list(values), weights=list(weights), k=1)[0]
+
+
+class InterpEmbeddingModel(FastEmbeddingModel):
+    """Top-K embedding interpolation: blends configs from nearest neighbors."""
+
+    def __init__(
+        self,
+        model_dir: Path | None = None,
+        *,
+        exclude_splits: frozenset[str] = frozenset(),
+        top_k: int = _INTERP_TOP_K,
+    ) -> None:
+        super().__init__(model_dir, exclude_splits=exclude_splits)
+        self._top_k = top_k
+
+    def _embed_and_select(self, vibe: str) -> MusicConfig:
+        encoder = self._load_encoder()
+        example_matrix = self._example_matrix()
+        query = encoder.encode([vibe], normalize_embeddings=True)
+        query_vec = np.asarray(query, dtype=np.float32)[0]
+        scores: NDArray[np.float32] = example_matrix @ query_vec
+
+        actual_k = min(self._top_k, len(self._examples()))
+        top_indices = np.argsort(scores)[-actual_k:][::-1]
+        top_scores = [float(scores[int(i)]) for i in top_indices]
+        if all(s <= 0 for s in top_scores):
+            return self._examples()[int(top_indices[0])].config
+        weights = _log_inverse_weights(top_scores)
+        configs = [self._examples()[int(i)].config for i in top_indices]
+
+        rng = random.Random(vibe)
+        data: dict[str, Any] = {}
+
+        # Ordinal fields: weighted avg in float space -> snap to nearest label
+        for field, label_map in _INTERP_ORDINAL_MAPS.items():
+            vals = [str(getattr(c, field)) for c in configs]
+            data[field] = _interp_ordinal(vals, weights, label_map)
+
+        # Float fields: weighted average
+        for field in _INTERP_FLOAT_FIELDS:
+            vals = [float(getattr(c, field)) for c in configs]
+            data[field] = sum(v * w for v, w in zip(vals, weights))
+
+        # Nominal fields: weighted random selection
+        for field in _INTERP_NOMINAL_FIELDS:
+            vals = [str(getattr(c, field)) for c in configs]
+            data[field] = _interp_nominal(vals, weights, rng)
+
+        # density: clamp to 2-6
+        density_vals = [c.density for c in configs]
+        data["density"] = max(
+            _MIN_DENSITY,
+            min(_MAX_DENSITY, round(sum(v * w for v, w in zip(density_vals, weights)))),
+        )
+
+        # phrase_len_bars: snap to 2, 4, or 8
+        plb_vals = [c.phrase_len_bars for c in configs]
+        plb_avg = sum(v * w for v, w in zip(plb_vals, weights))
+        data["phrase_len_bars"] = min(_VALID_PHRASE_BARS, key=lambda v: abs(v - plb_avg))
+
+        # register octaves: clamp 1-8, ensure min <= max
+        min_oct_vals = [c.register_min_oct for c in configs]
+        max_oct_vals = [c.register_max_oct for c in configs]
+        min_oct = max(
+            _MIN_OCTAVE,
+            min(_MAX_OCTAVE, round(sum(v * w for v, w in zip(min_oct_vals, weights)))),
+        )
+        max_oct = max(
+            _MIN_OCTAVE,
+            min(_MAX_OCTAVE, round(sum(v * w for v, w in zip(max_oct_vals, weights)))),
+        )
+        if min_oct > max_oct:
+            min_oct, max_oct = max_oct, min_oct
+        data["register_min_oct"] = min_oct
+        data["register_max_oct"] = max_oct
+
+        # chord_change_bars: positive int
+        ccb_vals = [c.chord_change_bars for c in configs]
+        data["chord_change_bars"] = max(
+            1, round(sum(v * w for v, w in zip(ccb_vals, weights)))
+        )
+
+        # depth: weighted probability
+        depth_vals = [c.depth for c in configs]
+        data["depth"] = sum(w for v, w in zip(depth_vals, weights) if v) > 0.5
+
+        return MusicConfig.model_validate(data)
+
+
+# ---------------------------------------------------------------------------
+# Semantic embedding model: zero-shot per-field matching
+# ---------------------------------------------------------------------------
+
+_SEMANTIC_SPECIAL_FIELDS: dict[str, list[tuple[object, str]]] = {
+    "depth": [(True, "deep layered sound"), (False, "flat simple sound")],
+    "register_min_oct": [(i, f"octave {i} register") for i in range(1, 9)],
+    "register_max_oct": [(i, f"octave {i} register") for i in range(1, 9)],
+}
+
+_SEMANTIC_SUFFIX: dict[str, str] = {
+    "bass": " bass",
+    "pad": " pad",
+    "melody": " melody",
+    "rhythm": " rhythm",
+    "texture": " texture",
+    "accent": " accent",
+    "attack": " attack",
+    "grain": " grain",
+    "melody_engine": " engine",
+    "tension_curve": " tension",
+    "harmony_style": " harmony",
+}
+
+
+def _value_to_semantic_text(field: str, value: object) -> str:
+    """Convert a config field value to descriptive text for semantic embedding."""
+    if field == "root":
+        return f"key of {str(value).replace('_sharp', ' sharp')}"
+    if field == "density":
+        return f"density {value}"
+    if field == "phrase_len_bars":
+        return f"{value} bar phrase"
+    base = str(value).replace("_", " ")
+    suffix = _SEMANTIC_SUFFIX.get(field, "")
+    return base + suffix
+
+
+class SemanticEmbeddingModel:
+    """Zero-shot semantic matching: picks each config value by embedding similarity.
+
+    For each config field, pre-encodes all valid enum values as text embeddings.
+    At inference, picks the value whose embedding is most similar to the input vibe.
+    No training data or embed map needed.
+    """
+
+    def __init__(self, model_dir: Path | None = None) -> None:
+        self._model_dir = model_dir
+
+    def warmup(self) -> None:
+        _ = self._field_embeddings()
+
+    async def generate(self, vibe: str) -> MusicConfig:
+        try:
+            return await asyncio.to_thread(self._select, vibe)
+        except Exception as exc:  # pragma: no cover - runtime fallback
+            _LOGGER.warning("Semantic model fallback: %s", exc, exc_info=True)
+            return _heuristic_config(vibe)
+
+    @functools.lru_cache(maxsize=1)
+    def _load_encoder(self) -> Any:
+        try:
+            from sentence_transformers import SentenceTransformer  # type: ignore[import]
+        except ImportError as exc:
+            _LOGGER.warning("sentence-transformers not installed: %s", exc, exc_info=True)
+            raise ModelNotAvailableError("sentence-transformers is not installed") from exc
+
+        _disable_transformers_progress()
+        _patch_torch_parameter_for_hf()
+        model_dir = self._model_dir
+        if model_dir is None:
+            model_dir = _LOCAL_EMBEDDING_DIR if _LOCAL_EMBEDDING_DIR.exists() else None
+
+        return SentenceTransformer(str(model_dir) if model_dir else _EMBEDDING_MODEL_NAME)
+
+    @functools.lru_cache(maxsize=1)
+    def _field_embeddings(
+        self,
+    ) -> dict[str, tuple[list[object], NDArray[np.float32]]]:
+        """Pre-encode all valid field value texts. Cached after first call."""
+        encoder = self._load_encoder()
+        result: dict[str, tuple[list[object], NDArray[np.float32]]] = {}
+
+        for name, field_info in MusicConfigPrompt.model_fields.items():
+            if name in _SEMANTIC_SPECIAL_FIELDS:
+                pairs = _SEMANTIC_SPECIAL_FIELDS[name]
+                values: list[object] = [p[0] for p in pairs]
+                texts = [p[1] for p in pairs]
+            else:
+                annotation = field_info.annotation
+                literal_values = get_args(annotation) if annotation is not None else ()
+                if not literal_values:
+                    continue
+                values = list(literal_values)
+                texts = [_value_to_semantic_text(name, v) for v in literal_values]
+
+            embeddings = encoder.encode(texts, normalize_embeddings=True)
+            result[name] = (values, np.asarray(embeddings, dtype=np.float32))
+
+        return result
+
+    def _select(self, vibe: str) -> MusicConfig:
+        encoder = self._load_encoder()
+        field_embeddings = self._field_embeddings()
+        query = encoder.encode([vibe], normalize_embeddings=True)
+        query_vec = np.asarray(query, dtype=np.float32)[0]
+
+        config_data: dict[str, object] = {}
+        for field, (values, matrix) in field_embeddings.items():
+            scores: NDArray[np.float32] = matrix @ query_vec
+            best_idx = int(np.argmax(scores))
+            config_data[field] = values[best_idx]
+
+        # Ensure register_min_oct <= register_max_oct
+        min_oct = config_data.get("register_min_oct")
+        max_oct = config_data.get("register_max_oct")
+        if isinstance(min_oct, int) and isinstance(max_oct, int) and min_oct > max_oct:
+            config_data["register_min_oct"] = max_oct
+            config_data["register_max_oct"] = min_oct
+
+        prompt = MusicConfigPrompt.model_validate(config_data)
+        return prompt.to_config()
 
 
 class ExpressiveMlxModel:
@@ -1164,7 +1460,9 @@ class ExpressiveMlxModel:
             try:
                 if _is_apple_silicon():
                     torch.backends.quantized.engine = "qnnpack"
-                model = torch.ao.quantization.quantize_dynamic(
+                # PT2 export-based quantization is the successor but requires
+                # torch.export which is impractical here.
+                model = torch.ao.quantization.quantize_dynamic(  # pyright: ignore[reportDeprecated]
                     model, {torch.nn.Linear}, dtype=torch.qint8
                 )
             except Exception as exc:
@@ -1280,6 +1578,14 @@ def _resolve_builtin_model(choice: ModelChoice) -> ModelForGeneratingMusicConfig
             return ExpressiveMlxModel()
         case "fast":
             return FastEmbeddingModel()
+        case "fast_no_test":
+            return FastEmbeddingModel(exclude_splits=frozenset({"TEST"}))
+        case "interp":
+            return InterpEmbeddingModel()
+        case "interp_no_test":
+            return InterpEmbeddingModel(exclude_splits=frozenset({"TEST"}))
+        case "semantic":
+            return SemanticEmbeddingModel()
         case _:
             raise ConfigGenerateError(f"Unknown model choice: {choice!r}")
 
@@ -1322,9 +1628,9 @@ def resolve_model(
                 return _FallbackModel(primary=primary, fallback=_resolve_builtin_model("fast"))
             return primary
         match model:
-            case "expressive" | "expressive_base" | "local" | "fast":
+            case "expressive" | "expressive_base" | "local" | "fast" | "fast_no_test" | "interp" | "interp_no_test" | "semantic":
                 primary = _resolve_builtin_model(model)
-                if model != "fast" and _fast_fallback_enabled():
+                if model not in ("fast", "fast_no_test", "interp", "interp_no_test", "semantic") and _fast_fallback_enabled():
                     return _FallbackModel(primary=primary, fallback=_resolve_builtin_model("fast"))
                 return primary
             case _:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import json
+import math
 import os
 import random
 import re
@@ -90,7 +91,7 @@ _TITLE_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9']+")
 
 _DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 _DEFAULT_EMBED_MAP_REPO = "guprab/latentscore-data"
-_DEFAULT_EMBED_MAP_FILE = "2026-01-26_scored/_progress_embeddings.jsonl"
+_DEFAULT_EMBED_MAP_FILE = "2026-01-26_scored/vibe_and_embeddings_to_config_map.jsonl"
 
 
 def _make_title(vibe: str) -> str:
@@ -617,6 +618,37 @@ class _EmbeddingLookupIndex:
         best_idx = int(np.argmax(scores))
         return self._examples[best_idx]
 
+    def lookup_top_k(
+        self, vibe: str, k: int = 3
+    ) -> tuple[list[_RetrievalExample], list[float]]:
+        """Return top-k nearest examples with normalized similarity weights."""
+        index = self._load()
+        return index._lookup_top_k_impl(vibe, k)
+
+    def _lookup_top_k_impl(
+        self, vibe: str, k: int
+    ) -> tuple[list[_RetrievalExample], list[float]]:
+        if self._matrix is None or not self._examples:
+            self._load()
+        assert self._matrix is not None
+        assert self._examples
+
+        import numpy as np
+
+        encoder = self._load_encoder()
+        query = encoder.encode([vibe], normalize_embeddings=True)
+        query_vec = np.asarray(query, dtype=np.float32)[0]
+        scores = self._matrix @ query_vec
+
+        actual_k = min(k, len(self._examples))
+        top_indices = np.argsort(scores)[-actual_k:][::-1]
+        top_scores = [float(scores[int(i)]) for i in top_indices]
+        if all(s <= 0 for s in top_scores):
+            return [self._examples[int(top_indices[0])]], [1.0]
+        weights = _log_inverse_weights(top_scores)
+        examples = [self._examples[int(i)] for i in top_indices]
+        return examples, weights
+
 
 def _resolve_embed_map_path() -> Path:
     explicit = os.environ.get("LATENTSCORE_EMBED_MAP", "").strip()
@@ -675,13 +707,338 @@ class EmbeddingLookupBaseline(ConfigBaseline):
         )
 
 
+# ---------------------------------------------------------------------------
+# Interpolated embedding baseline: top-K blending
+# ---------------------------------------------------------------------------
+
+_INTERP_TOP_K = 3
+
+_BASELINE_ORDINAL_MAPS: dict[str, dict[str, float]] = {
+    "tempo": {"very_slow": 0.15, "slow": 0.3, "medium": 0.5, "fast": 0.7, "very_fast": 0.9},
+    "brightness": {"very_dark": 0.1, "dark": 0.3, "medium": 0.5, "bright": 0.7, "very_bright": 0.9},
+    "space": {"dry": 0.1, "small": 0.3, "medium": 0.5, "large": 0.7, "vast": 0.95},
+    "motion": {"static": 0.1, "slow": 0.3, "medium": 0.5, "fast": 0.7, "chaotic": 0.9},
+    "stereo": {"mono": 0.0, "narrow": 0.25, "medium": 0.5, "wide": 0.75, "ultra_wide": 1.0},
+    "echo": {"none": 0.0, "subtle": 0.25, "medium": 0.5, "heavy": 0.75, "infinite": 0.95},
+    "human": {"robotic": 0.0, "tight": 0.15, "natural": 0.3, "loose": 0.5, "drunk": 0.8},
+    "melody_density": {
+        "very_sparse": 0.15, "sparse": 0.30, "medium": 0.50, "busy": 0.70, "very_busy": 0.85,
+    },
+    "syncopation": {"straight": 0.0, "light": 0.2, "medium": 0.5, "heavy": 0.8},
+    "swing": {"none": 0.0, "light": 0.2, "medium": 0.5, "heavy": 0.8},
+    "motif_repeat_prob": {"rare": 0.2, "sometimes": 0.5, "often": 0.8},
+    "step_bias": {"step": 0.9, "balanced": 0.7, "leapy": 0.4},
+    "chromatic_prob": {"none": 0.0, "light": 0.05, "medium": 0.12, "heavy": 0.25},
+    "cadence_strength": {"weak": 0.3, "medium": 0.6, "strong": 0.9},
+    "chord_change_bars": {"very_slow": 4.0, "slow": 2.0, "medium": 1.0, "fast": 0.5},
+}
+
+_BASELINE_NOMINAL_FIELDS = frozenset({
+    "root", "mode", "bass", "pad", "melody", "rhythm", "texture", "accent",
+    "attack", "grain", "melody_engine", "tension_curve", "harmony_style",
+    "chord_extensions",
+})
+
+_VALID_PHRASE_BARS = (2, 4, 8)
+_MIN_DENSITY = 2
+_MAX_DENSITY = 6
+_MIN_OCTAVE = 1
+_MAX_OCTAVE = 8
+
+
+def _log_inverse_weights(scores: Sequence[float]) -> list[float]:
+    """Convert cosine similarities to log-inverse weights: w_i = 1/|log(s_i)|.
+
+    Amplifies small differences in high-similarity regimes where linear
+    normalization produces near-uniform weights.
+    """
+    _EPS = 1e-9
+    raw = [1.0 / max(abs(math.log(max(s, _EPS))), _EPS) for s in scores]
+    total = sum(raw)
+    if total <= 0:
+        return [1.0 / len(scores)] * len(scores)
+    return [w / total for w in raw]
+
+
+def _bl_interp_ordinal(
+    values: Sequence[str],
+    weights: Sequence[float],
+    label_map: dict[str, float],
+) -> str:
+    """Weighted average of ordinal labels via float mapping, snap to nearest."""
+    avg = sum(label_map.get(v, 0.5) * w for v, w in zip(values, weights))
+    return min(label_map, key=lambda k: abs(label_map[k] - avg))
+
+
+def _bl_interp_nominal(
+    values: Sequence[str],
+    weights: Sequence[float],
+    rng: random.Random,
+) -> str:
+    """Weighted random selection among nominal values."""
+    return rng.choices(list(values), weights=list(weights), k=1)[0]
+
+
+class EmbeddingInterpBaseline(ConfigBaseline):
+    """Top-K embedding interpolation baseline.
+
+    Finds the K nearest vibes in embedding space and blends their configs
+    using similarity-weighted interpolation.
+    """
+
+    def __init__(self, top_k: int = _INTERP_TOP_K) -> None:
+        self._index = _get_retrieval_index()
+        self._top_k = top_k
+
+    def generate(self, vibe: str) -> MusicConfigPromptPayload:
+        examples, weights = self._index.lookup_top_k(vibe, self._top_k)
+        if not examples:
+            return EmbeddingLookupBaseline().generate(vibe)
+
+        rng = random.Random(vibe)
+        config_data: dict[str, Any] = {}
+
+        # Ordinal fields: weighted avg in float space -> snap to nearest label
+        for field, label_map in _BASELINE_ORDINAL_MAPS.items():
+            vals = [str(getattr(e.config, field)) for e in examples]
+            config_data[field] = _bl_interp_ordinal(vals, weights, label_map)
+
+        # Nominal fields: weighted random selection
+        for field in _BASELINE_NOMINAL_FIELDS:
+            vals = [str(getattr(e.config, field)) for e in examples]
+            config_data[field] = _bl_interp_nominal(vals, weights, rng)
+
+        # density: Literal[2..6] -> weighted avg -> snap
+        density_vals = [e.config.density for e in examples]
+        density_avg = sum(v * w for v, w in zip(density_vals, weights))
+        config_data["density"] = max(_MIN_DENSITY, min(_MAX_DENSITY, round(density_avg)))
+
+        # phrase_len_bars: Literal[2,4,8] -> snap
+        plb_vals = [e.config.phrase_len_bars for e in examples]
+        plb_avg = sum(v * w for v, w in zip(plb_vals, weights))
+        config_data["phrase_len_bars"] = min(
+            _VALID_PHRASE_BARS, key=lambda v: abs(v - plb_avg)
+        )
+
+        # register octaves: int, clamp 1-8, ensure min <= max
+        min_oct_vals = [e.config.register_min_oct for e in examples]
+        max_oct_vals = [e.config.register_max_oct for e in examples]
+        min_oct = max(
+            _MIN_OCTAVE,
+            min(_MAX_OCTAVE, round(sum(v * w for v, w in zip(min_oct_vals, weights)))),
+        )
+        max_oct = max(
+            _MIN_OCTAVE,
+            min(_MAX_OCTAVE, round(sum(v * w for v, w in zip(max_oct_vals, weights)))),
+        )
+        if min_oct > max_oct:
+            min_oct, max_oct = max_oct, min_oct
+        config_data["register_min_oct"] = min_oct
+        config_data["register_max_oct"] = max_oct
+
+        # depth: bool -> weighted probability
+        depth_vals = [e.config.depth for e in examples]
+        config_data["depth"] = sum(w for v, w in zip(depth_vals, weights) if v) > 0.5
+
+        config = MusicConfigPrompt.model_validate(config_data)
+        palettes = examples[0].palettes
+
+        return MusicConfigPromptPayload(
+            thinking=f"Top-{self._top_k} embedding interpolation baseline.",
+            title=_make_title(vibe),
+            config=config,
+            palettes=palettes,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Semantic matching baseline: zero-shot per-field selection
+# ---------------------------------------------------------------------------
+
+_SEMANTIC_SUFFIX: dict[str, str] = {
+    "bass": " bass",
+    "pad": " pad",
+    "melody": " melody",
+    "rhythm": " rhythm",
+    "texture": " texture",
+    "accent": " accent",
+    "attack": " attack",
+    "grain": " grain",
+    "melody_engine": " engine",
+    "tension_curve": " tension",
+    "harmony_style": " harmony",
+}
+
+
+def _bl_value_to_semantic_text(field: str, value: object) -> str:
+    """Convert a config field value to descriptive text for semantic embedding."""
+    if field == "root":
+        return f"key of {str(value).replace('_sharp', ' sharp')}"
+    if field == "density":
+        return f"density {value}"
+    if field == "phrase_len_bars":
+        return f"{value} bar phrase"
+    base = str(value).replace("_", " ")
+    suffix = _SEMANTIC_SUFFIX.get(field, "")
+    return base + suffix
+
+
+class SemanticMatchBaseline(ConfigBaseline):
+    """Zero-shot semantic matching baseline.
+
+    For each config field, picks the enum value whose text embedding
+    is most similar to the input vibe. No training data needed.
+    """
+
+    def __init__(self) -> None:
+        self._encoder: Any | None = None
+        self._cached_field_embeddings: (
+            dict[str, tuple[list[object], Any]] | None
+        ) = None
+
+    def _load_encoder(self) -> Any:
+        if self._encoder is not None:
+            return self._encoder
+        try:
+            from sentence_transformers import SentenceTransformer  # type: ignore[import]
+        except ImportError as exc:  # pragma: no cover - environment mismatch
+            raise RuntimeError(
+                "sentence-transformers is required for semantic baseline."
+            ) from exc
+        self._encoder = cast(Any, SentenceTransformer(_DEFAULT_EMBED_MODEL))
+        return cast(Any, self._encoder)
+
+    def _get_field_embeddings(self) -> dict[str, tuple[list[object], Any]]:
+        if self._cached_field_embeddings is not None:
+            return self._cached_field_embeddings
+
+        import numpy as np
+
+        encoder = self._load_encoder()
+
+        # All label fields: field_name → (values_sequence, text_formatter)
+        label_fields: dict[str, Sequence[object]] = {
+            "tempo": TEMPO_VALUES,
+            "brightness": BRIGHTNESS_VALUES,
+            "space": SPACE_VALUES,
+            "motion": MOTION_VALUES,
+            "stereo": STEREO_VALUES,
+            "echo": ECHO_VALUES,
+            "human": HUMAN_FEEL_VALUES,
+            "melody_density": MELODY_DENSITY_VALUES,
+            "syncopation": SYNCOPATION_VALUES,
+            "swing": SWING_VALUES,
+            "motif_repeat_prob": MOTIF_REPEAT_VALUES,
+            "step_bias": STEP_BIAS_VALUES,
+            "chromatic_prob": CHROMATIC_VALUES,
+            "cadence_strength": CADENCE_VALUES,
+            "chord_change_bars": CHORD_CHANGE_VALUES,
+            "root": ROOT_VALUES,
+            "mode": MODE_VALUES,
+            "bass": BASS_STYLES,
+            "pad": PAD_STYLES,
+            "melody": MELODY_STYLES,
+            "rhythm": RHYTHM_STYLES,
+            "texture": TEXTURE_STYLES,
+            "accent": ACCENT_STYLES,
+            "attack": ATTACK_STYLES,
+            "grain": GRAIN_STYLES,
+            "melody_engine": MELODY_ENGINES,
+            "tension_curve": TENSION_CURVES,
+            "harmony_style": HARMONY_STYLES,
+            "chord_extensions": CHORD_EXTENSIONS_VALUES,
+            "density": DENSITY_VALUES,
+            "phrase_len_bars": PHRASE_LENGTH_BARS,
+        }
+
+        # Special fields with custom text
+        special_fields: dict[str, list[tuple[object, str]]] = {
+            "depth": [
+                (True, "deep layered sound"),
+                (False, "flat simple sound"),
+            ],
+            "register_min_oct": [
+                (i, f"octave {i} register") for i in range(1, 9)
+            ],
+            "register_max_oct": [
+                (i, f"octave {i} register") for i in range(1, 9)
+            ],
+        }
+
+        result: dict[str, tuple[list[object], Any]] = {}
+
+        for field, vals in label_fields.items():
+            values: list[object] = list(vals)
+            texts = [_bl_value_to_semantic_text(field, v) for v in vals]
+            embeddings = encoder.encode(texts, normalize_embeddings=True)
+            result[field] = (values, np.asarray(embeddings, dtype=np.float32))
+
+        for field, pairs in special_fields.items():
+            values = [p[0] for p in pairs]
+            texts = [p[1] for p in pairs]
+            embeddings = encoder.encode(texts, normalize_embeddings=True)
+            result[field] = (values, np.asarray(embeddings, dtype=np.float32))
+
+        self._cached_field_embeddings = result
+        return result
+
+    def generate(self, vibe: str) -> MusicConfigPromptPayload:
+        import numpy as np
+
+        encoder = self._load_encoder()
+        field_embeddings = self._get_field_embeddings()
+
+        query = encoder.encode([vibe], normalize_embeddings=True)
+        query_vec = np.asarray(query, dtype=np.float32)[0]
+
+        config_data: dict[str, Any] = {}
+        for field, (values, matrix) in field_embeddings.items():
+            scores = matrix @ query_vec
+            best_idx = int(np.argmax(scores))
+            config_data[field] = values[best_idx]
+
+        # Ensure register_min_oct <= register_max_oct
+        min_oct = config_data.get("register_min_oct")
+        max_oct = config_data.get("register_max_oct")
+        if isinstance(min_oct, int) and isinstance(max_oct, int) and min_oct > max_oct:
+            config_data["register_min_oct"] = max_oct
+            config_data["register_max_oct"] = min_oct
+
+        config = MusicConfigPrompt.model_validate(config_data)
+
+        palette_gen = RandomConfigBaseline(seed=42)
+        return MusicConfigPromptPayload(
+            thinking="Zero-shot semantic matching: each field chosen by embedding similarity.",
+            title=_make_title(vibe),
+            config=config,
+            palettes=[palette_gen.random_palette() for _ in range(3)],
+        )
+
+
 # Registry of available baselines
 BASELINES: dict[str, type[ConfigBaseline]] = {
     "random": RandomConfigBaseline,
     "rule_based": RuleBasedBaseline,
     "mode": ModeConfigBaseline,
     "retrieval": EmbeddingLookupBaseline,
+    "embedding_lookup": EmbeddingLookupBaseline,
+    "embedding_interp": EmbeddingInterpBaseline,
+    "semantic_match": SemanticMatchBaseline,
 }
+
+_EMBEDDING_LOOKUP_NAMES = frozenset({"retrieval", "embedding_lookup", "embedding_interp"})
+
+EMBEDDING_LOOKUP_WARNING = (
+    "The embedding_lookup baseline retrieves configs from a fixed synthetic dataset "
+    "(HF: guprab/latentscore-data) generated by a teacher LLM "
+    "(gemini/gemini-3-flash-preview). "
+    "TEST-split rows are excluded to prevent data leakage."
+)
+
+
+def is_embedding_lookup(name: str) -> bool:
+    """Check if a baseline name refers to the embedding lookup baseline."""
+    return name in _EMBEDDING_LOOKUP_NAMES
 
 
 def get_baseline(name: str) -> ConfigBaseline:

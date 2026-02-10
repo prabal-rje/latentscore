@@ -6,9 +6,13 @@ import argparse
 import asyncio
 import json
 import logging
+import multiprocessing
+import re
 import tempfile
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence, cast
+from typing import Any, Iterable, Mapping, Sequence, TypeVar, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -42,7 +46,7 @@ DEFAULT_SYSTEM_PROMPT = build_music_prompt()
 DEFAULT_VIBE_FIELD = "vibe_original"
 DEFAULT_OUTPUT_DIR = Path("data_work/.benchmarks")
 DEFAULT_DURATION = 12.0
-DEFAULT_MAX_NEW_TOKENS = 512
+DEFAULT_MAX_NEW_TOKENS = 3000
 
 
 class BenchmarkSource(BaseModel):
@@ -74,6 +78,10 @@ class BenchmarkResult(BaseModel):
     clap_reward: float | None = None
     clap_details: ClapScore | None = None
     audio_path: str | None = None
+    elapsed_s: float | None = None
+    config_gen_s: float | None = None
+    audio_synth_s: float | None = None
+    success: bool = False
 
 
 class ModelSummary(BaseModel):
@@ -81,8 +89,39 @@ class ModelSummary(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    count: int
+    total: int
+    succeeded: int
+    failed: int
+    success_rate: float
     mean_clap_reward: float
+    mean_elapsed_s: float
+    mean_config_gen_s: float
+    mean_audio_synth_s: float
+
+
+class HumanEvalModelEntry(BaseModel):
+    """One model's output for a single vibe in the human-eval dataset."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_kind: str
+    config: dict[str, Any] | None = None
+    config_error: str | None = None
+    audio_path: str | None = None
+    clap_reward: float | None = None
+    success: bool = False
+
+
+class HumanEvalRow(BaseModel):
+    """One row of the human-eval dataset — one vibe, all models side-by-side."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vibe: str
+    id_in_dataset: str | int | None = None
+    dataset: str | None = None
+    split: str | None = None
+    models: dict[str, HumanEvalModelEntry]
 
 
 def parse_source_entries(values: Sequence[str], kind: str) -> list[BenchmarkSource]:
@@ -160,6 +199,18 @@ def _iter_rows(path: Path, limit: int, split: str | None) -> Iterable[dict[str, 
             break
 
 
+_SCHEMA_SECTION_RE = re.compile(r"\n*<schema>\n.*?\n</schema>", re.DOTALL)
+
+
+def _strip_schema_section(prompt: str) -> str:
+    """Remove <schema>...</schema> from the prompt.
+
+    LiteLLM models get the schema via ``response_format`` (structured output),
+    so embedding it in the prompt is redundant for large models.
+    """
+    return _SCHEMA_SECTION_RE.sub("", prompt).strip()
+
+
 async def _generate_litellm_payload(
     *,
     vibe: str,
@@ -170,7 +221,7 @@ async def _generate_litellm_payload(
     system_prompt: str,
 ) -> MusicConfigPromptPayload:
     messages = [
-        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": _strip_schema_section(system_prompt)},
         {"role": "user", "content": wrap_vibe_for_chat(vibe)},
     ]
     return await litellm_structured_completion(
@@ -183,6 +234,226 @@ async def _generate_litellm_payload(
     )
 
 
+T = TypeVar("T")
+
+
+def _split_rows(rows: list[T], n: int) -> list[list[T]]:
+    """Split rows into n roughly-equal chunks."""
+    k, remainder = divmod(len(rows), n)
+    chunks: list[list[T]] = []
+    start = 0
+    for i in range(n):
+        end = start + k + (1 if i < remainder else 0)
+        chunks.append(rows[start:end])
+        start = end
+    return chunks
+
+
+@dataclass
+class WorkerConfig:
+    """Picklable config for a worker process — no model objects, just primitives."""
+
+    worker_id: int
+    rows: list[dict[str, Any]]
+    sources: list[dict[str, Any]]  # BenchmarkSource.model_dump() list
+    system_prompt: str
+    duration: float
+    vibe_field: str
+    keep_audio: bool
+    audio_dir: str | None = None
+    clap_vibe_prefix: str = ""
+    # LiteLLM
+    api_key: str | None = None
+    model_kwargs: dict[str, Any] = field(default_factory=dict)
+    # Local model
+    local_device: str | None = None
+    local_max_new_tokens: int = DEFAULT_MAX_NEW_TOKENS
+    local_temperature: float = 0.0
+    local_force_cpu: bool = False
+    local_4bit: bool = False
+    local_no_int8: bool = False
+
+
+def _worker_fn(config: WorkerConfig) -> list[dict[str, Any]]:
+    """Run in a child process: init models, process chunk, return serializable results."""
+    worker_tag = f"worker-{config.worker_id}"
+    logger = logging.getLogger(f"data_work.clap_benchmark.{worker_tag}")
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+    sources = [BenchmarkSource(**s) for s in config.sources]
+
+    # --- init models per-worker ---
+    local_clients: dict[str, LocalHFClient] = {}
+    for source in sources:
+        if source.kind == "local":
+            assert source.model is not None
+            local_clients[source.label] = LocalHFClient(
+                source.model,
+                device=config.local_device,
+                max_new_tokens=config.local_max_new_tokens,
+                temperature=config.local_temperature,
+                force_cpu=config.local_force_cpu,
+                quantize_4bit=config.local_4bit,
+                no_int8=config.local_no_int8,
+            )
+
+    baseline_clients: dict[str, Any] = {}
+    baseline_sources = [s for s in sources if s.kind == "baseline"]
+    if baseline_sources:
+        from data_work.lib.baselines import get_baseline
+
+        for source in baseline_sources:
+            assert source.model is not None
+            baseline_clients[source.label] = get_baseline(source.model)
+
+    scorer = ClapScorer()
+
+    audio_dir = Path(config.audio_dir) if config.audio_dir else None
+    if config.keep_audio and audio_dir:
+        audio_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- process rows ---
+    results: list[dict[str, Any]] = []
+    for row_idx, row in enumerate(config.rows):
+        vibe = row.get(config.vibe_field)
+        if not isinstance(vibe, str) or not vibe.strip():
+            logger.warning("[%s] Skipping row without vibe text.", worker_tag)
+            continue
+        clap_vibe = f"{config.clap_vibe_prefix}{vibe}" if config.clap_vibe_prefix else vibe
+
+        for source in sources:
+            t0 = time.monotonic()
+            logger.info(
+                "[%s] row %d/%d [%s] vibe: %.60s...",
+                worker_tag,
+                row_idx + 1,
+                len(config.rows),
+                source.label,
+                vibe,
+            )
+            config_payload = None
+            error = None
+
+            try:
+                match source.kind:
+                    case "dataset":
+                        assert source.field is not None
+                        config_payload = _extract_config(row.get(source.field))
+                    case "litellm":
+                        assert source.model is not None
+                        payload = asyncio.run(
+                            _generate_litellm_payload(
+                                vibe=vibe,
+                                model=source.model,
+                                api_key=config.api_key,
+                                api_base=source.api_base,
+                                model_kwargs=config.model_kwargs,
+                                system_prompt=config.system_prompt,
+                            )
+                        )
+                        config_payload = payload.config.model_dump()
+                    case "local":
+                        client = local_clients[source.label]
+                        prompt = client.format_chat_prompt(
+                            system_prompt=config.system_prompt,
+                            user_prompt=wrap_vibe_for_chat(vibe),
+                        )
+                        payload = client.generate_structured(prompt, MusicConfigPromptPayload)
+                        config_payload = payload.config.model_dump()
+                    case "baseline":
+                        assert source.model is not None
+                        baseline = baseline_clients[source.label]
+                        baseline_payload = baseline.generate(vibe)
+                        config_payload = baseline_payload.config.model_dump()
+                    case _:
+                        error = f"Unsupported source kind: {source.kind}"
+            except Exception as exc:
+                error = str(exc)
+
+            t_config = time.monotonic() - t0
+
+            if config_payload is None:
+                results.append(
+                    BenchmarkResult(
+                        model=source.label,
+                        source_kind=source.kind,
+                        config_field=source.field,
+                        config_error=error or "missing_config",
+                        vibe=vibe,
+                        id_in_dataset=row.get("id_in_dataset"),
+                        dataset=row.get("dataset"),
+                        split=row.get("split"),
+                        elapsed_s=t_config,
+                        config_gen_s=t_config,
+                    ).model_dump()
+                )
+                continue
+
+            try:
+                t_synth_start = time.monotonic()
+                audio = _config_to_audio(config_payload, config.duration)
+                t_synth = time.monotonic() - t_synth_start
+
+                audio_record = None
+                if config.keep_audio and audio_dir:
+                    safe_label = _safe_filename(source.label)
+                    safe_id = _safe_filename(row.get("id_in_dataset") or "")
+                    audio_path = audio_dir / f"{row_idx:04d}_{safe_label}_{safe_id}.wav"
+                    write_wav(audio_path, audio)
+                    audio_file = str(audio_path)
+                    audio_record = audio_file
+                    clap_metrics = scorer.score(clap_vibe, audio_file)
+                else:
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        audio_path = Path(tmpdir) / "sample.wav"
+                        write_wav(audio_path, audio)
+                        audio_file = str(audio_path)
+                        clap_metrics = scorer.score(clap_vibe, audio_file)
+                elapsed = time.monotonic() - t0
+                logger.info(
+                    "[%s] [%s] done in %.1fs (config=%.1fs, synth=%.1fs)",
+                    worker_tag, source.label, elapsed, t_config, t_synth,
+                )
+                results.append(
+                    BenchmarkResult(
+                        model=source.label,
+                        source_kind=source.kind,
+                        config_field=source.field,
+                        vibe=vibe,
+                        id_in_dataset=row.get("id_in_dataset"),
+                        dataset=row.get("dataset"),
+                        split=row.get("split"),
+                        config=config_payload,
+                        clap_reward=clap_metrics.final_reward,
+                        clap_details=clap_metrics,
+                        audio_path=audio_record,
+                        elapsed_s=elapsed,
+                        config_gen_s=t_config,
+                        audio_synth_s=t_synth,
+                        success=True,
+                    ).model_dump()
+                )
+            except Exception as exc:
+                results.append(
+                    BenchmarkResult(
+                        model=source.label,
+                        source_kind=source.kind,
+                        config_field=source.field,
+                        config_error=str(exc),
+                        vibe=vibe,
+                        id_in_dataset=row.get("id_in_dataset"),
+                        dataset=row.get("dataset"),
+                        split=row.get("split"),
+                        config=config_payload,
+                        elapsed_s=time.monotonic() - t0,
+                        config_gen_s=t_config,
+                    ).model_dump()
+                )
+
+    logger.info("[%s] Finished processing %d rows.", worker_tag, len(config.rows))
+    return results
+
+
 def _write_results(path: Path, rows: Iterable[BenchmarkResult]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
@@ -190,20 +461,64 @@ def _write_results(path: Path, rows: Iterable[BenchmarkResult]) -> None:
             handle.write(row.model_dump_json() + "\n")
 
 
-def _summarize(results: Sequence[BenchmarkResult]) -> dict[str, ModelSummary]:
-    """Summarize benchmark results by model."""
-    by_model: dict[str, list[float]] = {}
-    for result in results:
-        if result.clap_reward is not None:
-            by_model.setdefault(result.model, []).append(result.clap_reward)
+def _mean_or_zero(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
 
-    return {
-        model: ModelSummary(
-            count=len(scores),
-            mean_clap_reward=sum(scores) / len(scores) if scores else 0.0,
+
+def _build_human_eval(results: Sequence[BenchmarkResult]) -> list[HumanEvalRow]:
+    """Pivot results into human-eval rows: one per vibe, all models side-by-side."""
+    rows: dict[str | int | None, HumanEvalRow] = {}
+    order: list[str | int | None] = []
+    for r in results:
+        key = r.id_in_dataset
+        if key not in rows:
+            order.append(key)
+            rows[key] = HumanEvalRow(
+                vibe=r.vibe,
+                id_in_dataset=r.id_in_dataset,
+                dataset=r.dataset,
+                split=r.split,
+                models={},
+            )
+        rows[key].models[r.model] = HumanEvalModelEntry(
+            source_kind=r.source_kind,
+            config=r.config,
+            config_error=r.config_error,
+            audio_path=r.audio_path,
+            clap_reward=r.clap_reward,
+            success=r.success,
         )
-        for model, scores in by_model.items()
-    }
+    return [rows[k] for k in order]
+
+
+def _summarize(results: Sequence[BenchmarkResult]) -> dict[str, ModelSummary]:
+    """Summarize benchmark results by model (only successful samples count for averages)."""
+    totals: dict[str, int] = {}
+    successes: dict[str, list[BenchmarkResult]] = {}
+
+    for result in results:
+        totals[result.model] = totals.get(result.model, 0) + 1
+        if result.success:
+            successes.setdefault(result.model, []).append(result)
+
+    summaries: dict[str, ModelSummary] = {}
+    for model, total in totals.items():
+        ok = successes.get(model, [])
+        succeeded = len(ok)
+        failed = total - succeeded
+        summaries[model] = ModelSummary(
+            total=total,
+            succeeded=succeeded,
+            failed=failed,
+            success_rate=succeeded / total if total else 0.0,
+            mean_clap_reward=_mean_or_zero([r.clap_reward for r in ok if r.clap_reward is not None]),
+            mean_elapsed_s=_mean_or_zero([r.elapsed_s for r in ok if r.elapsed_s is not None]),
+            mean_config_gen_s=_mean_or_zero([r.config_gen_s for r in ok if r.config_gen_s is not None]),
+            mean_audio_synth_s=_mean_or_zero(
+                [r.audio_synth_s for r in ok if r.audio_synth_s is not None]
+            ),
+        )
+    return summaries
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -266,7 +581,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--baseline",
         action="append",
         default=[],
-        help="Baseline type to benchmark (random, rule_based). Format: type[:label].",
+        help=(
+            "Baseline type to benchmark. Format: type[:label]. "
+            "Available: random, rule_based, mode, embedding_lookup. "
+            "embedding_lookup retrieves configs from a fixed synthetic dataset "
+            "(HF: guprab/latentscore-data), excluding TEST-split rows to prevent data leakage."
+        ),
     )
     parser.add_argument(
         "--system-prompt",
@@ -279,6 +599,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=DEFAULT_DURATION,
         help="Audio duration in seconds for each sample.",
+    )
+    parser.add_argument(
+        "--clap-vibe-prefix",
+        type=str,
+        default="",
+        help="Prefix prepended to vibe text for CLAP scoring (not config generation). "
+        "E.g. 'electronic music representing: '",
     )
     parser.add_argument(
         "--api-key",
@@ -325,15 +652,67 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--local-temperature",
         type=float,
-        default=0.0,
-        help="Sampling temperature for local models (0 = greedy).",
+        default=1.0,
+        help="Sampling temperature for local models (default: 1.0 per Unsloth Gemma 3 recommendations).",
+    )
+    parser.add_argument(
+        "--local-force-cpu",
+        action="store_true",
+        help="Force CPU inference for local models (ignore CUDA even if available).",
+    )
+    parser.add_argument(
+        "--local-4bit",
+        action="store_true",
+        help="Load local models with 4-bit NF4 quantization (requires CUDA + bitsandbytes).",
+    )
+    parser.add_argument(
+        "--local-no-int8",
+        action="store_true",
+        help="Disable automatic int8 quantization on Apple Silicon (use full float32).",
     )
     parser.add_argument(
         "--keep-audio",
         action="store_true",
         help="Keep generated audio files under output-dir/audio.",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Number of parallel worker processes. Each loads its own models. (default: 1 = sequential)",
+    )
     return parser
+
+
+def _build_worker_config(
+    *,
+    worker_id: int,
+    rows: list[dict[str, Any]],
+    sources: list[BenchmarkSource],
+    args: argparse.Namespace,
+    api_key: str | None,
+    model_kwargs: dict[str, Any],
+    audio_dir: Path | None,
+) -> WorkerConfig:
+    return WorkerConfig(
+        worker_id=worker_id,
+        rows=rows,
+        sources=[s.model_dump() for s in sources],
+        system_prompt=args.system_prompt,
+        duration=args.duration,
+        vibe_field=args.vibe_field,
+        keep_audio=args.keep_audio,
+        audio_dir=str(audio_dir) if audio_dir else None,
+        clap_vibe_prefix=args.clap_vibe_prefix,
+        api_key=api_key,
+        model_kwargs=model_kwargs,
+        local_device=args.local_device,
+        local_max_new_tokens=args.local_max_new_tokens,
+        local_temperature=args.local_temperature,
+        local_force_cpu=args.local_force_cpu,
+        local_4bit=args.local_4bit,
+        local_no_int8=args.local_no_int8,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -369,6 +748,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         raise SystemExit("--model-kwargs must be a JSON object.")
     model_kwargs = cast(dict[str, Any], model_kwargs)
 
+    # Normalize litellm model names + resolve API base
     litellm_models: list[tuple[str, str | None]] = []
     for source in litellm_sources:
         assert source.model is not None
@@ -383,145 +763,77 @@ def main(argv: Sequence[str] | None = None) -> None:
         models=litellm_models,
     )
 
-    local_clients: dict[str, LocalHFClient] = {}
-    for source in local_sources:
-        assert source.model is not None
-        local_clients[source.label] = LocalHFClient(
-            source.model,
-            device=args.local_device,
-            max_new_tokens=args.local_max_new_tokens,
-            temperature=args.local_temperature,
-        )
-
-    baseline_clients: dict[str, Any] = {}
+    # Emit embedding_lookup warnings from main process
     if baseline_sources:
-        from data_work.lib.baselines import get_baseline
+        from data_work.lib.baselines import EMBEDDING_LOOKUP_WARNING, is_embedding_lookup
 
         for source in baseline_sources:
             assert source.model is not None
-            baseline_clients[source.label] = get_baseline(source.model)
+            if is_embedding_lookup(source.model):
+                LOGGER.warning(EMBEDDING_LOOKUP_WARNING)
 
-    scorer = ClapScorer()
-    results: list[BenchmarkResult] = []
+    audio_dir = output_dir / "audio" if args.keep_audio else None
 
-    audio_dir = output_dir / "audio"
-    if args.keep_audio:
-        audio_dir.mkdir(parents=True, exist_ok=True)
+    # Collect all rows upfront (needed for splitting across workers)
+    all_rows = list(_iter_rows(input_path, args.limit, args.split))
+    LOGGER.info("Loaded %d rows to benchmark across %d source(s).", len(all_rows), len(sources))
 
-    for row in _iter_rows(input_path, args.limit, args.split):
-        vibe = row.get(args.vibe_field)
-        if not isinstance(vibe, str) or not vibe.strip():
-            LOGGER.warning("Skipping row without vibe text.")
-            continue
+    if not all_rows:
+        raise SystemExit("No rows matched the input/split/limit criteria.")
 
-        for source in sources:
-            config_payload = None
-            error = None
+    n_workers = min(args.workers, len(all_rows))
 
-            try:
-                match source.kind:
-                    case "dataset":
-                        assert source.field is not None
-                        config_payload = _extract_config(row.get(source.field))
-                    case "litellm":
-                        assert source.model is not None
-                        payload = asyncio.run(
-                            _generate_litellm_payload(
-                                vibe=vibe,
-                                model=source.model,
-                                api_key=api_key,
-                                api_base=source.api_base,
-                                model_kwargs=model_kwargs,
-                                system_prompt=args.system_prompt,
-                            )
-                        )
-                        config_payload = payload.config.model_dump()
-                    case "local":
-                        client = local_clients[source.label]
-                        prompt = client.format_chat_prompt(
-                            system_prompt=args.system_prompt,
-                            user_prompt=wrap_vibe_for_chat(vibe),
-                        )
-                        payload = client.generate_structured(prompt, MusicConfigPromptPayload)
-                        config_payload = payload.config.model_dump()
-                    case "baseline":
-                        assert source.model is not None
-                        baseline = baseline_clients[source.label]
-                        baseline_payload = baseline.generate(vibe)
-                        config_payload = baseline_payload.config.model_dump()
-                    case _:
-                        error = f"Unsupported source kind: {source.kind}"
-            except Exception as exc:
-                error = str(exc)
+    if n_workers <= 1:
+        # --- Single-process path (no multiprocessing overhead) ---
+        wc = _build_worker_config(
+            worker_id=0,
+            rows=all_rows,
+            sources=sources,
+            args=args,
+            api_key=api_key,
+            model_kwargs=model_kwargs,
+            audio_dir=audio_dir,
+        )
+        raw_results = _worker_fn(wc)
+    else:
+        # --- Multi-process path ---
+        LOGGER.info("Spawning %d worker processes...", n_workers)
+        chunks = _split_rows(all_rows, n_workers)
+        worker_configs = [
+            _build_worker_config(
+                worker_id=i,
+                rows=chunk,
+                sources=sources,
+                args=args,
+                api_key=api_key,
+                model_kwargs=model_kwargs,
+                audio_dir=audio_dir,
+            )
+            for i, chunk in enumerate(chunks)
+        ]
+        with multiprocessing.Pool(processes=n_workers) as pool:
+            chunk_results = pool.map(_worker_fn, worker_configs)
+        raw_results = [r for chunk in chunk_results for r in chunk]
 
-            if config_payload is None:
-                results.append(
-                    BenchmarkResult(
-                        model=source.label,
-                        source_kind=source.kind,
-                        config_field=source.field,
-                        config_error=error or "missing_config",
-                        vibe=vibe,
-                        id_in_dataset=row.get("id_in_dataset"),
-                        dataset=row.get("dataset"),
-                        split=row.get("split"),
-                    )
-                )
-                continue
-
-            try:
-                audio = _config_to_audio(config_payload, args.duration)
-                audio_record = None
-                if args.keep_audio:
-                    safe_label = _safe_filename(source.label)
-                    safe_id = _safe_filename(row.get("id_in_dataset"))
-                    audio_path = audio_dir / f"{safe_label}_{safe_id}.wav"
-                    write_wav(audio_path, audio)
-                    audio_file = str(audio_path)
-                    audio_record = audio_file
-                    clap_metrics = scorer.score(vibe, audio_file)
-                else:
-                    with tempfile.TemporaryDirectory() as tmpdir:
-                        audio_path = Path(tmpdir) / "sample.wav"
-                        write_wav(audio_path, audio)
-                        audio_file = str(audio_path)
-                        clap_metrics = scorer.score(vibe, audio_file)
-                results.append(
-                    BenchmarkResult(
-                        model=source.label,
-                        source_kind=source.kind,
-                        config_field=source.field,
-                        vibe=vibe,
-                        id_in_dataset=row.get("id_in_dataset"),
-                        dataset=row.get("dataset"),
-                        split=row.get("split"),
-                        config=config_payload,
-                        clap_reward=clap_metrics.final_reward,
-                        clap_details=clap_metrics,
-                        audio_path=audio_record,
-                    )
-                )
-            except Exception as exc:
-                results.append(
-                    BenchmarkResult(
-                        model=source.label,
-                        source_kind=source.kind,
-                        config_field=source.field,
-                        config_error=str(exc),
-                        vibe=vibe,
-                        id_in_dataset=row.get("id_in_dataset"),
-                        dataset=row.get("dataset"),
-                        split=row.get("split"),
-                        config=config_payload,
-                    )
-                )
-
+    # Strip computed fields that don't survive Pydantic round-trip (ClapScore.final_score)
+    for r in raw_results:
+        if isinstance(r.get("clap_details"), dict):
+            r["clap_details"].pop("final_score", None)
+    results = [BenchmarkResult(**r) for r in raw_results]
     _write_results(output_path, results)
     summary = _summarize(results)
-    summary_dict = {model: stats.model_dump() for model, stats in summary.items()}
+    summary_dict = {model_name: stats.model_dump() for model_name, stats in summary.items()}
     summary_path.write_text(json.dumps(summary_dict, indent=2) + "\n", encoding="utf-8")
-    LOGGER.info("Wrote results to %s", output_path)
+    # Write human-eval dataset (pivoted: one row per vibe, all models side-by-side)
+    human_eval_path = output_dir / "human_eval.jsonl"
+    human_eval_rows = _build_human_eval(results)
+    with human_eval_path.open("w", encoding="utf-8") as f:
+        for row in human_eval_rows:
+            f.write(row.model_dump_json() + "\n")
+
+    LOGGER.info("Wrote %d results to %s", len(results), output_path)
     LOGGER.info("Wrote summary to %s", summary_path)
+    LOGGER.info("Wrote %d human-eval rows to %s", len(human_eval_rows), human_eval_path)
 
 
 if __name__ == "__main__":
