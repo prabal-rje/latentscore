@@ -1,6 +1,6 @@
 # LatentScore
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/guprab/latentscore/blob/main/notebooks/quickstart.ipynb)
+[![Try in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart.ipynb)
 
 **Generate ambient music from text. Locally. No GPU required.**
 
