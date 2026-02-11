@@ -1,5 +1,7 @@
 # LatentScore
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/guprab/latentscore/blob/main/notebooks/quickstart.ipynb)
+
 **Generate ambient music from text. Locally. No GPU required.**
 
 ```python
@@ -10,9 +12,7 @@ ls.render("warm sunset over water").play()
 
 That's it. One line. You get audio playing on your speakers.
 
-> **Alpha** &mdash; under active development. API may change between versions. [Read more about how it works](https://substack.com/home/post/p-184245090).
-
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/guprab/latentscore/blob/main/notebooks/quickstart.ipynb)
+> ⚠️ **Alpha** &mdash; under active development. API may change between versions. [Read more about how it works](https://substack.com/home/post/p-184245090).
 
 ---
 
