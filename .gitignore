@@ -104,3 +104,4 @@ human_eval_app/
 # --- Extraneous files containing info. for LLM context ---
 llm_files/
 submissions/
+gemma-3-270m-it/

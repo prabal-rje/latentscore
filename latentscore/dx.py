@@ -170,7 +170,7 @@ class Playlist(BaseModel):
         fallback: FallbackInput | None = None,
         fallback_model: ModelSpec = "fast",
         hooks: StreamHooks | None = None,
-        queue_maxsize: int = 0,
+        queue_maxsize: int = 1,
     ) -> AudioStream:
         items = [track.to_streamable() for track in self.tracks]
         return _stream_from_items(
@@ -224,7 +224,7 @@ class LiveStream:
         fallback: FallbackInput | None = None,
         fallback_model: ModelSpec = "fast",
         hooks: StreamHooks | None = None,
-        queue_maxsize: int = 0,
+        queue_maxsize: int = 1,
         sample_rate: int = SAMPLE_RATE,
     ) -> None:
         self._source: _NormalizedSource = self._normalize_source(source)
@@ -531,7 +531,7 @@ def stream(
     fallback: FallbackInput | None = None,
     fallback_model: ModelSpec = "fast",
     hooks: StreamHooks | None = None,
-    queue_maxsize: int = 0,
+    queue_maxsize: int = 1,
 ) -> AudioStream:
     items_list = _normalize_items(items)
     stream_items = _coerce_stream_items(items_list, duration=duration, transition=transition)
@@ -705,7 +705,7 @@ def live(
     fallback: FallbackInput | None = None,
     fallback_model: ModelSpec = "fast",
     hooks: StreamHooks | None = None,
-    queue_maxsize: int = 0,
+    queue_maxsize: int = 1,
     sample_rate: int = SAMPLE_RATE,
 ) -> LiveStream:
     return LiveStream(
