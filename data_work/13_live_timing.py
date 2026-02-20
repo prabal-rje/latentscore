@@ -12,6 +12,7 @@ Run:
 
 import argparse
 import asyncio
+import threading
 import time
 from collections.abc import AsyncIterator
 
@@ -95,8 +96,8 @@ async def performance() -> AsyncIterator[str | ls.MusicConfigUpdate]:
     Yields vibes and config updates; sleeps control how long each
     segment plays before the next yield.
     """
-    print(f"[{_ts()}]  yield: \"warm jazz cafe at midnight\"")
-    yield "warm jazz cafe at midnight"
+    print(f"[{_ts()}]  yield: \"tension over a treasured object\"")
+    yield "tension over a treasured object"
 
     await asyncio.sleep(8)
 
@@ -106,8 +107,8 @@ async def performance() -> AsyncIterator[str | ls.MusicConfigUpdate]:
 
     await asyncio.sleep(8)
 
-    print(f"[{_ts()}]  yield: \"neon rain on empty streets\"")
-    yield "neon rain on empty streets"
+    print(f"[{_ts()}]  yield: \"happy day\"")
+    yield "happy day"
 
 
 # ── main ─────────────────────────────────────────────────────────────
@@ -130,7 +131,7 @@ def main() -> None:
         help="LiteLLM model string or built-in name (default: gemini/gemini-3-flash-preview)",
     )
     parser.add_argument(
-        "--seconds", type=float, default=60.0,
+        "--seconds", type=float, default=45.0,
         help="Total playback duration (default: 60)",
     )
     args = parser.parse_args()
@@ -145,10 +146,19 @@ def main() -> None:
     session = ls.live(
         performance(),
         model=model,
-        transition_seconds=2.0,
+        transition_seconds=6.0,
         hooks=hooks,
-        queue_maxsize=1,
+        queue_maxsize=2,
     )
+
+    heartbeat_stop = threading.Event()
+
+    def _heartbeat() -> None:
+        while not heartbeat_stop.wait(5.0):
+            print(f"[{_ts()}]  ♪ playing ...")
+
+    heartbeat_thread = threading.Thread(target=_heartbeat, daemon=True)
+    heartbeat_thread.start()
 
     if args.save:
         path = session.save(args.save, seconds=args.seconds)

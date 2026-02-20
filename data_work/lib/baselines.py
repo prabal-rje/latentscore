@@ -99,6 +99,7 @@ _TITLE_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9']+")
 _DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 _DEFAULT_EMBED_MAP_REPO = "guprab/latentscore-data"
 _DEFAULT_EMBED_MAP_FILE = "2026-01-26_scored/vibe_and_embeddings_to_config_map.jsonl"
+_DEFAULT_CLAP_EMBED_MAP_FILE = "2026-01-26_scored/vibe_and_clap_audio_embeddings_to_config_map.jsonl"
 
 
 def _make_title(vibe: str) -> str:
@@ -709,6 +710,200 @@ class EmbeddingLookupBaseline(ConfigBaseline):
 
 
 # ---------------------------------------------------------------------------
+# CLAP audio-embedding lookup baseline (fast_heavy tier)
+# ---------------------------------------------------------------------------
+
+
+class _ClapEmbeddingLookupIndex:
+    """Index that matches text queries against pre-computed CLAP audio embeddings."""
+
+    def __init__(self, *, embed_map_path: Path) -> None:
+        self._embed_map_path = embed_map_path
+        self._clap: Any | None = None
+        self._examples: list[_RetrievalExample] = []
+        self._matrix: Any | None = None
+
+    def warmup(self) -> None:
+        _ = self._load()
+
+    def lookup(self, vibe: str) -> _RetrievalExample:
+        index = self._load()
+        return index._lookup_impl(vibe)
+
+    def _load_clap(self) -> Any:
+        if self._clap is not None:
+            return self._clap
+        try:
+            import laion_clap  # type: ignore[import]
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError("laion-clap is required for CLAP embedding baseline.") from exc
+        model = laion_clap.CLAP_Module(enable_fusion=False)
+        model.load_ckpt()
+        self._clap = model
+        return model
+
+    def _load(self) -> "_ClapEmbeddingLookupIndex":
+        if self._matrix is not None and self._examples:
+            return self
+
+        import numpy as np
+        from pydantic import ValidationError
+
+        palette_fallback = RandomConfigBaseline(seed=42)
+
+        examples: list[_RetrievalExample] = []
+        embeddings: list[list[float]] = []
+
+        with self._embed_map_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    row_obj: object = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(row_obj, dict):
+                    continue
+                row = cast(dict[str, Any], row_obj)
+
+                # Exclude TEST split to prevent data leakage.
+                split = row.get("split")
+                if isinstance(split, str) and split.upper() == "TEST":
+                    continue
+
+                vibe_value = row.get("vibe_original") or row.get("vibe") or row.get("vibe_noisy")
+                config_value = row.get("config")
+                embed_value = row.get("clap_audio_embedding")
+                if not isinstance(vibe_value, str) or not vibe_value.strip():
+                    continue
+                if not isinstance(config_value, dict):
+                    continue
+                if not isinstance(embed_value, list):
+                    continue
+
+                try:
+                    config = MusicConfigPrompt.model_validate(config_value)
+                except ValidationError:
+                    continue
+
+                palettes_value = row.get("palettes")
+                palettes: list[Palette] = []
+                if isinstance(palettes_value, list):
+                    palettes_list = cast(list[Any], palettes_value)
+                    for item in palettes_list:
+                        if not isinstance(item, dict):
+                            palettes = []
+                            break
+                        try:
+                            palettes.append(Palette.model_validate(item))
+                        except ValidationError:
+                            palettes = []
+                            break
+
+                if len(palettes) != 3:
+                    palettes = [palette_fallback.random_palette() for _ in range(3)]
+
+                try:
+                    embed_list = cast(list[Any], embed_value)
+                    embeddings.append([float(x) for x in embed_list])
+                except (TypeError, ValueError):
+                    continue
+
+                examples.append(
+                    _RetrievalExample(vibe=vibe_value, config=config, palettes=palettes)
+                )
+
+        if not examples:
+            raise RuntimeError(
+                f"No usable examples found in CLAP embedding map: {self._embed_map_path}"
+            )
+
+        mat = np.asarray(embeddings, dtype=np.float32)
+        norms = np.linalg.norm(mat, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        matrix = mat / norms
+
+        self._examples = examples
+        self._matrix = matrix
+        return self
+
+    def _lookup_impl(self, vibe: str) -> _RetrievalExample:
+        if self._matrix is None or not self._examples:
+            self._load()
+        assert self._matrix is not None
+        assert self._examples
+
+        import numpy as np
+
+        clap = self._load_clap()
+        text_embed = clap.get_text_embedding([vibe])
+        query_vec = np.asarray(text_embed[0], dtype=np.float32)
+        norm = float(np.linalg.norm(query_vec))
+        if norm > 0:
+            query_vec = query_vec / norm
+        scores = self._matrix @ query_vec
+        best_idx = int(np.argmax(scores))
+        return self._examples[best_idx]
+
+
+def _resolve_clap_embed_map_path() -> Path:
+    explicit = os.environ.get("LATENTSCORE_CLAP_EMBED_MAP", "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+
+    repo = os.environ.get("LATENTSCORE_CLAP_EMBED_MAP_REPO", _DEFAULT_EMBED_MAP_REPO)
+    filename = os.environ.get("LATENTSCORE_CLAP_EMBED_MAP_FILE", _DEFAULT_CLAP_EMBED_MAP_FILE)
+
+    try:
+        from huggingface_hub import hf_hub_download  # type: ignore[import]
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError(
+            "huggingface_hub is required to download the CLAP embedding map."
+        ) from exc
+
+    base_dir = Path(os.environ.get("LATENTSCORE_MODEL_DIR", "")).expanduser()
+    if not base_dir:
+        base_dir = Path.home() / ".cache" / "latentscore" / "models"
+    cache_dir = base_dir / "datasets"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    return Path(
+        hf_hub_download(
+            repo_id=repo,
+            repo_type="dataset",
+            filename=filename,
+            cache_dir=str(cache_dir),
+        )
+    )
+
+
+@functools.lru_cache(maxsize=1)
+def _get_clap_retrieval_index() -> _ClapEmbeddingLookupIndex:
+    return _ClapEmbeddingLookupIndex(embed_map_path=_resolve_clap_embed_map_path())
+
+
+class ClapEmbeddingLookupBaseline(ConfigBaseline):
+    """Nearest-neighbor lookup using CLAP audio embeddings (fast_heavy tier).
+
+    Matches input text against pre-computed CLAP audio embeddings of rendered
+    configs, so the similarity captures what configs *sound* like rather than
+    comparing text-to-text.
+    """
+
+    def __init__(self) -> None:
+        self._index = _get_clap_retrieval_index()
+
+    def generate(self, vibe: str) -> MusicConfigPromptPayload:
+        example = self._index.lookup(vibe)
+        return MusicConfigPromptPayload(
+            thinking="CLAP audio-embedding retrieval from rendered configs (fast_heavy tier).",
+            title=_make_title(vibe),
+            config=example.config,
+            palettes=example.palettes,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Interpolated embedding baseline: top-K blending
 # ---------------------------------------------------------------------------
 
@@ -1032,9 +1227,12 @@ BASELINES: dict[str, type[ConfigBaseline]] = {
     "embedding_lookup": EmbeddingLookupBaseline,
     "embedding_interp": EmbeddingInterpBaseline,
     "semantic_match": SemanticMatchBaseline,
+    "clap_embedding_lookup": ClapEmbeddingLookupBaseline,
 }
 
-_EMBEDDING_LOOKUP_NAMES = frozenset({"retrieval", "embedding_lookup", "embedding_interp"})
+_EMBEDDING_LOOKUP_NAMES = frozenset({
+    "retrieval", "embedding_lookup", "embedding_interp", "clap_embedding_lookup",
+})
 
 EMBEDDING_LOOKUP_WARNING = (
     "The embedding_lookup baseline retrieves configs from a fixed synthetic dataset "
