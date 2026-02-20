@@ -239,7 +239,7 @@ if audio.metadata is not None:
         print([c.hex for c in palette.colors])
 ```
 
-> **Note:** LLM models are slower than the default `fast` model (network round-trips) and can occasionally produce invalid configs. The `fast` model is recommended for production use.
+> **Note:** LLM models are slower than the default `fast` model (network round-trips) and can occasionally produce invalid configs. The `fast` and `fast_heavy` models are recommended for production use.
 
 ---
 
@@ -249,7 +249,13 @@ You give LatentScore a **vibe** (a short text description) and it generates ambi
 
 Under the hood, the default `fast` model uses **embedding-based retrieval**: your vibe text gets embedded with a sentence transformer, then matched against a curated library of 10,000+ music configurations using cosine similarity. The best-matching config drives a real-time audio synthesizer.
 
-This approach is **instant** (sub-second), **100% reliable** (no LLM hallucinations), and produces the highest-quality results. Our [CLAP benchmarks](https://huggingface.co/datasets/guprab/latentscore-clap-benchmark) showed that embedding retrieval outperforms Claude Opus 4.5 and Gemini 3 Flash at mapping vibes to music configurations.
+The `fast_heavy` model uses **LAION-CLAP audio embeddings** instead: your vibe text is encoded with CLAP's text encoder and matched against pre-computed CLAP audio embeddings of each config's rendered audio. This matches text against what configs actually *sound* like, rather than comparing text-to-text.
+
+```python
+ls.render("warm sunset over water", model="fast_heavy").play()
+```
+
+Both approaches are **instant** (sub-second), **100% reliable** (no LLM hallucinations), and produce high-quality results. Our [CLAP benchmarks](https://huggingface.co/datasets/guprab/latentscore-clap-benchmark) showed that embedding retrieval outperforms Claude Opus 4.5 and Gemini 3 Flash at mapping vibes to music configurations.
 
 ---
 
@@ -306,7 +312,7 @@ Every `MusicConfig` field uses human-readable labels. Full reference:
 
 ### Local LLM (Expressive Mode)
 
-> **Not recommended.** The default `fast` model is faster, more reliable, and produces higher-quality results. Expressive mode exists for experimentation only.
+> **Not recommended.** The default `fast` and `fast_heavy` models are faster, more reliable, and produce higher-quality results. Expressive mode exists for experimentation only.
 
 Runs a 270M-parameter Gemma 3 LLM locally. On macOS Apple Silicon, inference uses MLX (~5&ndash;15s). On CPU-only Linux/Windows, it uses transformers (30&ndash;120s per render). The local model can produce invalid configs and our benchmarks showed it barely outperforms a random baseline.
 

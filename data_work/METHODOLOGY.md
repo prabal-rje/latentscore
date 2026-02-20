@@ -499,6 +499,40 @@ the embedding export.
 - Output rows include: `vibe_original`, `embedding`, `title`, `config`, `palettes`,
   plus dataset metadata (`dataset`, `id_in_dataset`, `split`).
 
+### 2.6 CLAP Audio Embedding Export
+
+**Script:** `data_work/14_export_clap_embedding_map.py`
+
+**Input:** `data_work/2026-01-26_scored/vibe_and_embeddings_to_config_map.jsonl` (10,558 rows)
+**Output:** `data_work/2026-01-26_scored/vibe_and_clap_audio_embeddings_to_config_map.jsonl`
+
+**Purpose:** Build a CLAP audio embedding lookup table for the `fast_heavy` model.
+Unlike the `fast` model (MiniLM text-to-text matching), `fast_heavy` matches input
+text against CLAP audio embeddings of what each config *sounds* like.
+
+**Per-row pipeline:**
+1. Parse config dict → `MusicConfigPrompt` → `MusicConfig` → `SynthConfig`
+2. `assemble(synth_config, duration=45.0)` → numpy audio array
+3. Write to temp WAV via `write_wav()`
+4. `clap_model.get_audio_embedding_from_filelist([wav_path])` → [1, 512]
+5. L2-normalize embedding
+6. Write output row with `clap_audio_embedding` field (512-dim float32 list)
+
+**Command (2026-02-19):**
+```bash
+python -m data_work.14_export_clap_embedding_map \
+  --workers 7 --duration 45 --resume
+```
+
+**Status:** [x] Complete (2026-02-19)
+
+**Results:**
+- 10,558 rows processed in ~21 minutes (7 workers, 45s audio, 0.12s/row)
+- Output: 136MB JSONL with 512-dim CLAP audio embeddings
+- Uploaded to HuggingFace: `guprab/latentscore-data` under `2026-01-26_scored/`
+
+---
+
 **Reward weights:**
 | Component | Weight | Description |
 |-----------|--------|-------------|
@@ -658,6 +692,7 @@ Track actual runs here as they complete.
 | 2026-01-26 | 02b | `02b_generate_configs --num-candidates 5 --max-concurrency 500` | `data_work/2026-01-26_processed` | Gemini Flash, N=5, ~$230 cost |
 | 2026-01-26 | 02c | `02c_score_configs --scorers clap` | `data_work/2026-01-26_scored` | ~9 hours, Best-of-5 +28% improvement |
 | 2026-02-10 | 04 | `04_clap_benchmark` (6 sources, 200 rows, no prefix, --keep-audio) | `data_work/.experiments/eval_assets/clap_200row_final_noprefix/` | embedding_lookup best (0.1628), sft_finetuned ~ random. [HF dataset](https://huggingface.co/datasets/guprab/latentscore-clap-benchmark) |
+| 2026-02-19 | 14 | `14_export_clap_embedding_map --workers 7 --duration 45` | `data_work/2026-01-26_scored/vibe_and_clap_audio_embeddings_to_config_map.jsonl` | 10,558 rows, 512-dim CLAP audio embeddings, 136MB. Uploaded to HF. |
 
 ---
 
@@ -684,3 +719,4 @@ Document key decisions made during the process.
 | Embedding lookup as production model | CLAP benchmark (2026-02-10) showed simple retrieval (0.1628) outperforms all LLM-based approaches including Gemini Flash (0.1576), Opus 4.5 (0.1367), and SFT fine-tuned Gemma 3 (0.1401). Fast (1.2s/row), 100% success rate, no API costs. | 2026-02-10 |
 | No CLAP prefix for evaluation | Adding "electronic music representing: " prefix compresses score distribution and reduces discriminative power between sources (10.2% vs 23.4% relative gap). Raw vibe text gives clearer signal. | 2026-02-10 |
 | Gemma 3 inference: Unsloth defaults | Per Gemma 3 team / Unsloth: temp=1.0, top_k=64, top_p=0.95, repetition_penalty=1.0. Previous arbitrary settings (temp=0.2, rep_penalty=1.35) were not tuned for this model. | 2026-02-10 |
+| `fast_heavy` model (CLAP audio embeddings) | CLAP text-to-audio matching captures what configs *sound* like, not just what the vibe text says. Uses LAION-CLAP 512-dim embeddings. `laion-clap` + `torchvision` added as required deps. | 2026-02-19 |

@@ -25,6 +25,8 @@ dependencies = [
     "transformers>=4.57.0,<5",
     "tokenizers>=0.20.0",
     "sentencepiece",
+    "laion-clap",
+    "torchvision",
 ]
 
 [project.optional-dependencies]

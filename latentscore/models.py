@@ -126,6 +126,8 @@ def _sanitize_payload_json(raw: str) -> str:
 ModelChoice = Literal[
     "fast",
     "fast_no_test",
+    "fast_heavy",
+    "fast_heavy_no_test",
     "interp",
     "interp_no_test",
     "semantic",
@@ -136,6 +138,8 @@ ModelChoice = Literal[
 MODEL_CHOICES: tuple[ModelChoice, ...] = (
     "fast",
     "fast_no_test",
+    "fast_heavy",
+    "fast_heavy_no_test",
     "interp",
     "interp_no_test",
     "semantic",
@@ -190,6 +194,14 @@ _EMBED_MAP_REPO = os.environ.get(
 _EMBED_MAP_FILE = os.environ.get(
     "LATENTSCORE_EMBED_MAP_FILE",
     "2026-01-26_scored/vibe_and_embeddings_to_config_map.jsonl",
+)
+_CLAP_EMBED_MAP_REPO = os.environ.get(
+    "LATENTSCORE_CLAP_EMBED_MAP_REPO",
+    "guprab/latentscore-data",
+)
+_CLAP_EMBED_MAP_FILE = os.environ.get(
+    "LATENTSCORE_CLAP_EMBED_MAP_FILE",
+    "2026-01-26_scored/vibe_and_clap_audio_embeddings_to_config_map.jsonl",
 )
 _LOGGER = logging.getLogger("latentscore.models")
 _chat_role_warning_emitted = False
@@ -886,6 +898,166 @@ class FastEmbeddingModel:
                 "Failed to download embedding map (%s/%s): %s",
                 _EMBED_MAP_REPO,
                 _EMBED_MAP_FILE,
+                exc,
+                exc_info=True,
+            )
+            return None
+
+
+# ---------------------------------------------------------------------------
+# CLAP audio-embedding model: text-to-audio nearest-neighbor
+# ---------------------------------------------------------------------------
+
+
+class FastHeavyModel:
+    """CLAP audio-embedding backed config selection.
+
+    At query time, encodes the input vibe text via CLAP text encoder,
+    then finds the nearest neighbor among pre-computed CLAP audio embeddings.
+    This matches text semantics against actual rendered audio characteristics.
+    """
+
+    def __init__(
+        self,
+        *,
+        exclude_splits: frozenset[str] = frozenset(),
+    ) -> None:
+        self._exclude_splits = exclude_splits
+
+    def warmup(self) -> None:
+        _ = self._example_matrix()
+
+    async def generate(self, vibe: str) -> MusicConfig:
+        try:
+            return await asyncio.to_thread(self._embed_and_select, vibe)
+        except Exception as exc:  # pragma: no cover - runtime fallback
+            _LOGGER.warning("FastHeavy model fallback: %s", exc, exc_info=True)
+            return _heuristic_config(vibe)
+
+    @functools.lru_cache(maxsize=1)
+    def _load_clap(self) -> Any:
+        try:
+            import laion_clap  # type: ignore[import]
+        except ImportError as exc:
+            raise ModelNotAvailableError(
+                "laion-clap is not installed. Install via: pip install laion-clap"
+            ) from exc
+
+        model = laion_clap.CLAP_Module(enable_fusion=False)
+        model.load_ckpt()
+        return model
+
+    @functools.lru_cache(maxsize=1)
+    def _examples(self) -> tuple[ExampleConfig, ...]:
+        examples, _ = self._clap_embed_map_examples()
+        return examples
+
+    @functools.lru_cache(maxsize=1)
+    def _example_matrix(self) -> NDArray[np.float32]:
+        examples, embed_matrix = self._clap_embed_map_examples()
+        if embed_matrix is not None:
+            return embed_matrix
+        raise ModelNotAvailableError(
+            "CLAP audio embedding map not available. "
+            "Download it or set LATENTSCORE_CLAP_EMBED_MAP to a local path."
+        )
+
+    def _embed_and_select(self, vibe: str) -> MusicConfig:
+        clap = self._load_clap()
+        example_matrix = self._example_matrix()
+        query = clap.get_text_embedding([vibe])
+        query_vec = np.asarray(query, dtype=np.float32)[0]
+        norm = np.linalg.norm(query_vec)
+        if norm > 0:
+            query_vec = query_vec / norm
+        scores = example_matrix @ query_vec
+        best_idx = int(np.argmax(scores))
+        return self._examples()[best_idx].config
+
+    @functools.lru_cache(maxsize=1)
+    def _clap_embed_map_examples(
+        self,
+    ) -> tuple[tuple[ExampleConfig, ...], NDArray[np.float32] | None]:
+        map_path = self._resolve_clap_embed_map_path()
+        if map_path is None or not map_path.exists():
+            _LOGGER.warning("CLAP embedding map not found; fast_heavy unavailable.")
+            return (), None
+
+        examples: list[ExampleConfig] = []
+        embeddings: list[list[float]] = []
+        try:
+            with map_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if self._exclude_splits and row.get("split") in self._exclude_splits:
+                        continue
+                    vibe = row.get("vibe_original") or row.get("vibe") or row.get("vibe_noisy")
+                    config = row.get("config")
+                    if not vibe or not isinstance(config, dict):
+                        continue
+                    try:
+                        prompt_config = MusicConfigPrompt.model_validate(config)
+                        music_config = prompt_config.to_config()
+                    except ValidationError:
+                        try:
+                            music_config = MusicConfig.model_validate(config)
+                        except ValidationError:
+                            continue
+                    examples.append(ExampleConfig(vibe=str(vibe), config=music_config))
+                    embed: object = row.get("clap_audio_embedding")
+                    if isinstance(embed, list):
+                        embeddings.append([float(v) for v in cast(list[Any], embed)])
+        except OSError as exc:  # pragma: no cover - filesystem edge case
+            _LOGGER.warning("Failed reading CLAP embedding map: %s", exc, exc_info=True)
+            return (), None
+
+        if not examples:
+            return (), None
+
+        matrix: NDArray[np.float32] | None = None
+        if len(embeddings) == len(examples):
+            mat = np.asarray(embeddings, dtype=np.float32)
+            norms = np.linalg.norm(mat, axis=1, keepdims=True)
+            norms[norms == 0] = 1.0
+            matrix = mat / norms
+        return tuple(examples), matrix
+
+    def _resolve_clap_embed_map_path(self) -> Path | None:
+        explicit = os.environ.get("LATENTSCORE_CLAP_EMBED_MAP", "").strip()
+        if explicit:
+            return Path(explicit).expanduser()
+
+        try:
+            from huggingface_hub import hf_hub_download  # type: ignore[import]
+        except ImportError as exc:
+            _LOGGER.warning("huggingface_hub not installed: %s", exc, exc_info=True)
+            return None
+
+        base_dir = Path(os.environ.get("LATENTSCORE_MODEL_DIR", "")).expanduser()
+        if not base_dir:
+            base_dir = Path.home() / ".cache" / "latentscore" / "models"
+        cache_dir = base_dir / "datasets"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            return Path(
+                hf_hub_download(
+                    repo_id=_CLAP_EMBED_MAP_REPO,
+                    repo_type="dataset",
+                    filename=_CLAP_EMBED_MAP_FILE,
+                    cache_dir=str(cache_dir),
+                )
+            )
+        except Exception as exc:  # pragma: no cover - network/IO errors
+            _LOGGER.warning(
+                "Failed to download CLAP embedding map (%s/%s): %s",
+                _CLAP_EMBED_MAP_REPO,
+                _CLAP_EMBED_MAP_FILE,
                 exc,
                 exc_info=True,
             )
@@ -1612,6 +1784,10 @@ def _resolve_builtin_model(choice: ModelChoice) -> ModelForGeneratingMusicConfig
             return FastEmbeddingModel()
         case "fast_no_test":
             return FastEmbeddingModel(exclude_splits=frozenset({"TEST"}))
+        case "fast_heavy":
+            return FastHeavyModel()
+        case "fast_heavy_no_test":
+            return FastHeavyModel(exclude_splits=frozenset({"TEST"}))
         case "interp":
             return InterpEmbeddingModel()
         case "interp_no_test":
@@ -1666,13 +1842,24 @@ def resolve_model(
                 | "local"
                 | "fast"
                 | "fast_no_test"
+                | "fast_heavy"
+                | "fast_heavy_no_test"
                 | "interp"
                 | "interp_no_test"
                 | "semantic"
             ):
                 primary = _resolve_builtin_model(model)
                 if (
-                    model not in ("fast", "fast_no_test", "interp", "interp_no_test", "semantic")
+                    model
+                    not in (
+                        "fast",
+                        "fast_no_test",
+                        "fast_heavy",
+                        "fast_heavy_no_test",
+                        "interp",
+                        "interp_no_test",
+                        "semantic",
+                    )
                     and _fast_fallback_enabled()
                 ):
                     return _FallbackModel(primary=primary, fallback=_resolve_builtin_model("fast"))

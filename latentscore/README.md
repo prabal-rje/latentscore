@@ -22,7 +22,8 @@ audio.save(".examples/quickstart.wav")
 
 ## Models
 
-- `"fast"` (default): local embedding model
+- `"fast"` (default): MiniLM text-embedding retrieval (384-dim, sub-second)
+- `"fast_heavy"`: LAION-CLAP audio-embedding retrieval (512-dim, matches text against rendered audio)
 - `"expressive"` / `"local"`: local LLM (CUDA where available; otherwise CPU)
 - `"external:<model-name>"`: LiteLLM adapter shorthand
 

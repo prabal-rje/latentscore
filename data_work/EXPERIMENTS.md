@@ -217,6 +217,19 @@ conda run -n latentscore-data python -m data_work.10_export_embedding_map \
 Outputs:
 - `data_work/2026-01-26_scored/vibe_and_embeddings_to_config_map.jsonl` (10,558 rows, correct splits)
 
+### Export CLAP audio embedding map (14)
+
+```bash
+python -m data_work.14_export_clap_embedding_map \
+  --workers 7 --duration 45 --resume
+```
+
+Results:
+- 10,558 rows, 7 workers, 45s audio per config
+- Total time: ~21 minutes (0.12s/row)
+- Output: `data_work/2026-01-26_scored/vibe_and_clap_audio_embeddings_to_config_map.jsonl` (136MB, 512-dim CLAP audio embeddings)
+- Uploaded to HF: `guprab/latentscore-data` under `2026-01-26_scored/`
+
 ### GRPO status
 
 Skipped for now due to compute constraints (see `METHODOLOGY.md`).

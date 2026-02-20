@@ -23,11 +23,14 @@ litellm
 json-repair
 
 # --- Embeddings ---
-# Note: sentence-transformers pulls in Torch. 
+# Note: sentence-transformers pulls in Torch.
 # Torch works on both Mac and Linux via PyPI, so no special markers needed.
 sentence-transformers
 scikit-learn
 torch
+# CLAP audio-embedding lookup (for fast_heavy model)
+laion-clap
+torchvision
 
 # --- UI ---
 textual>=0.58

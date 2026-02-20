@@ -387,6 +387,34 @@ conda run -n latentscore-data python -m data_work.10_export_embedding_map \
   --batch-size 64
 ```
 
+### `14_export_clap_embedding_map`
+
+Builds a CLAP **audio** embedding lookup table by rendering each config as 45s audio,
+extracting LAION-CLAP audio embeddings (512-dim), and writing a JSONL file for the
+`fast_heavy` model. Input is the existing MiniLM embedding map; output adds a
+`clap_audio_embedding` field.
+
+Usage example:
+
+```bash
+# Test run (5 rows)
+python -m data_work.14_export_clap_embedding_map --limit 5
+
+# Full run with parallel workers
+python -m data_work.14_export_clap_embedding_map --workers 7 --duration 45 --resume
+
+# Upload to HuggingFace
+python -m data_work.14_export_clap_embedding_map --upload
+```
+
+Features:
+- Auto-downloads input from HuggingFace if not found locally
+- Resume support via progress JSONL (`--resume`)
+- Multiprocessing: each worker loads its own CLAP model (`--workers N`)
+- Upload to HF dataset with `--upload`
+
+Output: `vibe_and_clap_audio_embeddings_to_config_map.jsonl` (10,558 rows, 512-dim embeddings, ~136MB)
+
 ### `04_clap_benchmark`
 
 Scores configs with LAION-CLAP. You can benchmark dataset configs, LiteLLM
