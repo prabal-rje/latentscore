@@ -9,7 +9,7 @@ description = "Generate ambient music from text. Locally. No GPU required."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
-    "numpy<2",
+    "numpy",
     "scipy",
     "soundfile",
     "sounddevice",
