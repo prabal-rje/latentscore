@@ -13,7 +13,6 @@ dependencies = [
     "scipy",
     "soundfile",
     "sounddevice",
-    "simpleaudio",
     "pydantic>=2",
     "rich",
     "sentence-transformers",
