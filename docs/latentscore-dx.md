@@ -38,7 +38,7 @@ def live_items() -> Iterable[ls.Streamable]:
     for vibe in ["misty harbor", "neon rain", "quiet orchard"]:
         yield ls.Streamable(content=vibe, duration=6.0, transition_duration=1.5)
 
-chunks = ls.stream_raw(live_items(), chunk_seconds=1.0, model="fast_heavy")
+chunks = ls.stream_raw(live_items(), chunk_seconds=1.0, model="fast")
 play_stream(chunks, sample_rate=ls.SAMPLE_RATE)
 ```
 
@@ -53,7 +53,7 @@ async for chunk in ls.stream(
     duration=120,
     transition=5,
     chunk_seconds=1.0,
-    model="fast_heavy",
+    model="fast",
 ):
     await speaker.write(chunk)
 ```
@@ -83,8 +83,8 @@ playlist.stream().play()
 
 ## Model selection
 
-- `"fast_heavy"` (recommended): LAION-CLAP audio-embedding retrieval (512-dim, matches text against rendered audio, 71% higher quality than `fast`).
-- `"fast"`: MiniLM text-embedding retrieval (384-dim, marginally faster but significantly lower quality).
+- `"fast"` (default): MiniLM text-embedding retrieval (384-dim, sub-second).
+- `"fast_heavy"`: LAION-CLAP audio-embedding retrieval (512-dim, matches text against rendered audio).
 - `"expressive"` or `"local"`: local LLM (Apple Silicon uses MLX; other platforms use transformers with CUDA if available, otherwise CPU; 4-bit bitsandbytes is used when available).
 - `"external:<model-name>"`: shorthand for `LiteLLMAdapter`.
 

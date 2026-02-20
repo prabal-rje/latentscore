@@ -7,7 +7,7 @@
 ```python
 import latentscore as ls
 
-ls.render("warm sunset over water", model="fast_heavy").play()
+ls.render("warm sunset over water").play()
 ```
 
 That's it. One line. You get audio playing on your speakers.
@@ -52,7 +52,7 @@ latentscore demo --output ambient.wav    # save to file
 ```python
 import latentscore as ls
 
-audio = ls.render("warm sunset over water", model="fast_heavy", duration=10.0)
+audio = ls.render("warm sunset over water", duration=10.0)
 audio.play()              # plays on your speakers
 audio.save("output.wav")  # save to WAV
 ```
@@ -60,9 +60,9 @@ audio.save("output.wav")  # save to WAV
 ### Different vibes
 
 ```python
-ls.render("jazz cafe at midnight", model="fast_heavy").play()
-ls.render("thunderstorm on a tin roof", model="fast_heavy").play()
-ls.render("lo-fi study beats", model="fast_heavy").play()
+ls.render("jazz cafe at midnight").play()
+ls.render("thunderstorm on a tin roof").play()
+ls.render("lo-fi study beats").play()
 ```
 
 ---
@@ -239,7 +239,7 @@ if audio.metadata is not None:
         print([c.hex for c in palette.colors])
 ```
 
-> **Note:** LLM models are slower than `fast_heavy` (network round-trips) and can occasionally produce invalid configs. `fast_heavy` is recommended for production use.
+> **Note:** LLM models are slower than the default `fast` model (network round-trips) and can occasionally produce invalid configs. The built-in `fast` model is recommended for production use.
 
 ---
 
@@ -247,11 +247,11 @@ if audio.metadata is not None:
 
 You give LatentScore a **vibe** (a short text description) and it generates ambient music that matches.
 
-The recommended `fast_heavy` model uses **LAION-CLAP audio embeddings**: your vibe text is encoded with CLAP's text encoder and matched against pre-computed CLAP audio embeddings of 10,000+ rendered music configurations. This matches text directly against what configs actually *sound* like. The best-matching config drives a real-time audio synthesizer.
+The default `fast` model uses **embedding-based retrieval**: your vibe text gets embedded with a sentence transformer, then matched against a curated library of 10,000+ music configurations using cosine similarity. The best-matching config drives a real-time audio synthesizer.
 
-The lighter `fast` model uses **text-to-text retrieval** instead (MiniLM sentence embeddings). It's marginally faster but scores **71% lower** on audio-text alignment benchmarks.
+An alternative `fast_heavy` model uses **LAION-CLAP audio embeddings** to match text against what configs actually *sound* like. It scores higher on automated CLAP benchmarks but requires a heavier dependency (`laion-clap`).
 
-Both approaches are **instant** (~2s), **100% reliable** (no LLM hallucinations), and require no API keys. Our [CLAP benchmarks](https://huggingface.co/datasets/guprab/latentscore-clap-benchmark) showed that embedding retrieval outperforms Claude Opus 4.5 and Gemini 3 Flash at mapping vibes to music configurations, and `fast_heavy` outperforms `fast` by 71%.
+Both approaches are **instant** (~2s), **100% reliable** (no LLM hallucinations), and require no API keys. Our [CLAP benchmarks](https://huggingface.co/datasets/guprab/latentscore-clap-benchmark) showed that embedding retrieval outperforms Claude Opus 4.5 and Gemini 3 Flash at mapping vibes to music configurations.
 
 ---
 

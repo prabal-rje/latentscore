@@ -76,5 +76,5 @@ async def test_notify_user_early_exit_on_missing_recipient():
 
 ## Demo CLI
 ```bash
-python -m latentscore.demo --model fast_heavy --save
+python -m latentscore.demo --model fast --save
 ```
