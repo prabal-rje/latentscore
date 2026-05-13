@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use LatentScore in your research, please cite our SIGGRAPH Talks '26 paper."
+title: "LatentScore"
+authors:
+  - family-names: Gupta
+    given-names: Prabal
+repository-code: "https://github.com/prabal-rje/latentscore"
+license: Apache-2.0
+preferred-citation:
+  type: conference-paper
+  title: "LatentScore: Sketching Soundscapes with LLM-Distilled Retrieval for Procedural Synthesis"
+  authors:
+    - family-names: Gupta
+      given-names: Prabal
+  collection-title: "SIGGRAPH Talks '26"
+  collection-type: proceedings
+  year: 2026
+  publisher:
+    name: ACM
+  doi: 10.1145/3799818.3812120
