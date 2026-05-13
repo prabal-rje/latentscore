@@ -1,6 +1,6 @@
 # LatentScore
 
-[![Try in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart.ipynb) [![Listen to Demo](https://img.shields.io/badge/▶_Listen_to_Demo-latentscore.com-8A2BE2?style=flat)](https://latentscore.com/demo)
+[![Try in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart.ipynb) [![Listen to Demo](https://img.shields.io/badge/▶_Listen_to_Demo-latentscore.com-8A2BE2?style=flat)](https://latentscore.com/demo) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue?style=flat)](LICENSE)
 
 [![Presenting at SIGGRAPH 2026](https://img.shields.io/badge/Presenting_at-SIGGRAPH_2026-B91C1C?style=flat)](https://s2026.siggraph.org/program/talks/) [![Presenting at NIME 2026](https://img.shields.io/badge/Presenting_at-NIME_2026-5B21B6?style=flat)](https://nime2026.org/)
 
@@ -336,3 +336,26 @@ See [`data_work/README.md`](data_work/README.md) and [`docs/architecture.md`](do
 See [`CONTRIBUTE.md`](CONTRIBUTE.md) for environment setup and contribution guidelines.
 
 See [`docs/coding-guidelines.md`](docs/coding-guidelines.md) for code style requirements.
+
+---
+
+## Citation
+
+If you use LatentScore in your research, please cite the SIGGRAPH Talks '26 paper:
+
+```bibtex
+@inproceedings{gupta2026latentscore,
+  author    = {Gupta, Prabal},
+  title     = {LatentScore: Sketching Soundscapes with LLM-Distilled Retrieval for Procedural Synthesis},
+  booktitle = {SIGGRAPH Talks '26},
+  year      = {2026},
+  publisher = {ACM},
+  doi       = {10.1145/3799818.3812120}
+}
+```
+
+---
+
+## License
+
+LatentScore is released under the [Apache License 2.0](LICENSE).
