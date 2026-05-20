@@ -25,7 +25,7 @@ https://private-user-images.githubusercontent.com/140295281/557606724-22889dcc-9
 **Requires Python 3.10&ndash;3.12.** If you don't have it: `brew install python@3.10` (macOS) or `pyenv install 3.10`.
 
 ```bash
-pip install "latentscore[fast]"
+pip install latentscore
 ```
 
 Or with conda:
@@ -33,10 +33,10 @@ Or with conda:
 ```bash
 conda create -n latentscore python=3.10 -y
 conda activate latentscore
-pip install "latentscore[fast]"
+pip install latentscore
 ```
 
-The `[fast]` extra adds retrieval-based text-prompt rendering (sentence-transformers, ~1&nbsp;GB). Bare `pip install latentscore` still accepts text prompts but falls back to a built-in heuristic mapper &mdash; useful on headless servers where the ML dependency would be overkill. The render API and `MusicConfig` work identically in both modes.
+The baseline install gives you embedding-match text prompts (`ls.render("vibe")`), `MusicConfig` rendering, and local playback &mdash; everything in the Quick Start below. Optional extras: `[external]` for bring-your-own hosted LLMs (LiteLLM), `[heavy]` for CLAP audio retrieval, `[expressive]` for local LLM inference.
 
 ---
 
@@ -213,7 +213,7 @@ asyncio.run(main())
 
 ## Bring Your Own LLM
 
-Use any LLM through [LiteLLM](https://docs.litellm.ai/docs/providers) &mdash; OpenAI, Anthropic, Google, Mistral, Groq, and [100+ others](https://docs.litellm.ai/docs/providers). LiteLLM is included with latentscore.
+Use any LLM through [LiteLLM](https://docs.litellm.ai/docs/providers) &mdash; OpenAI, Anthropic, Google, Mistral, Groq, and [100+ others](https://docs.litellm.ai/docs/providers). Install with `pip install "latentscore[external]"` (or add `external` to your existing install).
 
 ```python
 import latentscore as ls
@@ -257,7 +257,7 @@ The default `fast` model uses **embedding-based retrieval**: your vibe text gets
 
 An alternative `fast_heavy` model uses **LAION-CLAP audio embeddings** to match text against what configs actually *sound* like. It scores higher on automated CLAP benchmarks but requires a heavier dependency (`laion-clap`).
 
-Both approaches are **instant** (~2s), **100% reliable** (no LLM hallucinations), and require no API keys. Our [CLAP benchmarks](https://huggingface.co/datasets/guprab/latentscore-clap-benchmark) showed that embedding retrieval outperforms Claude Opus 4.5 and Gemini 3 Flash at mapping vibes to music configurations.
+Both approaches are **fast** (~2s after model caches are warm; first call also downloads ~90&nbsp;MB for `fast` or ~1.8&nbsp;GB for `fast_heavy`), **100% reliable** (no LLM hallucinations), and require no API keys. Our [CLAP benchmarks](https://huggingface.co/datasets/guprab/latentscore-clap-benchmark) showed that embedding retrieval outperforms Claude Opus 4.5 and Gemini 3 Flash at mapping vibes to music configurations.
 
 ---
 

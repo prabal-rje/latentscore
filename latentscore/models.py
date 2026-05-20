@@ -768,7 +768,10 @@ class FastEmbeddingModel:
         self._exclude_splits = exclude_splits
 
     def warmup(self) -> None:
+        # Trigger every download the model needs to serve a query so that the
+        # first generate() call doesn't appear to hang while it does this work.
         _ = self._example_matrix()
+        _ = self._load_encoder()
 
     async def generate(self, vibe: str) -> MusicConfig:
         try:
@@ -784,7 +787,8 @@ class FastEmbeddingModel:
         except ImportError as exc:
             _LOGGER.warning("sentence-transformers not installed: %s", exc, exc_info=True)
             raise ModelNotAvailableError(
-                'sentence-transformers is not installed. Install with: pip install "latentscore[fast]"'
+                "sentence-transformers is a required dependency of latentscore but is not "
+                "importable. Reinstall with: pip install --force-reinstall latentscore"
             ) from exc
 
         _disable_transformers_progress()
@@ -877,7 +881,13 @@ class FastEmbeddingModel:
         try:
             from huggingface_hub import hf_hub_download  # type: ignore[import]
         except ImportError as exc:
-            _LOGGER.warning("huggingface_hub not installed: %s", exc, exc_info=True)
+            _LOGGER.warning(
+                "huggingface_hub is a required latentscore dependency but is not importable — "
+                "this should not happen in a clean install. Reinstall: "
+                "pip install --force-reinstall latentscore. Error: %s",
+                exc,
+                exc_info=True,
+            )
             return None
 
         base_dir = Path(os.environ.get("LATENTSCORE_MODEL_DIR", "")).expanduser()
@@ -927,7 +937,10 @@ class FastHeavyModel:
         self._exclude_splits = exclude_splits
 
     def warmup(self) -> None:
+        # Trigger every download the model needs to serve a query so that the
+        # first generate() call doesn't appear to hang while it does this work.
         _ = self._example_matrix()
+        _ = self._load_clap()
 
     async def generate(self, vibe: str) -> MusicConfig:
         try:
@@ -947,6 +960,12 @@ class FastHeavyModel:
 
         model = laion_clap.CLAP_Module(enable_fusion=False)
         model.load_ckpt()
+        # NOTE: we considered casting to fp16 to save ~317 MB steady-state RAM,
+        # but the CLAP library itself only casts on CUDA (`factory.py` gates the
+        # cast to `device.type != "cpu"`). On CPU, the text-encoder Roberta
+        # LayerNorm/softmax accumulations have known fp16 numerical issues, so
+        # blanket fp16 risks silently wrong embeddings. Keep fp32 on CPU; revisit
+        # if/when we ship a CUDA path.
         return model
 
     @functools.lru_cache(maxsize=1)
@@ -1037,7 +1056,13 @@ class FastHeavyModel:
         try:
             from huggingface_hub import hf_hub_download  # type: ignore[import]
         except ImportError as exc:
-            _LOGGER.warning("huggingface_hub not installed: %s", exc, exc_info=True)
+            _LOGGER.warning(
+                "huggingface_hub is a required latentscore dependency but is not importable — "
+                "this should not happen in a clean install. Reinstall: "
+                "pip install --force-reinstall latentscore. Error: %s",
+                exc,
+                exc_info=True,
+            )
             return None
 
         base_dir = Path(os.environ.get("LATENTSCORE_MODEL_DIR", "")).expanduser()
@@ -1304,7 +1329,8 @@ class SemanticEmbeddingModel:
         except ImportError as exc:
             _LOGGER.warning("sentence-transformers not installed: %s", exc, exc_info=True)
             raise ModelNotAvailableError(
-                'sentence-transformers is not installed. Install with: pip install "latentscore[fast]"'
+                "sentence-transformers is a required dependency of latentscore but is not "
+                "importable. Reinstall with: pip install --force-reinstall latentscore"
             ) from exc
 
         _disable_transformers_progress()
@@ -1376,14 +1402,17 @@ class ExpressiveMlxModel:
                 import llama_cpp  # type: ignore[import] # noqa: F401
             except ImportError as exc:
                 raise ModelNotAvailableError(
-                    "llama-cpp-python + instructor are required for GGUF inference"
+                    "llama-cpp-python + instructor are required for GGUF inference. "
+                    'Install with: pip install "latentscore[expressive]"'
                 ) from exc
             return
 
         try:
             import outlines  # type: ignore[import] # noqa: F401
         except ImportError as exc:
-            raise ModelNotAvailableError("outlines is not installed") from exc
+            raise ModelNotAvailableError(
+                'outlines is not installed. Install with: pip install "latentscore[expressive]"'
+            ) from exc
 
         if backend == "mlx":
             try:
@@ -1391,14 +1420,18 @@ class ExpressiveMlxModel:
                 import mlx_lm  # type: ignore[import] # noqa: F401
             except ImportError as exc:
                 raise ModelNotAvailableError(
-                    "mlx and mlx-lm are required on Apple Silicon; install them first"
+                    "mlx and mlx-lm are required on Apple Silicon for expressive mode. "
+                    'Install with: pip install "latentscore[expressive]"'
                 ) from exc
             return
 
         try:
             import transformers  # type: ignore[import]
         except ImportError as exc:
-            raise ModelNotAvailableError("transformers is not installed") from exc
+            raise ModelNotAvailableError(
+                "transformers is a required dependency of latentscore but is not "
+                "importable. Reinstall with: pip install --force-reinstall latentscore"
+            ) from exc
 
         version: str = transformers.__version__.split(".")[0]
         if version.isdigit() and int(version) >= 5:
@@ -1458,7 +1491,10 @@ class ExpressiveMlxModel:
             from huggingface_hub import snapshot_download  # type: ignore[import]
         except ImportError as exc:
             _LOGGER.warning("huggingface_hub not installed: %s", exc, exc_info=True)
-            raise ModelNotAvailableError("huggingface_hub is not installed") from exc
+            raise ModelNotAvailableError(
+                "huggingface_hub is a required dependency of latentscore but is not "
+                "importable. Reinstall with: pip install --force-reinstall latentscore"
+            ) from exc
 
         _LOGGER.info(
             "Downloading model weights. This happens once and is cached at %s.",
@@ -1487,7 +1523,10 @@ class ExpressiveMlxModel:
             from huggingface_hub import snapshot_download  # type: ignore[import]
         except ImportError as exc:
             _LOGGER.warning("huggingface_hub not installed: %s", exc, exc_info=True)
-            raise ModelNotAvailableError("huggingface_hub is not installed") from exc
+            raise ModelNotAvailableError(
+                "huggingface_hub is a required dependency of latentscore but is not "
+                "importable. Reinstall with: pip install --force-reinstall latentscore"
+            ) from exc
 
         _LOGGER.info(
             "Downloading MLX model weights (~200MB). This happens once and is cached at %s.",
@@ -1526,7 +1565,10 @@ class ExpressiveMlxModel:
             from huggingface_hub import hf_hub_download  # type: ignore[import]
         except ImportError as exc:
             _LOGGER.warning("huggingface_hub not installed: %s", exc, exc_info=True)
-            raise ModelNotAvailableError("huggingface_hub is not installed") from exc
+            raise ModelNotAvailableError(
+                "huggingface_hub is a required dependency of latentscore but is not "
+                "importable. Reinstall with: pip install --force-reinstall latentscore"
+            ) from exc
 
         base_dir = Path(os.environ.get("LATENTSCORE_MODEL_DIR", ""))
         if not base_dir:

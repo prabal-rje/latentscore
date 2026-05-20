@@ -52,6 +52,7 @@ from .main import (
     stream as stream_raw,
 )
 from .models import ExternalModelSpec, ModelForGeneratingMusicConfig, ModelSpec
+from .prefetch import prefetch
 
 __all__ = [
     "SAMPLE_RATE",
@@ -97,6 +98,7 @@ __all__ = [
     "live",
     "astream",
     "astream_raw",
+    "prefetch",
     "render",
     "render_raw",
     "save_wav",
@@ -107,7 +109,7 @@ __all__ = [
     "stream_updates",
 ]
 
-__version__ = "0.1.2"
+__version__ = "0.1.4"
 
 _configure_logging()
 del _configure_logging

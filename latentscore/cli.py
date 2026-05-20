@@ -38,7 +38,10 @@ def _download_expressive(model_base: Path) -> Path:
         from huggingface_hub import snapshot_download  # type: ignore[import]
     except ImportError as exc:
         _LOGGER.warning("huggingface_hub not installed: %s", exc, exc_info=True)
-        raise ModelNotAvailableError("huggingface_hub is not installed") from exc
+        raise ModelNotAvailableError(
+            "huggingface_hub is a required dependency of latentscore but is not "
+            "importable. Reinstall with: pip install --force-reinstall latentscore"
+        ) from exc
 
     target = model_base / _EXPRESSIVE_DIR
     target.mkdir(parents=True, exist_ok=True)
@@ -60,9 +63,9 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument("--output", type=str, default="demo.wav")
 
     download = sub.add_parser("download", help="Download model assets.")
-    download.add_argument("model", choices=["expressive"], type=str)
+    download.add_argument("model", choices=["expressive", "fast", "fast_heavy"], type=str)
 
-    sub.add_parser("doctor", help="Check model availability and cache paths.")
+    sub.add_parser("doctor", help="Show model cache paths and which model weights are present.")
     return parser
 
 
@@ -88,6 +91,11 @@ def main(argv: list[str] | None = None) -> int:
                     with Spinner("Downloading expressive model"):
                         _download_expressive(model_base)
                 _CONSOLE.print(f"Downloaded expressive model to {target}")
+                return 0
+            if args.model in ("fast", "fast_heavy"):
+                from .prefetch import prefetch as _prefetch
+
+                _prefetch(args.model)  # type: ignore[arg-type]
                 return 0
 
         if args.command == "doctor":

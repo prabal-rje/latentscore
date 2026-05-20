@@ -11,39 +11,40 @@ requires-python = ">=3.10,<3.13"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = [
+    # Synthesis + audio I/O + playback + CLI rendering.
     "numpy",
     "scipy",
     "soundfile",
     "sounddevice",
     "pydantic>=2",
     "rich",
-]
-
-[project.optional-dependencies]
-# Text-prompt retrieval (recommended for most users).
-fast = [
+    # Default text-prompt retrieval (the "fast" model). Embedding-match quality
+    # out of the box — no extra needed for the headline `ls.render("text")` API.
     "sentence-transformers",
     "torch",
-    "scikit-learn",
     "huggingface_hub>=0.20",
     "transformers>=4.57.0,<5",
     "tokenizers>=0.20.0",
     "sentencepiece",
 ]
+
+[project.optional-dependencies]
+# Back-compat alias: pre-0.1.4 users had to do `pip install "latentscore[fast]"`.
+# Everything that was in [fast] is now in core, so this is intentionally empty.
+fast = []
 # Bring-your-own hosted LLM via LiteLLM (Anthropic / Gemini / OpenAI / ...).
 external = [
     "litellm>=1.0",
     "python-dotenv",
     "json-repair",
 ]
-# CLAP-audio retrieval (experimental, heavy).
+# CLAP-audio retrieval (experimental, heavy — torchvision + laion-clap).
 heavy = [
     "laion-clap",
     "torchvision",
 ]
 # Local LLM inference (expressive mode) - CPU-only, uses huggingface transformers.
 expressive = [
-    "latentscore[fast]",
     "outlines",
     "instructor",
     "bitsandbytes; sys_platform == 'linux' and platform_machine == 'x86_64'",

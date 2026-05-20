@@ -294,7 +294,9 @@ class LiteLLMAdapter:
             from litellm import acompletion  # type: ignore[import]
         except ImportError as exc:
             _LOGGER.warning("LiteLLM not installed: %s", exc)
-            raise ModelNotAvailableError("litellm is not installed") from exc
+            raise ModelNotAvailableError(
+                'litellm is not installed. Install with: pip install "latentscore[external]"'
+            ) from exc
 
         _register_safe_get_event_loop_atexit()
         _configure_litellm_logging(litellm)
