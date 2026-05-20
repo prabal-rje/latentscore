@@ -38,12 +38,23 @@ pip install latentscore
 
 The baseline install gives you embedding-match text prompts (`ls.render("vibe")`), `MusicConfig` rendering, and local playback &mdash; everything in the Quick Start below. Optional extras: `[external]` for bring-your-own hosted LLMs (LiteLLM), `[heavy]` for CLAP audio retrieval, `[expressive]` for local LLM inference.
 
+### Verify your install
+
+```bash
+latentscore doctor --strict --offline
+```
+
+Runs ten checks (Python version, package metadata, license, audio I/O, schema export, core synth render, retrieval render, optional-extra availability) and exits non-zero if anything required is broken. Add `--require-external`/`--require-heavy`/`--require-expressive` to also fail when those extras aren't installed. Add `--json` for machine-readable output.
+
 ---
 
 ## CLI
 
 ```bash
-latentscore doctor                       # check setup and model availability
+latentscore doctor                       # run 10 install health checks
+latentscore doctor --strict --offline    # CI-friendly: nonzero on required-fail
+latentscore doctor --json                # machine-readable JSON
+latentscore download fast                # prefetch the default model assets
 latentscore demo                         # render and play a sample
 latentscore demo --duration 30           # 30-second demo
 latentscore demo --output ambient.wav    # save to file
