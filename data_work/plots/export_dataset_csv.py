@@ -18,20 +18,44 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
-DEFAULT_INPUT = Path(
-    "data_work/.experiments/vibe_and_embeddings_to_config_map.jsonl"
-)
+DEFAULT_INPUT = Path("data_work/.experiments/vibe_and_embeddings_to_config_map.jsonl")
 DEFAULT_OUTPUT = Path("data_work/plots/dataset_export.csv")
 
 CONFIG_FIELDS = [
-    "tempo", "root", "mode", "brightness", "space", "density",
-    "bass", "pad", "melody", "rhythm", "texture", "accent",
-    "motion", "attack", "stereo", "depth", "echo", "human", "grain",
-    "melody_engine", "phrase_len_bars", "melody_density", "syncopation",
-    "swing", "motif_repeat_prob", "step_bias", "chromatic_prob",
-    "cadence_strength", "register_min_oct", "register_max_oct",
-    "tension_curve", "harmony_style", "chord_change_bars", "chord_extensions",
+    "tempo",
+    "root",
+    "mode",
+    "brightness",
+    "space",
+    "density",
+    "bass",
+    "pad",
+    "melody",
+    "rhythm",
+    "texture",
+    "accent",
+    "motion",
+    "attack",
+    "stereo",
+    "depth",
+    "echo",
+    "human",
+    "grain",
+    "melody_engine",
+    "phrase_len_bars",
+    "melody_density",
+    "syncopation",
+    "swing",
+    "motif_repeat_prob",
+    "step_bias",
+    "chromatic_prob",
+    "cadence_strength",
+    "register_min_oct",
+    "register_max_oct",
+    "tension_curve",
+    "harmony_style",
+    "chord_change_bars",
+    "chord_extensions",
 ]
 
 PALETTE_COUNT = 3
@@ -125,10 +149,12 @@ def _unflatten_row(flat: dict[str, str]) -> dict[str, Any]:
     for p in range(1, PALETTE_COUNT + 1):
         colors: list[dict[str, str]] = []
         for c in range(1, COLORS_PER_PALETTE + 1):
-            colors.append({
-                "hex": flat[f"palette_{p}_color_{c}"],
-                "weight": PALETTE_WEIGHTS[c - 1],
-            })
+            colors.append(
+                {
+                    "hex": flat[f"palette_{p}_color_{c}"],
+                    "weight": PALETTE_WEIGHTS[c - 1],
+                }
+            )
         palettes.append({"colors": colors})
 
     embedding = [float(flat[f"emb_{i}"]) for i in range(384)]
@@ -221,7 +247,9 @@ def main(argv: list[str] | None = None) -> None:
                         break
             print(f"Wrote {written} rows → {output_path}")
             cols = len(header)
-            print(f"Columns: {cols} ({len(CONFIG_FIELDS)} config + {PALETTE_COUNT * COLORS_PER_PALETTE} palette + 384 embedding + 5 meta)")
+            print(
+                f"Columns: {cols} ({len(CONFIG_FIELDS)} config + {PALETTE_COUNT * COLORS_PER_PALETTE} palette + 384 embedding + 5 meta)"
+            )
 
         case "to-jsonl":
             written = csv_to_jsonl(input_path, output_path, limit=args.limit)

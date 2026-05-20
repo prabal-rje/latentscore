@@ -72,7 +72,9 @@ def load_benchmark_rows() -> list[dict]:
 def load_hf_scored_rows() -> list[dict]:
     rows: list[dict] = []
     for split in SCORED_SPLITS:
-        path = hf_hub_download(HF_DATASET_REPO, f"2026-01-26_scored/{split}.jsonl", repo_type="dataset")
+        path = hf_hub_download(
+            HF_DATASET_REPO, f"2026-01-26_scored/{split}.jsonl", repo_type="dataset"
+        )
         with open(path) as f:
             for line in f:
                 rows.append(json.loads(line))
@@ -102,11 +104,20 @@ def plot_config_latency(rows: list[dict]) -> None:
     fig.suptitle("Config Generation Latency by Controller", fontsize=14, fontweight="bold", y=1.02)
 
     for ax, model in zip(axes, models):
-        latencies = [r["config_gen_s"] for r in by_model[model] if r.get("config_gen_s") is not None]
+        latencies = [
+            r["config_gen_s"] for r in by_model[model] if r.get("config_gen_s") is not None
+        ]
         if not latencies:
             continue
 
-        ax.hist(latencies, bins=30, color=MODEL_COLORS[model], alpha=ALPHA, edgecolor="white", linewidth=0.5)
+        ax.hist(
+            latencies,
+            bins=30,
+            color=MODEL_COLORS[model],
+            alpha=ALPHA,
+            edgecolor="white",
+            linewidth=0.5,
+        )
         ax.set_title(MODEL_LABELS[model], fontsize=10, fontweight="bold")
         ax.set_xlabel("Seconds", fontsize=9)
         med = statistics.median(latencies)
@@ -142,11 +153,20 @@ def plot_audio_latency(rows: list[dict]) -> None:
     fig.suptitle("Audio Synthesis Latency by Controller", fontsize=14, fontweight="bold", y=1.02)
 
     for ax, model in zip(axes, models):
-        latencies = [r["audio_synth_s"] for r in by_model[model] if r.get("audio_synth_s") is not None]
+        latencies = [
+            r["audio_synth_s"] for r in by_model[model] if r.get("audio_synth_s") is not None
+        ]
         if not latencies:
             continue
 
-        ax.hist(latencies, bins=30, color=MODEL_COLORS[model], alpha=ALPHA, edgecolor="white", linewidth=0.5)
+        ax.hist(
+            latencies,
+            bins=30,
+            color=MODEL_COLORS[model],
+            alpha=ALPHA,
+            edgecolor="white",
+            linewidth=0.5,
+        )
         ax.set_title(MODEL_LABELS[model], fontsize=10, fontweight="bold")
         ax.set_xlabel("Seconds", fontsize=9)
         med = statistics.median(latencies)
@@ -183,9 +203,15 @@ def plot_hf_clap_distribution(hf_rows: list[dict]) -> None:
             selected_scores.append(score)
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    fig.suptitle("CLAP Score Distribution — HuggingFace Dataset (Best-of-5 Selected)", fontsize=13, fontweight="bold")
+    fig.suptitle(
+        "CLAP Score Distribution — HuggingFace Dataset (Best-of-5 Selected)",
+        fontsize=13,
+        fontweight="bold",
+    )
 
-    ax.hist(selected_scores, bins=80, color="#2eaa4f", alpha=ALPHA, edgecolor="white", linewidth=0.5)
+    ax.hist(
+        selected_scores, bins=80, color="#2eaa4f", alpha=ALPHA, edgecolor="white", linewidth=0.5
+    )
     mean_val = statistics.mean(selected_scores)
     med_val = statistics.median(selected_scores)
     ax.axvline(mean_val, color="red", linestyle="-", linewidth=1.5, label=f"mean={mean_val:.4f}")
@@ -326,36 +352,62 @@ def plot_benchmark_comparison(rows: list[dict]) -> None:
         claps = [r["clap_reward"] for r in succeeded]
         mean_claps.append(statistics.mean(claps))
         std_claps.append(statistics.stdev(claps) if len(claps) > 1 else 0.0)
-        success_rates.append(len(succeeded) / len(all_rows_for_model) * 100 if all_rows_for_model else 0)
+        success_rates.append(
+            len(succeeded) / len(all_rows_for_model) * 100 if all_rows_for_model else 0
+        )
         config_times = [r["config_gen_s"] for r in succeeded if r.get("config_gen_s") is not None]
         median_latencies.append(statistics.median(config_times) if config_times else 0)
 
     fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-    fig.suptitle("Benchmark Comparison — 200 Test Prompts, 6 Controllers", fontsize=14, fontweight="bold", y=1.02)
+    fig.suptitle(
+        "Benchmark Comparison — 200 Test Prompts, 6 Controllers",
+        fontsize=14,
+        fontweight="bold",
+        y=1.02,
+    )
 
     x = np.arange(len(models))
     bar_width = 0.6
 
     # Panel 1: Mean CLAP score
     ax1 = axes[0]
-    ax1.bar(x, mean_claps, bar_width, color=colors, alpha=ALPHA, edgecolor="white", linewidth=0.5,
-            yerr=std_claps, error_kw={"linewidth": 0.8, "capsize": 3, "capthick": 0.8, "alpha": 0.5})
+    ax1.bar(
+        x,
+        mean_claps,
+        bar_width,
+        color=colors,
+        alpha=ALPHA,
+        edgecolor="white",
+        linewidth=0.5,
+        yerr=std_claps,
+        error_kw={"linewidth": 0.8, "capsize": 3, "capthick": 0.8, "alpha": 0.5},
+    )
     # Random baseline reference line
     random_idx = models.index("random") if "random" in models else None
     if random_idx is not None:
-        ax1.axhline(mean_claps[random_idx], color="#999999", linestyle=":", linewidth=1, alpha=0.7,
-                     label=f"Random baseline ({mean_claps[random_idx]:.3f})")
+        ax1.axhline(
+            mean_claps[random_idx],
+            color="#999999",
+            linestyle=":",
+            linewidth=1,
+            alpha=0.7,
+            label=f"Random baseline ({mean_claps[random_idx]:.3f})",
+        )
         ax1.legend(fontsize=7, loc="upper left")
     ax1.set_ylabel("Mean CLAP Score", fontsize=10)
     ax1.set_title("CLAP Alignment", fontsize=11, fontweight="bold")
     ax1.set_xticks(x)
     ax1.set_xticklabels(labels, fontsize=8, rotation=25, ha="right")
     for i, v in enumerate(mean_claps):
-        ax1.text(i, v + std_claps[i] + 0.008, f"{v:.3f}", ha="center", fontsize=7, fontweight="bold")
+        ax1.text(
+            i, v + std_claps[i] + 0.008, f"{v:.3f}", ha="center", fontsize=7, fontweight="bold"
+        )
 
     # Panel 2: Schema success rate
     ax2 = axes[1]
-    ax2.bar(x, success_rates, bar_width, color=colors, alpha=ALPHA, edgecolor="white", linewidth=0.5)
+    ax2.bar(
+        x, success_rates, bar_width, color=colors, alpha=ALPHA, edgecolor="white", linewidth=0.5
+    )
     ax2.set_ylabel("Success Rate (%)", fontsize=10)
     ax2.set_title("Schema Validity", fontsize=11, fontweight="bold")
     ax2.set_xticks(x)
@@ -369,7 +421,9 @@ def plot_benchmark_comparison(rows: list[dict]) -> None:
     ax3 = axes[2]
     # Replace 0 latency for random with a small value for log scale
     plot_latencies = [max(lat, 0.001) for lat in median_latencies]
-    ax3.bar(x, plot_latencies, bar_width, color=colors, alpha=ALPHA, edgecolor="white", linewidth=0.5)
+    ax3.bar(
+        x, plot_latencies, bar_width, color=colors, alpha=ALPHA, edgecolor="white", linewidth=0.5
+    )
     ax3.set_ylabel("Median Latency (s)", fontsize=10)
     ax3.set_title("Config Generation Latency", fontsize=11, fontweight="bold")
     ax3.set_xticks(x)

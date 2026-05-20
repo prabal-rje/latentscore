@@ -32,7 +32,9 @@ LOGGER = logging.getLogger(__name__)
 
 DEFAULT_INPUT_LOCAL = Path("data_work/2026-01-26_scored/vibe_and_embeddings_to_config_map.jsonl")
 DEFAULT_INPUT_HF_FILE = "2026-01-26_scored/vibe_and_embeddings_to_config_map.jsonl"
-DEFAULT_OUTPUT = Path("data_work/2026-01-26_scored/vibe_and_clap_audio_embeddings_to_config_map.jsonl")
+DEFAULT_OUTPUT = Path(
+    "data_work/2026-01-26_scored/vibe_and_clap_audio_embeddings_to_config_map.jsonl"
+)
 DEFAULT_PROGRESS = Path("data_work/2026-01-26_scored/_clap_embed_progress.jsonl")
 DEFAULT_DURATION = 60.0
 
@@ -216,7 +218,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         description="Export CLAP audio embeddings for fast_heavy model.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--input", type=Path, default=None, help="Source JSONL (auto-downloads from HF if omitted).")
+    parser.add_argument(
+        "--input", type=Path, default=None, help="Source JSONL (auto-downloads from HF if omitted)."
+    )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="Output JSONL.")
     parser.add_argument("--progress", type=Path, default=DEFAULT_PROGRESS, help="Progress file.")
     parser.add_argument("--duration", type=float, default=DEFAULT_DURATION, help="Audio seconds.")
@@ -276,16 +280,25 @@ def main(argv: Sequence[str] | None = None) -> None:
             _upload_to_hf(output_path)
         return
 
-    LOGGER.info("Processing %d rows (duration=%.0fs, workers=%d)", len(all_rows), args.duration, args.workers)
+    LOGGER.info(
+        "Processing %d rows (duration=%.0fs, workers=%d)",
+        len(all_rows),
+        args.duration,
+        args.workers,
+    )
     t0 = time.monotonic()
 
     if args.workers > 1:
-        written = _process_parallel(all_rows, args.duration, args.workers, output_path, progress_path)
+        written = _process_parallel(
+            all_rows, args.duration, args.workers, output_path, progress_path
+        )
     else:
         written = _process_single(all_rows, args.duration, output_path, progress_path)
 
     elapsed = time.monotonic() - t0
-    LOGGER.info("Done: %d rows written in %.1fs (%.2fs/row)", written, elapsed, elapsed / max(written, 1))
+    LOGGER.info(
+        "Done: %d rows written in %.1fs (%.2fs/row)", written, elapsed, elapsed / max(written, 1)
+    )
 
     if args.upload:
         _upload_to_hf(output_path)

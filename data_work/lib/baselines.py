@@ -99,7 +99,9 @@ _TITLE_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9']+")
 _DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 _DEFAULT_EMBED_MAP_REPO = "guprab/latentscore-data"
 _DEFAULT_EMBED_MAP_FILE = "2026-01-26_scored/vibe_and_embeddings_to_config_map.jsonl"
-_DEFAULT_CLAP_EMBED_MAP_FILE = "2026-01-26_scored/vibe_and_clap_audio_embeddings_to_config_map.jsonl"
+_DEFAULT_CLAP_EMBED_MAP_FILE = (
+    "2026-01-26_scored/vibe_and_clap_audio_embeddings_to_config_map.jsonl"
+)
 
 
 def _make_title(vibe: str) -> str:
@@ -1230,9 +1232,14 @@ BASELINES: dict[str, type[ConfigBaseline]] = {
     "clap_embedding_lookup": ClapEmbeddingLookupBaseline,
 }
 
-_EMBEDDING_LOOKUP_NAMES = frozenset({
-    "retrieval", "embedding_lookup", "embedding_interp", "clap_embedding_lookup",
-})
+_EMBEDDING_LOOKUP_NAMES = frozenset(
+    {
+        "retrieval",
+        "embedding_lookup",
+        "embedding_interp",
+        "clap_embedding_lookup",
+    }
+)
 
 EMBEDDING_LOOKUP_WARNING = (
     "The embedding_lookup baseline retrieves configs from a fixed synthetic dataset "

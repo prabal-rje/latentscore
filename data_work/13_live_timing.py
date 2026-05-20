@@ -79,15 +79,14 @@ def _item_label(item: object) -> str:
         case str():
             return f'"{item[:40]}..."' if len(item) > 40 else f'"{item}"'
         case ls.MusicConfigUpdate():
-            fields = {
-                k: v for k, v in item.model_dump(exclude_none=True).items()
-            }
+            fields = {k: v for k, v in item.model_dump(exclude_none=True).items()}
             return f"MCU({fields})"
         case _:
             return repr(item)[:60]
 
 
 # ── generator (the "performance") ────────────────────────────────────
+
 
 async def performance() -> AsyncIterator[str | ls.MusicConfigUpdate]:
     """
@@ -96,7 +95,7 @@ async def performance() -> AsyncIterator[str | ls.MusicConfigUpdate]:
     Yields vibes and config updates; sleeps control how long each
     segment plays before the next yield.
     """
-    print(f"[{_ts()}]  yield: \"tension over a treasured object\"")
+    print(f'[{_ts()}]  yield: "tension over a treasured object"')
     yield "tension over a treasured object"
 
     await asyncio.sleep(8)
@@ -107,11 +106,12 @@ async def performance() -> AsyncIterator[str | ls.MusicConfigUpdate]:
 
     await asyncio.sleep(8)
 
-    print(f"[{_ts()}]  yield: \"happy day\"")
+    print(f'[{_ts()}]  yield: "happy day"')
     yield "happy day"
 
 
 # ── main ─────────────────────────────────────────────────────────────
+
 
 def _parse_model(model_str: str) -> ls.ModelSpec:
     """Parse CLI model string into a ModelSpec."""
@@ -123,15 +123,21 @@ def _parse_model(model_str: str) -> ls.ModelSpec:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--save", type=str, default=None,
+        "--save",
+        type=str,
+        default=None,
         help="Save to WAV instead of playing to speakers",
     )
     parser.add_argument(
-        "--model", type=str, default="gemini/gemini-3-flash-preview",
+        "--model",
+        type=str,
+        default="gemini/gemini-3-flash-preview",
         help="LiteLLM model string or built-in name (default: gemini/gemini-3-flash-preview)",
     )
     parser.add_argument(
-        "--seconds", type=float, default=45.0,
+        "--seconds",
+        type=float,
+        default=45.0,
         help="Total playback duration (default: 60)",
     )
     args = parser.parse_args()
