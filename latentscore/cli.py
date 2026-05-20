@@ -4,7 +4,6 @@ import argparse
 import logging
 import os
 from pathlib import Path
-from typing import Iterable
 
 from rich.console import Console
 
@@ -49,11 +48,6 @@ def _download_expressive(model_base: Path) -> Path:
     return target
 
 
-def _doctor_report(lines: Iterable[str]) -> None:
-    for line in lines:
-        _CONSOLE.print(line)
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="latentscore")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -65,7 +59,34 @@ def build_parser() -> argparse.ArgumentParser:
     download = sub.add_parser("download", help="Download model assets.")
     download.add_argument("model", choices=["expressive", "fast", "fast_heavy"], type=str)
 
-    sub.add_parser("doctor", help="Show model cache paths and which model weights are present.")
+    doctor = sub.add_parser(
+        "doctor",
+        help="Run install health checks (Python version, license, render, retrieval, ...).",
+    )
+    doctor.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    doctor.add_argument(
+        "--strict", action="store_true", help="Exit nonzero when required checks fail."
+    )
+    doctor.add_argument(
+        "--offline",
+        action="store_true",
+        help="Set HF_HUB_OFFLINE / TRANSFORMERS_OFFLINE for network-free checks.",
+    )
+    doctor.add_argument(
+        "--require-external",
+        action="store_true",
+        help="Treat [external] (LiteLLM) availability as required.",
+    )
+    doctor.add_argument(
+        "--require-heavy",
+        action="store_true",
+        help="Treat [heavy] (laion-clap) availability as required.",
+    )
+    doctor.add_argument(
+        "--require-expressive",
+        action="store_true",
+        help="Treat [expressive] availability as required.",
+    )
     return parser
 
 
@@ -99,20 +120,20 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
 
         if args.command == "doctor":
-            model_base = _default_model_base()
-            expressive_dir = model_base / _EXPRESSIVE_DIR
-            embeddings_dir = Path("models") / "all-MiniLM-L6-v2"
-            report = [
-                f"Model cache base: {model_base}",
-                f"Expressive model present: {expressive_dir.exists()}",
-                f"Embeddings model present: {embeddings_dir.exists()}",
-                "Hints:",
-                "- Run `latentscore download expressive` to prefetch the LLM weights.",
-                "- Set LATENTSCORE_MODEL_DIR to point at a preseeded models directory.",
-                "- In production, run `latentscore doctor` and prefetch missing models to avoid runtime downloads.",
-            ]
-            _doctor_report(report)
-            return 0
+            from .doctor import build_doctor_report, doctor_exit_code, render_json, render_text
+
+            report = build_doctor_report(
+                strict=args.strict,
+                offline=args.offline,
+                require_external=args.require_external,
+                require_heavy=args.require_heavy,
+                require_expressive=args.require_expressive,
+            )
+            if args.json:
+                print(render_json(report))
+            else:
+                render_text(report, _CONSOLE.print)
+            return doctor_exit_code(report)
 
         parser.print_help()
         return 1
