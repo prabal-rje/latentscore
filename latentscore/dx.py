@@ -742,7 +742,7 @@ def _coerce_model(model: ModelSpec) -> ModelSpec:
         except ImportError as exc:
             _LOGGER.warning("LiteLLM not installed: %s", exc, exc_info=True)
             raise ModelNotAvailableError(
-                "LiteLLM is not installed; install latentscore[litellm]"
+                'LiteLLM is not installed. Install with: pip install "latentscore[external]"'
             ) from exc
         return LiteLLMAdapter(model=name)
 

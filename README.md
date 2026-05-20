@@ -25,7 +25,7 @@ https://private-user-images.githubusercontent.com/140295281/557606724-22889dcc-9
 **Requires Python 3.10&ndash;3.12.** If you don't have it: `brew install python@3.10` (macOS) or `pyenv install 3.10`.
 
 ```bash
-pip install latentscore
+pip install "latentscore[fast]"
 ```
 
 Or with conda:
@@ -33,8 +33,10 @@ Or with conda:
 ```bash
 conda create -n latentscore python=3.10 -y
 conda activate latentscore
-pip install latentscore
+pip install "latentscore[fast]"
 ```
+
+The `[fast]` extra adds text-prompt retrieval (sentence-transformers, ~1&nbsp;GB). Use `pip install latentscore` (no extras) for a minimal core that renders from a `MusicConfig` only &mdash; useful on headless servers.
 
 ---
 

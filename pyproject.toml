@@ -8,6 +8,8 @@ version = "0.1.4"
 description = "Generate ambient music from text. Locally. No GPU required."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = [
     "numpy",
     "scipy",
@@ -15,26 +17,36 @@ dependencies = [
     "sounddevice",
     "pydantic>=2",
     "rich",
+]
+
+[project.optional-dependencies]
+# Text-prompt retrieval (recommended for most users).
+fast = [
     "sentence-transformers",
-    "litellm>=1.0",
-    "python-dotenv",
-    "json-repair",
     "torch",
     "scikit-learn",
     "huggingface_hub>=0.20",
     "transformers>=4.57.0,<5",
     "tokenizers>=0.20.0",
     "sentencepiece",
+]
+# Bring-your-own hosted LLM via LiteLLM (Anthropic / Gemini / OpenAI / ...).
+external = [
+    "litellm>=1.0",
+    "python-dotenv",
+    "json-repair",
+]
+# CLAP-audio retrieval (experimental, heavy).
+heavy = [
     "laion-clap",
     "torchvision",
 ]
-
-[project.optional-dependencies]
-# Local LLM inference (expressive mode) - CPU-only, uses huggingface transformers
+# Local LLM inference (expressive mode) - CPU-only, uses huggingface transformers.
 expressive = [
+    "latentscore[fast]",
     "outlines",
     "instructor",
-    "bitsandbytes; sys_platform == 'linux'",
+    "bitsandbytes; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "mlx; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "mlx-lm; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "llama-cpp-python; platform_machine != 'arm64' and sys_platform != 'win32'",

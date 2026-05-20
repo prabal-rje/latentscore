@@ -105,3 +105,6 @@ human_eval_app/
 llm_files/
 submissions/
 gemma-3-270m-it/
+
+# --- Local install-from-scratch test harness (Docker + conda) ---
+.install-test/

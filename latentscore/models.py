@@ -783,7 +783,9 @@ class FastEmbeddingModel:
             from sentence_transformers import SentenceTransformer  # type: ignore[import]
         except ImportError as exc:
             _LOGGER.warning("sentence-transformers not installed: %s", exc, exc_info=True)
-            raise ModelNotAvailableError("sentence-transformers is not installed") from exc
+            raise ModelNotAvailableError(
+                'sentence-transformers is not installed. Install with: pip install "latentscore[fast]"'
+            ) from exc
 
         _disable_transformers_progress()
         _patch_torch_parameter_for_hf()
@@ -940,7 +942,7 @@ class FastHeavyModel:
             import laion_clap  # type: ignore[import]
         except ImportError as exc:
             raise ModelNotAvailableError(
-                "laion-clap is not installed. Install via: pip install laion-clap"
+                'laion-clap is not installed. Install with: pip install "latentscore[heavy]"'
             ) from exc
 
         model = laion_clap.CLAP_Module(enable_fusion=False)
@@ -954,7 +956,7 @@ class FastHeavyModel:
 
     @functools.lru_cache(maxsize=1)
     def _example_matrix(self) -> NDArray[np.float32]:
-        examples, embed_matrix = self._clap_embed_map_examples()
+        _, embed_matrix = self._clap_embed_map_examples()
         if embed_matrix is not None:
             return embed_matrix
         raise ModelNotAvailableError(
@@ -1301,7 +1303,9 @@ class SemanticEmbeddingModel:
             from sentence_transformers import SentenceTransformer  # type: ignore[import]
         except ImportError as exc:
             _LOGGER.warning("sentence-transformers not installed: %s", exc, exc_info=True)
-            raise ModelNotAvailableError("sentence-transformers is not installed") from exc
+            raise ModelNotAvailableError(
+                'sentence-transformers is not installed. Install with: pip install "latentscore[fast]"'
+            ) from exc
 
         _disable_transformers_progress()
         _patch_torch_parameter_for_hf()
