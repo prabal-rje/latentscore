@@ -83,10 +83,10 @@ playlist.stream().play()
 
 ## Model selection
 
-- `"fast"` (default): MiniLM text-embedding retrieval (384-dim, sub-second).
-- `"fast_heavy"`: LAION-CLAP audio-embedding retrieval (512-dim, matches text against rendered audio).
-- `"expressive"` or `"local"`: local LLM (Apple Silicon uses MLX; other platforms use transformers with CUDA if available, otherwise CPU; 4-bit bitsandbytes is used when available).
-- `"external:<model-name>"`: shorthand for `LiteLLMAdapter`.
+- `"fast"` (default): MiniLM text-embedding retrieval (384-dim, sub-second). Included in the core install.
+- `"fast_heavy"`: LAION-CLAP audio-embedding retrieval (512-dim, matches text against rendered audio). Requires `pip install "latentscore[heavy]"`.
+- `"expressive"` or `"local"`: local LLM (Apple Silicon uses MLX; other platforms use transformers with CUDA if available, otherwise CPU; 4-bit bitsandbytes is used when available). Requires `pip install "latentscore[expressive]"`.
+- `"external:<model-name>"`: shorthand for `LiteLLMAdapter`. Requires `pip install "latentscore[external]"`.
 
 ```python
 import latentscore as ls
