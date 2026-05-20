@@ -36,7 +36,7 @@ conda activate latentscore
 pip install "latentscore[fast]"
 ```
 
-The `[fast]` extra adds text-prompt retrieval (sentence-transformers, ~1&nbsp;GB). Use `pip install latentscore` (no extras) for a minimal core that renders from a `MusicConfig` only &mdash; useful on headless servers.
+The `[fast]` extra adds retrieval-based text-prompt rendering (sentence-transformers, ~1&nbsp;GB). Bare `pip install latentscore` still accepts text prompts but falls back to a built-in heuristic mapper &mdash; useful on headless servers where the ML dependency would be overkill. The render API and `MusicConfig` work identically in both modes.
 
 ---
 
