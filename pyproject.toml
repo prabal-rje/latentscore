@@ -63,12 +63,18 @@ include = ["latentscore", "latentscore.*", "common", "common.*"]
 [tool.ruff]
 target-version = "py310"
 line-length = 100
+# The demo lives in its own conventions (vendored from the latentscore-demo
+# repo). It's not part of the library; don't gate make check on its style.
+extend-exclude = ["demo"]
 
 [tool.ruff.lint]
 extend-select = ["I"]
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.pyright]
+exclude = ["demo", "**/__pycache__", "**/node_modules"]
 
 [tool.pytest.ini_options]
 addopts = "--asyncio-mode=auto --maxfail=1 --cov=latentscore --cov=data_work --cov-report=term-missing"

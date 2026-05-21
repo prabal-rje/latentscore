@@ -1,0 +1,25 @@
+services:
+  backend:
+    build:
+      # Build from the latentscore repo root so the Dockerfile can install
+      # the bundled latentscore source via `pip install ./latentscore-src`.
+      context: ..
+      dockerfile: demo/backend/Dockerfile
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_ANONYMOUS: "${VITE_ANONYMOUS:-false}"
+    ports:
+      - "3002:80"
+    depends_on:
+      backend:
+        condition: service_healthy
