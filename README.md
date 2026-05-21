@@ -56,23 +56,40 @@ Then open [`localhost:3002`](http://localhost:3002). More details in [demo/](dem
 
 ## Install the SDK
 
-**Supported platforms:** macOS, Linux, Windows **ONLY** via [WSL2](docs/FAQ.md#can-i-run-this-on-windows). For the web UI on any OS, use the [Docker demo](#try-the-demo) instead.
+### Requirements
 
-**Requires Python 3.10&ndash;3.12.** If you don't have it: `brew install python@3.10` (macOS) or `pyenv install 3.10`.
+- **OS** &mdash; macOS, Linux, or Windows **ONLY** via [WSL2](docs/FAQ.md#can-i-run-this-on-windows). For the web UI on any OS, use the [Docker demo](#try-the-demo) instead.
+- **Python 3.10&ndash;3.12** &mdash; we test against [3.12](https://www.python.org/downloads/release/python-3120/) (matches our Docker image). Or use [conda](https://docs.conda.io/projects/miniconda/en/latest/) for environment management.
+
+### Install
+
+With **venv** (regular Python):
 
 ```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
 pip install latentscore
 ```
 
-Or with conda:
+With **conda**:
 
 ```bash
-conda create -n latentscore python=3.10 -y
+conda create -n latentscore python=3.12 -y
 conda activate latentscore
 pip install latentscore
 ```
 
-The baseline install gives you embedding-match text prompts (`ls.render("vibe")`), `MusicConfig` rendering, and local playback &mdash; everything in the Quick Start below. Optional extras: `[external]` for bring-your-own hosted LLMs (LiteLLM), `[heavy]` for CLAP audio retrieval, `[expressive]` for local LLM inference.
+### What you get
+
+`pip install latentscore` gives you text prompts (`ls.render("vibe")`), `MusicConfig` rendering, and local playback &mdash; the [Quick Start](#quick-start) below.
+
+Optional extras &mdash; install with `pip install "latentscore[<extra>]"`:
+
+| Extra | Adds |
+|---|---|
+| `external` | bring-your-own hosted LLM via [LiteLLM](https://docs.litellm.ai/) (Anthropic, Gemini, OpenAI, &hellip;) |
+| `heavy` | CLAP audio-based retrieval (`fast_heavy` model) |
+| `expressive` | local LLM inference |
 
 ### Verify your install
 
