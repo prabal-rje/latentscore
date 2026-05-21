@@ -1,80 +1,90 @@
-## Setting Up Your Environment with Conda
+# Contributing to LatentScore
 
-### 1. Install Conda
+## Setting Up Your Environment
 
-If you don't have Conda installed already, download and install [Miniconda](https://docs.conda.io/en/latest/miniconda.html) or [Anaconda](https://www.anaconda.com/products/distribution) following the instructions for your operating system.
+### 1. Install Conda (recommended)
 
-### 2. Create or Update the Environment
+Download [Miniconda](https://docs.conda.io/en/latest/miniconda.html) or [Anaconda](https://www.anaconda.com/products/distribution) if you don't have it already. The project pins Python 3.10–3.12.
 
-Create the `latentscore` environment from the repo's `environment.yml` (arm64 Conda on Apple Silicon):
-
-```bash
-conda env create -f environment.yml
-```
-
-If the environment already exists, update it:
+### 2. Create the environment
 
 ```bash
-conda env update -f environment.yml --prune
+conda create -n latentscore python=3.10 -y
+conda activate latentscore
 ```
 
-`environment.yml` installs the same dependencies as `requirements.txt`, so pip users can install:
+(`environment.yml` is also present for `conda env create -f environment.yml`, but the explicit two-liner above is the same thing and easier to update.)
+
+### 3. Install the package in editable mode with dev extras
+
+This is the canonical contributor install. It pulls everything you need
+to run the full test suite, build the docs, exercise the demo, and
+iterate on the library:
 
 ```bash
-pip install -r requirements.txt
+pip install -e ".[external,heavy,expressive,dev]"
 ```
 
-### macOS Prerequisites
+The extras:
 
-Install SoX for audio playback. ALSA headers are Linux-only and are not needed on macOS:
+- `[dev]` — pytest, ruff, pyright (the `make check` toolchain).
+- `[external]` — LiteLLM bridge for the `external:<model>` model spec.
+- `[heavy]` — laion-clap for `fast_heavy` retrieval.
+- `[expressive]` — local LLM backends (MLX on Apple Silicon, llama-cpp elsewhere).
+
+For a lighter setup that skips local LLM tooling:
+
+```bash
+pip install -e ".[external,heavy,dev]"
+```
+
+### 4. System prerequisites for audio playback
+
+**macOS:**
 
 ```bash
 brew install sox
 ```
 
-### Linux Prerequisites
-
-On Linux, install system packages required for audio playback and ALSA headers:
+**Linux:**
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y sox libasound2-dev
 ```
 
-### Windows Prerequisites
+**Windows:** install SoX with your preferred package manager (e.g.
+`winget install sox`). If you're using WSL, follow the Linux steps inside
+the WSL distro.
 
-Windows does not use ALSA headers. For native Windows, install SoX with your preferred package manager (e.g., `winget install sox`). If you are using WSL, follow the Linux prerequisites above inside your WSL distro.
+### 5. Next time
 
-### 3. Activate the Environment
-
-Before installing packages, activate the new environment:
-
-```bash
-conda activate latentscore
-```
-
-### 4. Editable Install (Optional)
-
-If you want editable imports for development:
-
-```bash
-pip install -e .
-```
-
-### 5. Next Time You Want To Contribute
-
-You only need to **create and set up** the environment once! The next time you want to contribute, just activate the environment:
+You only set this up once. Future sessions just need:
 
 ```bash
 conda activate latentscore
 ```
-
-Now you are ready to start working!
 
 ## Development Loop
 
-Install project dependencies and tooling via `environment.yml` (see above). Before opening a pull request, run the full suite:
+Before opening a pull request, run the full suite:
 
 ```bash
-make check
+make check     # ruff lint + format + pyright + pytest
 ```
+
+Style and review rules live in
+[`docs/contribute/coding-guidelines.md`](docs/contribute/coding-guidelines.md);
+code samples illustrating the conventions live in
+[`docs/contribute/examples.md`](docs/contribute/examples.md).
+
+## Working on the demo
+
+The interactive demo (`demo/`) is its own React + FastAPI artifact. See
+[`demo/README.md`](demo/README.md) for backend-only, frontend-only, and
+Docker Compose setup paths.
+
+## Working on the data pipeline
+
+The research pipeline lives under `data_work/` and uses a separate
+conda env (`latentscore-data`). See [`data_work/README.md`](data_work/README.md).

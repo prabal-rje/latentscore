@@ -75,6 +75,11 @@ latentscore demo --output ambient.wav    # save to file
 ```python
 import latentscore as ls
 
+# Optional one-time setup: pre-download the embedding model (~90 MB) so
+# the first render() call doesn't appear to hang. The download happens
+# on the first render anyway; this just makes it explicit and visible.
+ls.prefetch("fast")
+
 audio = ls.render("warm sunset over water", duration=10.0)
 audio.play()              # plays on your speakers
 audio.save("output.wav")  # save to WAV
