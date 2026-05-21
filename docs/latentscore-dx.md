@@ -168,3 +168,171 @@ audio = ls.render("underwater cave", hooks=hooks)
 - range: `[-1, 1]`
 - sample rate: `44100`
 - shape: `(n,)` (mono)
+
+```python
+import numpy as np
+import latentscore as ls
+
+audio = ls.render("deep ocean")
+samples = np.asarray(audio)  # NDArray[np.float32]
+```
+
+---
+
+## Controlling the sound
+
+### `MusicConfig` (full control)
+
+Build a config directly with human-readable labels and skip the
+text-prompt retrieval step entirely:
+
+```python
+import latentscore as ls
+
+config = ls.MusicConfig(
+    tempo="slow",
+    brightness="dark",
+    space="vast",
+    density=3,
+    bass="drone",
+    pad="ambient_drift",
+    melody="contemplative",
+    rhythm="minimal",
+    texture="shimmer",
+    echo="heavy",
+    root="d",
+    mode="minor",
+)
+
+ls.render(config, duration=10.0).play()
+```
+
+### `MusicConfigUpdate` (tweak a vibe)
+
+Start from a vibe and override specific parameters:
+
+```python
+import latentscore as ls
+
+audio = ls.render(
+    "morning coffee shop",
+    duration=10.0,
+    update=ls.MusicConfigUpdate(
+        brightness="very_bright",
+        rhythm="electronic",
+    ),
+)
+audio.play()
+```
+
+### Relative steps
+
+`Step(+1)` moves one level up the scale, `Step(-1)` moves one down.
+Saturates at the boundaries.
+
+```python
+from latentscore.config import Step
+
+audio = ls.render(
+    "morning coffee shop",
+    duration=10.0,
+    update=ls.MusicConfigUpdate(
+        brightness=Step(+2),   # two levels brighter
+        space=Step(-1),        # one level less spacious
+    ),
+)
+audio.play()
+```
+
+## Parameter reference
+
+Every `MusicConfig` field uses human-readable labels.
+
+| Field | Labels |
+|-------|--------|
+| `tempo` | `very_slow` `slow` `medium` `fast` `very_fast` |
+| `brightness` | `very_dark` `dark` `medium` `bright` `very_bright` |
+| `space` | `dry` `small` `medium` `large` `vast` |
+| `motion` | `static` `slow` `medium` `fast` `chaotic` |
+| `stereo` | `mono` `narrow` `medium` `wide` `ultra_wide` |
+| `echo` | `none` `subtle` `medium` `heavy` `infinite` |
+| `human` | `robotic` `tight` `natural` `loose` `drunk` |
+| `attack` | `soft` `medium` `sharp` |
+| `grain` | `clean` `warm` `gritty` |
+| `density` | `2` `3` `4` `5` `6` |
+| `root` | `c` `c#` `d` ... `a#` `b` |
+| `mode` | `major` `minor` `dorian` `mixolydian` |
+
+**Layer styles:**
+
+| Layer | Styles |
+|-------|--------|
+| `bass` | `drone` `sustained` `pulsing` `walking` `fifth_drone` `sub_pulse` `octave` `arp_bass` |
+| `pad` | `warm_slow` `dark_sustained` `cinematic` `thin_high` `ambient_drift` `stacked_fifths` `bright_open` |
+| `melody` | `procedural` `contemplative` `rising` `falling` `minimal` `ornamental` `arp_melody` `contemplative_minor` `call_response` `heroic` |
+| `rhythm` | `none` `minimal` `heartbeat` `soft_four` `hats_only` `electronic` `kit_light` `kit_medium` `military` `tabla_essence` `brush` |
+| `texture` | `none` `shimmer` `shimmer_slow` `vinyl_crackle` `breath` `stars` `glitch` `noise_wash` `crystal` `pad_whisper` |
+| `accent` | `none` `bells` `pluck` `chime` `bells_dense` `blip` `blip_random` `brass_hit` `wind` `arp_accent` `piano_note` |
+
+## Bring your own LLM
+
+Use any LLM through [LiteLLM](https://docs.litellm.ai/docs/providers)
+&mdash; OpenAI, Anthropic, Google, Mistral, Groq, and
+[100+ others](https://docs.litellm.ai/docs/providers). Install with
+`pip install "latentscore[external]"`.
+
+```python
+import latentscore as ls
+
+# Gemini (free tier available)
+ls.render("cyberpunk rain on neon streets", model="external:gemini/gemini-3-flash-preview").play()
+
+# Claude
+ls.render("cozy library with rain outside", model="external:anthropic/claude-sonnet-4-5-20250929").play()
+
+# GPT
+ls.render("space station ambient", model="external:openai/gpt-4o").play()
+```
+
+API keys are read from environment variables automatically
+(`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`).
+
+### LLM metadata
+
+External models return rich metadata alongside audio:
+
+```python
+audio = ls.render("cyberpunk rain", model="external:gemini/gemini-3-flash-preview")
+
+if audio.metadata is not None:
+    print(audio.metadata.title)      # e.g. "Neon Rain Drift"
+    print(audio.metadata.thinking)   # the LLM's reasoning
+    print(audio.metadata.config)     # the MusicConfig it chose
+    for palette in audio.metadata.palettes:
+        print([c.hex for c in palette.colors])
+```
+
+> **Note:** LLM models are slower than the default `fast` model
+> (network round-trips) and can occasionally produce invalid configs.
+> The built-in `fast` model is recommended for production use.
+
+## Local LLM (`expressive` / `local`)
+
+> **Not recommended.** The default `fast` and `fast_heavy` models are
+> faster, more reliable, and produce higher-quality results.
+> Expressive mode exists for experimentation only.
+
+Runs a 270M-parameter Gemma 3 LLM locally. On macOS Apple Silicon,
+inference uses MLX (~5&ndash;15&nbsp;s). On CPU-only Linux, it uses
+`transformers` (30&ndash;120&nbsp;s per render). The local model can
+produce invalid configs and our benchmarks showed it barely outperforms
+a random baseline.
+
+```bash
+pip install 'latentscore[expressive]'
+latentscore download expressive
+```
+
+```python
+ls.render("jazz cafe at midnight", model="expressive").play()
+```
