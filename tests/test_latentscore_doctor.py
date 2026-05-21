@@ -145,3 +145,33 @@ def test_doctor_required_check_failure_triggers_warn_overall() -> None:
     )
     report = DoctorReport(status="fail", strict=True, offline=False, checks=checks)
     assert doctor_exit_code(report) == 1
+
+
+def test_doctor_cli_hint_preserves_bracket_extras(capsys, monkeypatch) -> None:
+    """Regression: Rich Console parses `[external]` etc. as markup tags and would
+    silently strip them from hint strings, leaving users with a useless
+    `pip install "latentscore"`. The CLI must call console.print with
+    markup=False so hint text renders literally."""
+    import importlib.util
+
+    real_find_spec = importlib.util.find_spec
+
+    def _no_litellm(name, *args, **kwargs):
+        if name == "litellm":
+            return None
+        return real_find_spec(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib.util, "find_spec", _no_litellm)
+
+    exit_code = main(["doctor", "--require-external", "--strict", "--offline"])
+    out = capsys.readouterr().out
+
+    # The external check should have failed and rendered its hint
+    assert "external_available" in out
+    assert "FAIL" in out
+    # The fix: brackets must be preserved literally, not parsed as Rich markup
+    assert '"latentscore[external]"' in out, (
+        f"Rich markup parsing stripped [external] from the hint. Output was:\n{out}"
+    )
+    # And in strict mode, exit code should be 1
+    assert exit_code == 1

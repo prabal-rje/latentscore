@@ -132,7 +132,12 @@ def main(argv: list[str] | None = None) -> int:
             if args.json:
                 print(render_json(report))
             else:
-                render_text(report, _CONSOLE.print)
+                # `markup=False` so Rich doesn't parse `[external]`/`[heavy]`/
+                # `[expressive]` in hint strings as styling tags and silently
+                # strip them.
+                from functools import partial
+
+                render_text(report, partial(_CONSOLE.print, markup=False))
             return doctor_exit_code(report)
 
         parser.print_help()
