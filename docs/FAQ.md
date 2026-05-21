@@ -91,11 +91,10 @@ version:
 
 - **Native Windows** &mdash; core and `[external]` should work
   (all deps ship Windows wheels) but we haven't tested. `[expressive]`
-  also installs on Windows: `llama-cpp-python`, `mlx`, and
-  `bitsandbytes` are excluded by pyproject markers, but the code
-  falls back to the `transformers` backend which is in core. CPU
-  inference of the 270M Gemma model is slow (~30&ndash;120&nbsp;s
-  per render) but functional.
+  also installs and runs on Windows via the `transformers` backend.
+  Note this is the same backend that runs on every other platform too
+  &mdash; MLX integration isn't actually live, so even Apple Silicon
+  is on CPU. Expect ~30&ndash;100&nbsp;seconds per render.
 - **WSL2** &mdash; works identically to Linux. This is the
   recommended path for native Windows users who want speed parity.
 - **Docker Desktop** &mdash; the bundled demo (`demo/`) runs fine.
@@ -111,9 +110,13 @@ No. The entire library is CPU-only. The headline `fast` model is
 nearest-neighbor lookup over a precomputed 384-dim embedding matrix
 &mdash; effectively a dot product. Audio synthesis is pure NumPy.
 
-`[expressive]` (local LLM inference) optionally uses MLX on Apple
-Silicon for speedup, and `transformers` will use CUDA if it's
-available, but neither is required.
+`[expressive]` (local LLM inference) runs through the `transformers`
+backend on every platform (including macOS &mdash; MLX integration is
+declared in pyproject markers but not actually wired into the runtime
+yet). CUDA is used if available; otherwise it's CPU. A single render
+on macOS / CPU takes ~30&ndash;100&nbsp;seconds, so expressive mode is
+slow even on a fast laptop &mdash; stick with `fast` or `fast_heavy`
+unless you specifically need LLM-generated configs.
 
 ---
 

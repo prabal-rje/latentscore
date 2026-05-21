@@ -198,8 +198,7 @@ python -m data_work.02a_extract_vibes \
 - Disable caching with `--no-prompt-caching` in `02b_generate_configs` if needed
 
 **Inference note (2026-01-18):**
-- MLX-based local inference uses the same system/user role contract and logs a warning
-  because MLX is a temporary inference path.
+- The `expressive` / `local` model path is declared in pyproject markers as MLX-on-Apple-Silicon + llama-cpp/transformers elsewhere, but in the current release the runtime always falls back to the CPU `transformers` backend (~30&ndash;100&nbsp;s per render). The role-based prompt contract is the same regardless of backend.
 
 **Command:**
 ```bash

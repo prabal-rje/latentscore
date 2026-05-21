@@ -22,7 +22,15 @@ https://private-user-images.githubusercontent.com/140295281/557606724-22889dcc-9
 
 ## Live demo
 
-The interactive demo at **[latentscore.com/demo](https://latentscore.com/demo)** lets you type vibes and stream audio in the browser &mdash; no install needed. The full source (FastAPI backend + React frontend + Dockerfile) lives in [`demo/`](demo/). To run it locally: `docker compose -f demo/docker-compose.yml up --build` (see [`demo/README.md`](demo/README.md) for details).
+Try it in your browser: **[latentscore.com/demo](https://latentscore.com/demo)** &mdash; no install needed.
+
+To run it locally:
+
+```bash
+docker compose -f demo/docker-compose.yml up --build
+```
+
+More details in [demo/](demo/).
 
 ---
 
@@ -31,9 +39,9 @@ The interactive demo at **[latentscore.com/demo](https://latentscore.com/demo)**
 - [Install](#install) &mdash; 30 seconds
 - [Quick start](#quick-start) &mdash; Python in 5 lines
 - [Controlling the sound](#controlling-the-sound) &mdash; `MusicConfig` parameters
-- [Library DX](docs/latentscore-dx.md) &mdash; streaming, live playlists, async API, bring-your-own-LLM
+- [Documentation](docs/latentscore-dx.md) &mdash; streaming, live playlists, async, bring-your-own-LLM
 - [How it works](docs/architecture.md#how-it-works) &mdash; embedding retrieval, no LLM hallucinations
-- [Help / FAQ](docs/FAQ.md) &mdash; common questions
+- [FAQ](docs/FAQ.md) &mdash; common questions
 - [Citation](#citation) &mdash; SIGGRAPH Talks '26 BibTeX
 
 ---
@@ -62,31 +70,27 @@ The baseline install gives you embedding-match text prompts (`ls.render("vibe")`
 latentscore doctor --strict --offline
 ```
 
-Runs ten checks (Python version, package metadata, license, audio I/O, schema export, core synth render, retrieval render, optional-extra availability) and exits non-zero if anything required is broken. Add `--require-external`/`--require-heavy`/`--require-expressive` to also fail when those extras aren't installed. Add `--json` for machine-readable output.
+Exits non-zero with a clear hint if anything's broken. Add `--json` for machine-readable output.
 
-### Platform support
-
-| Platform | Core (`pip install latentscore`) | `[external]` | `[heavy]` | `[expressive]` | Demo (Docker) |
-|---|---|---|---|---|---|
-| macOS arm64 | ✅ tested | ✅ tested | ✅ tested | ✅ tested (MLX) | ✅ tested |
-| Linux x86_64 | ✅ tested | ✅ tested | ✅ tested | ✅ tested | ✅ tested |
-| Windows native | should work | should work | untested | should work (transformers backend; mlx + llama-cpp excluded by markers) | ✅ via Docker Desktop |
-| Windows WSL2 | as Linux | as Linux | as Linux | as Linux | as Linux |
-
-If you're on native Windows and hit an issue, the cleanest fallback is **WSL2** (then follow the Linux instructions inside it) or **Docker Desktop** for the demo. If you find that core or `[external]` actually works on native Windows, please open an issue so we can mark it tested.
+> ⚠️ **Windows native is untested.** Core, [external], and [heavy] should work via pip wheels; [expressive] runs the local LLM through the CPU `transformers` backend (slow, see the [FAQ](docs/FAQ.md)). Use **WSL2** or **Docker Desktop** if you hit issues.
 
 ---
 
 ## CLI
 
 ```bash
-latentscore doctor                       # run 10 install health checks
-latentscore doctor --strict --offline    # CI-friendly: nonzero on required-fail
-latentscore doctor --json                # machine-readable JSON
-latentscore download fast                # prefetch the default model assets
-latentscore demo                         # render and play a sample
-latentscore demo --duration 30           # 30-second demo
-latentscore demo --output ambient.wav    # save to file
+# Verify your install
+latentscore doctor                       # human-readable summary
+latentscore doctor --strict --offline    # nonzero exit if anything's broken
+latentscore doctor --json                # machine-readable output
+
+# Pre-download model assets (otherwise the first render call appears to hang)
+latentscore download fast                # ~90 MB, MiniLM embedding model
+latentscore download fast_heavy          # ~1.8 GB, LAION-CLAP weights
+
+# Render a sample clip
+latentscore demo                         # play a short ambient clip
+latentscore demo --duration 30 --output ambient.wav   # 30 seconds, save to file
 ```
 
 ---
@@ -141,20 +145,20 @@ ls.render(
 ).play()
 ```
 
-See [`docs/latentscore-dx.md`](docs/latentscore-dx.md) for the full
-parameter reference, relative-step updates, streaming, live playlists,
-async API, and bring-your-own-LLM cookbook.
+See the [full documentation](docs/latentscore-dx.md) for the parameter
+reference, relative-step updates, streaming, live playlists, async
+API, and bring-your-own-LLM cookbook.
 
 ---
 
 ## Read more
 
-- [`docs/latentscore-dx.md`](docs/latentscore-dx.md) &mdash; full library DX: parameter reference, streaming, live playlists, async API, bring-your-own-LLM cookbook, audio contract.
-- [`docs/architecture.md`](docs/architecture.md) &mdash; system architecture + how the retrieval works under the hood.
-- [`docs/FAQ.md`](docs/FAQ.md) &mdash; common questions (first-call hang, system deps, Windows support, citation, …).
-- [`data_work/README.md`](data_work/README.md) &mdash; research / training pipeline.
-- [`CONTRIBUTE.md`](CONTRIBUTE.md) &mdash; contributor setup; [`docs/contribute/coding-guidelines.md`](docs/contribute/coding-guidelines.md) for style rules.
-- [`demo/README.md`](demo/README.md) &mdash; the bundled FastAPI + React demo.
+- [Documentation](docs/latentscore-dx.md) &mdash; parameter reference, streaming, async API, bring-your-own-LLM
+- [How it works](docs/architecture.md) &mdash; embedding retrieval, explained
+- [FAQ](docs/FAQ.md) &mdash; first-call hang, system deps, Windows, citation, …
+- [Research pipeline](data_work/README.md) &mdash; how the dataset was built
+- [Contributing](CONTRIBUTE.md) &mdash; setup + [style rules](docs/contribute/coding-guidelines.md)
+- [Demo](demo/) &mdash; run the web demo locally
 
 ---
 

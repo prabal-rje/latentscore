@@ -85,7 +85,7 @@ playlist.stream().play()
 
 - `"fast"` (default): MiniLM text-embedding retrieval (384-dim, sub-second). Included in the core install.
 - `"fast_heavy"`: LAION-CLAP audio-embedding retrieval (512-dim, matches text against rendered audio). Requires `pip install "latentscore[heavy]"`.
-- `"expressive"` or `"local"`: local LLM (Apple Silicon uses MLX; other platforms use transformers with CUDA if available, otherwise CPU; 4-bit bitsandbytes is used when available). Requires `pip install "latentscore[expressive]"`.
+- `"expressive"` or `"local"`: local LLM (270M Gemma 3). Always runs through the CPU `transformers` backend in the current release &mdash; MLX integration is declared in pyproject markers but not yet wired into the runtime, so even on Apple Silicon you're on CPU. Expect ~30&ndash;100&nbsp;s per render. Requires `pip install "latentscore[expressive]"`.
 - `"external:<model-name>"`: shorthand for `LiteLLMAdapter`. Requires `pip install "latentscore[external]"`.
 
 ```python
@@ -316,17 +316,19 @@ if audio.metadata is not None:
 > (network round-trips) and can occasionally produce invalid configs.
 > The built-in `fast` model is recommended for production use.
 
-## Local LLM (`expressive` / `local`)
+## Local LLM (`expressive` / `local`) ⚠️
 
-> **Not recommended.** The default `fast` and `fast_heavy` models are
-> faster, more reliable, and produce higher-quality results.
-> Expressive mode exists for experimentation only.
+> **Not recommended for general use.** The default `fast` and
+> `fast_heavy` models are faster, more reliable, and produce
+> higher-quality results. Expressive mode exists for experimentation.
 
-Runs a 270M-parameter Gemma 3 LLM locally. On macOS Apple Silicon,
-inference uses MLX (~5&ndash;15&nbsp;s). On CPU-only Linux, it uses
-`transformers` (30&ndash;120&nbsp;s per render). The local model can
-produce invalid configs and our benchmarks showed it barely outperforms
-a random baseline.
+Runs a 270M-parameter Gemma 3 LLM locally via the `transformers`
+backend on CPU &mdash; **including on Apple Silicon**. MLX integration
+is declared in pyproject markers but isn't actually wired into the
+runtime yet, so every platform falls back to CPU `transformers`.
+Expect ~30&ndash;100&nbsp;seconds per render on a laptop. The local
+model can also produce invalid configs and our benchmarks showed it
+barely outperforms a random baseline.
 
 ```bash
 pip install 'latentscore[expressive]'
