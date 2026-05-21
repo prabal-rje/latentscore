@@ -64,11 +64,14 @@ def test_core_render_paths_work_without_optional_extras(tmp_path: Path) -> None:
         print("PASS")
     """).strip()
 
+    # 300s timeout because a cold first run (no Hugging Face cache) needs to
+    # download MiniLM (~90 MB) before the text-prompt render can succeed.
+    # Warm-cache runs finish in <10s.
     result = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=300,
     )
     assert result.returncode == 0, (
         f"core-only render failed with poisoned optional extras:\n"

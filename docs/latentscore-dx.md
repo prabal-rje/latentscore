@@ -60,7 +60,6 @@ async for chunk in ls.stream(
 
 - `stream(...)` supports both `for` and `async for`.
 - `chunk_seconds` controls chunk sizing.
-- `preview=True` uses the fast model as a speculative preview while a slower model loads.
 
 ## Tier 3: Composition primitives
 

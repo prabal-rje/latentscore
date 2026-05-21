@@ -78,16 +78,14 @@ Fix per platform:
   are only needed for source compilation.
 - **macOS:** the Homebrew Python comes with these by default. If
   it's still failing, `brew install sox` is usually enough.
-- **Windows native:** see [Platform support](../README.md#platform-support)
-  in the main README. WSL2 is the recommended path.
+- **Windows native:** see the [Windows answer](#can-i-run-this-on-windows)
+  below. WSL2 is the recommended path.
 
 ---
 
 ## Can I run this on Windows?
 
-The honest matrix is in the main README's
-[Platform support](../README.md#platform-support) section. Short
-version:
+Short version (the README has a one-line warning pointing here):
 
 - **Native Windows** &mdash; core and `[external]` should work
   (all deps ship Windows wheels) but we haven't tested. `[expressive]`

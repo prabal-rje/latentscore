@@ -30,7 +30,7 @@ The extras:
 - `[dev]` — pytest, ruff, pyright (the `make check` toolchain).
 - `[external]` — LiteLLM bridge for the `external:<model>` model spec.
 - `[heavy]` — laion-clap for `fast_heavy` retrieval.
-- `[expressive]` — local LLM backends (MLX on Apple Silicon, llama-cpp elsewhere).
+- `[expressive]` — local LLM (270M Gemma 3). Currently runs through the CPU `transformers` backend on every platform; MLX / llama-cpp markers exist in `pyproject.toml` but aren't wired into the runtime yet, so renders take ~30–100&nbsp;s.
 
 For a lighter setup that skips local LLM tooling:
 
