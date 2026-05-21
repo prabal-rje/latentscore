@@ -89,6 +89,9 @@ data_work/.smoke/
 data_work/fireworks/
 # Dated dataset/score dumps from the pipeline (e.g. 2026-01-26_scored/, ~131 MB)
 data_work/2[0-9][0-9][0-9]-*/
+# Paper-figure generation output (PDFs/PNGs/TeX kept locally for paper builds,
+# never committed — regenerate via data_work/plots/plot_all.py).
+data_work/plots/
 datasets/
 latentscore-gemma3-270m-v5-merged/
 latentscore-gemma3-270m-v5-mlx-4bit/

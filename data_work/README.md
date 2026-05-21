@@ -1,32 +1,88 @@
 # Data Work
 
-This folder is intended for researchers who want to generate data, train models, or otherwise
-run data preparation scripts outside of the core LatentScore package.
+This folder is for researchers who want to regenerate the training data, retrain a model,
+or rerun the paper's evaluation harness. It's standalone — the published `latentscore`
+library doesn't depend on anything here, and `pip install latentscore` does not pull
+`data_work/` into your environment.
+
+## Directory layout
+
+```
+data_work/
+├── README.md                  this file
+├── EXPERIMENTS.md             runnable command catalog (consumed by run_experiments.py)
+├── METHODOLOGY.md             narrative of how the dataset was built
+│
+├── 01_download_base_data.py   stage 1: Common Pile corpus sampling
+├── 02a_extract_vibes.py       stage 2a: vibe extraction (cheap LLM)
+├── 02b_generate_configs.py    stage 2b: config generation (SOTA LLM, best-of-N)
+├── 02c_score_configs.py       stage 2c: pick best candidate per vibe via CLAP
+├── 03_modal_train.py          stage 3: SFT + GRPO training on Modal
+├── 04_clap_benchmark.py       stage 4: CLAP-based eval across models/baselines
+├── 05_export_models.py        stage 5: export trained weights to MLX/GGUF
+├── 06_eval_suite.py           later: prompt-controllability eval
+├── 07_human_eval_pack.py      pack samples for human evaluators
+├── 07_modal_infer_eval.py     run inference for human-eval pack
+├── 08_synth_sensitivity.py    ablation: how much each config field matters
+├── 09_field_usage.py          analysis: which fields the model actually moves
+├── 09_render_audio_from_results.py  render WAVs from a benchmark JSONL
+├── 10_export_embedding_map.py text-embedding map for the fast model
+├── 11_sample_test_prompts.py  produce held-out test prompts
+├── 12_perf_benchmark.py       latency benchmarks
+├── 13_live_timing.py          live-streaming timing analysis
+├── 14_export_clap_embedding_map.py  CLAP audio-embedding map (fast_heavy model)
+├── 98_export_fireworks_jsonl.py     export SFT/GRPO JSONL in Fireworks chat format
+│
+├── audio_rewards.py           CLAP-based reward function (used by 03_modal_train)
+├── generate_audio_from_configs.py   utility: render WAVs from a configs.jsonl
+├── test_scorer.py             example scorer plugin for 02c (see usage below)
+├── run_experiments.py         parses bash blocks from EXPERIMENTS.md and runs them
+│
+├── lib/                       shared helpers: LLM client, schemas, dedupe, scoring
+├── eval_sets/                 curated eval-prompt fixtures (own README + JSONLs)
+│
+├── environment.yml            conda env definition for the latentscore-data env
+├── requirements.txt           pip-flat dependency list (used by environment.yml)
+└── setup_python_env.sh        helper that creates a venv and installs requirements
+```
+
+What's NOT tracked (gitignored, regenerated locally as you run the pipeline):
+
+- `data_work/.outputs/`, `.cache/`, `.processed*/`, `.eval_results/`, `.benchmarks/`,
+  `.modal_outputs/`, `.exports/`, `.experiments/`, `.tmp_*/`, `.audio/`, `.smoke/`,
+  `fireworks/`, `2[0-9][0-9][0-9]-*/`
+- `data_work/plots/` — paper-figure PNG/PDF/TeX outputs. Stays local; regenerate via
+  `python data_work/plots/plot_all.py`. (The plot scripts themselves live in this folder
+  on your disk, just not in the repo.)
 
 ## Environment setup (separate from core LatentScore)
 
-This data pipeline uses a dedicated conda environment to avoid pulling data-only dependencies
-into the main LatentScore install.
+This data pipeline uses a dedicated conda environment, `latentscore-data`, to avoid
+pulling data-only dependencies into the main LatentScore install.
 
 ```bash
 conda env create -f data_work/environment.yml
 conda activate latentscore-data
 ```
 
-You can also use the local venv helper:
+Or with the local venv helper:
 
 ```bash
 ./data_work/setup_python_env.sh
 source data_work/.venv/bin/activate
 ```
 
-Or install manually:
+Or manually:
 
 ```bash
 python3 -m venv data_work/.venv
 source data_work/.venv/bin/activate
 pip install -r data_work/requirements.txt
 ```
+
+Note: `data_work/requirements.txt` and `data_work/environment.yml` are *separate* from
+the root-level `pyproject.toml` that drives the `latentscore` library install. The
+root install does not need any of these.
 
 ## Scripts
 
@@ -222,17 +278,6 @@ Show all options:
 ```bash
 python -m data_work.02a_extract_vibes --help
 python -m data_work.02b_generate_configs --help
-```
-
-### `debug_vibe_noisy`
-
-Quick sanity check for `vibe_noisy` differences in existing outputs plus an
-nlpaug noise demo.
-
-```bash
-python -m data_work.lib.debug_vibe_noisy \
-  --input data_work/.processed_smoke2/SFT-Train.jsonl \
-  --limit 200
 ```
 
 ### `03_modal_train`
