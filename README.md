@@ -45,14 +45,14 @@ Then open [`localhost:3002`](http://localhost:3002). More details in [demo/](dem
 
 ## 3. Contents
 
-- [1. Try it now](#1-try-it-now) - four ways to get going (browser, Docker, Colab, pip)
-- [2. Try the demo](#2-try-the-demo) - deeper Docker setup
-- [4. Install the SDK](#4-install-the-sdk) - pip, 30 seconds
-- [5. CLI](#5-cli) - `latentscore doctor`, `download`, `demo`
-- [6. Quick start](#6-quick-start) - Python in 5 lines
-- [7. Controlling the sound](#7-controlling-the-sound) - `MusicConfig` parameters
-- [8. Read more](#8-read-more) - docs, FAQ, research pipeline, contributing
-- [9. Citation](#9-citation) - SIGGRAPH Talks '26 BibTeX
+- [Try it now](#1-try-it-now) - four ways to get going (browser, Docker, Colab, pip)
+- [Try the demo](#2-try-the-demo) - deeper Docker setup
+- [Install the SDK](#4-install-the-sdk) - pip, 30 seconds
+- [CLI](#5-cli) - `latentscore doctor`, `download`, `demo`
+- [Quick start](#6-quick-start) - Python in 5 lines
+- [Controlling the sound](#7-controlling-the-sound) - `MusicConfig` parameters
+- [Read more](#8-read-more) - docs, FAQ, research pipeline, contributing
+- [Citation](#9-citation) - SIGGRAPH Talks '26 BibTeX
 - [Documentation](docs/latentscore-dx.md) - streaming, live playlists, async, bring-your-own-LLM
 - [How it works](docs/architecture.md#how-it-works) - embedding retrieval, no LLM hallucinations
 - [FAQ](docs/FAQ.md) - common questions
