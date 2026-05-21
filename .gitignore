@@ -62,13 +62,10 @@ latentscore.egg-info/
 # !.codex/setup.sh
 **/repomix-output.xml
 **/repomix-output.md
+# docs/plans/ is local-only — design docs + historical implementation plans
+# stay on disk for reference but never ship with the repo.
 docs/plans/**/*.md
 docs/plans
-!docs/plans/
-!docs/plans/2026-01-15-dependency-install-docs.md
-!docs/plans/2026-01-15-platform-prereq-clarify.md
-!docs/plans/2026-01-19-title-payload-design.md
-!docs/plans/2026-01-19-title-payload-implementation-plan.md
 data_work/.cache/
 data_work/.outputs*/
 data_work/.processed*/

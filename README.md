@@ -354,7 +354,7 @@ See [`data_work/README.md`](data_work/README.md) and [`docs/architecture.md`](do
 
 See [`CONTRIBUTE.md`](CONTRIBUTE.md) for environment setup and contribution guidelines.
 
-See [`docs/coding-guidelines.md`](docs/coding-guidelines.md) for code style requirements.
+See [`docs/contribute/coding-guidelines.md`](docs/contribute/coding-guidelines.md) for code style requirements.
 
 ---
 
