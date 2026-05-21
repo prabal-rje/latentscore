@@ -86,13 +86,13 @@ pip install latentscore
 
 `pip install latentscore` gives you text prompts (`ls.render("vibe")`), `MusicConfig` rendering, and local playback &mdash; the [Quick Start](#quick-start) below.
 
-Optional extras &mdash; install with `pip install "latentscore[<extra>]"`:
+Optional extras:
 
-| Extra | Adds |
+| Install | Adds |
 |---|---|
-| `external` | bring-your-own hosted LLM via [LiteLLM](https://docs.litellm.ai/) (Anthropic, Gemini, OpenAI, &hellip;) |
-| `heavy` | CLAP audio-based retrieval (`fast_heavy` model) |
-| `expressive` | local LLM inference |
+| `pip install "latentscore[external]"` | bring-your-own hosted LLM via [LiteLLM](https://docs.litellm.ai/) (Anthropic, Gemini, OpenAI, &hellip;) |
+| `pip install "latentscore[heavy]"` | CLAP audio-based retrieval (`fast_heavy` model) |
+| `pip install "latentscore[expressive]"` | local LLM inference |
 
 ### Verify your install
 
