@@ -56,7 +56,7 @@ Then open [`localhost:3002`](http://localhost:3002). More details in [demo/](dem
 
 ## Install the SDK
 
-**Supported platforms:** macOS, Linux, Windows via [WSL2](docs/FAQ.md#can-i-run-this-on-windows). Native Windows isn't supported &mdash; the SDK depends on PyTorch, which doesn't ship Windows-native wheels for ARM64. For the web UI on any OS, use the [Docker demo](#try-the-demo) instead.
+**Supported platforms:** macOS, Linux, Windows **ONLY** via [WSL2](docs/FAQ.md#can-i-run-this-on-windows). For the web UI on any OS, use the [Docker demo](#try-the-demo) instead.
 
 **Requires Python 3.10&ndash;3.12.** If you don't have it: `brew install python@3.10` (macOS) or `pyenv install 3.10`.
 
