@@ -85,6 +85,13 @@ scripts/outlines_constrained_demo.py
 data_work/.gguf_models/
 data_work/.llama.cpp/
 data_work/.mlx_models/
+# Local outputs from the data pipeline (never committed)
+data_work/.tmp_*/
+data_work/.audio/
+data_work/.smoke/
+data_work/fireworks/
+# Dated dataset/score dumps from the pipeline (e.g. 2026-01-26_scored/, ~131 MB)
+data_work/2[0-9][0-9][0-9]-*/
 datasets/
 latentscore-gemma3-270m-v5-merged/
 latentscore-gemma3-270m-v5-mlx-4bit/
