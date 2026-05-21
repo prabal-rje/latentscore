@@ -6,11 +6,12 @@
 
 **Generate ambient music from text. Locally. No GPU required.**
 
-**Three ways to try it:**
+**Four ways to try it:**
 
 - 🎧 **Hear it now** &mdash; [latentscore.com/demo](https://latentscore.com/demo). Browser, no install.
 - 🐳 **Run the demo locally** &mdash; `docker compose` on any OS. See [Try the demo](#try-the-demo).
-- 🛠 **Build with it** &mdash; `pip install latentscore` on macOS, Linux, or Windows WSL2. See [Install the SDK](#install-the-sdk).
+- 📓 **Try the SDK in Colab** &mdash; [open the quickstart notebook](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart.ipynb). No install, runs in your browser.
+- 🛠 **Build with it locally** &mdash; `pip install latentscore` on macOS, Linux, or Windows WSL2. See [Install the SDK](#install-the-sdk).
 
 ```python
 import latentscore as ls
