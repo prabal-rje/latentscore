@@ -28,7 +28,7 @@ latentscore download fast
 
 Subsequent calls hit the local cache and complete in &lt;1&nbsp;s. The
 `fast_heavy` model has the same shape but downloads ~1.8&nbsp;GB of
-LAION-CLAP weights instead of the 90&nbsp;MB MiniLM &mdash; expect
+LAION-CLAP weights instead of the 90&nbsp;MB MiniLM - expect
 several minutes on first use.
 
 ---
@@ -92,13 +92,13 @@ availability entirely.
 **The SDK (`pip install latentscore`) does not work on native Windows.**
 It depends on PyTorch, which doesn't ship Windows ARM64 wheels at all
 (empirically confirmed on Windows 11 ARM), and Windows x64 is
-untested. On Windows, install the SDK inside **WSL2** &mdash; WSL2
+untested. On Windows, install the SDK inside **WSL2** - WSL2
 runs a Linux kernel, so PyTorch wheels are available and the install
 path is identical to native Linux.
 
 Install WSL2 via Microsoft's official guide: [Install WSL](https://learn.microsoft.com/en-us/windows/wsl/install).
 Once you have an Ubuntu shell, follow the standard Linux install
-instructions in the [README](../README.md#install-the-sdk).
+instructions in the [README](../README.md#4-install-the-sdk).
 
 If you successfully install the SDK on native Windows x64 (where
 PyTorch wheels do exist but we haven't tested), please open an issue
@@ -110,14 +110,14 @@ so we can update this answer.
 
 No. The entire library is CPU-only. The headline `fast` model is
 nearest-neighbor lookup over a precomputed 384-dim embedding matrix
-&mdash; effectively a dot product. Audio synthesis is pure NumPy.
+- effectively a dot product. Audio synthesis is pure NumPy.
 
 `[expressive]` (local LLM inference) runs through the `transformers`
-backend on every platform (including macOS &mdash; MLX integration is
+backend on every platform (including macOS - MLX integration is
 declared in pyproject markers but not actually wired into the runtime
 yet). CUDA is used if available; otherwise it's CPU. A single render
 on macOS / CPU takes ~30&ndash;100&nbsp;seconds, so expressive mode is
-slow even on a fast laptop &mdash; stick with `fast` or `fast_heavy`
+slow even on a fast laptop - stick with `fast` or `fast_heavy`
 unless you specifically need LLM-generated configs.
 
 ---
@@ -157,7 +157,7 @@ The default model isn't an LLM. It's a **retrieval system**: your
 text gets embedded with MiniLM (or CLAP for `fast_heavy`), then
 the nearest neighbor is picked from a hand-curated library of
 ~10,000&nbsp;`MusicConfig` records. Each record is a deterministic
-recipe for a piece of music &mdash; no generation, no
+recipe for a piece of music - no generation, no
 hallucinations, just selection + a procedural synth.
 
 You can opt in to LLM-based generation via `[external]` (Anthropic,
@@ -198,4 +198,4 @@ SIGGRAPH Talks '26 paper details. Most bibliography managers
 (Zotero, BibTeX-style tooling) read CFF automatically; the
 BibTeX block is also in the main README's
 [Citation](../README.md#citation) section. License is Apache 2.0
-&mdash; see [LICENSE](../LICENSE).
+- see [LICENSE](../LICENSE).

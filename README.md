@@ -4,20 +4,20 @@
 
 [![Presenting at SIGGRAPH 2026](https://img.shields.io/badge/Presenting_at-SIGGRAPH_2026-B91C1C?style=flat)](https://s2026.siggraph.org/program/talks/) [![Presenting at NIME 2026](https://img.shields.io/badge/Presenting_at-NIME_2026-5B21B6?style=flat)](https://nime2026.org/)
 
-**Generate ambient music from text. Locally. No GPU required.** &mdash; [Read more about how it works](https://prabal.ca/posts/latentscore-research/).
+**Generate ambient music from text. Locally. No GPU required.** - [Read more about how it works](https://prabal.ca/posts/latentscore-research/).
 
 https://private-user-images.githubusercontent.com/140295281/557606724-22889dcc-9287-4712-8ffb-ec19381444c9.mp4?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzI1NTQ3OTcsIm5iZiI6MTc3MjU1NDQ5NywicGF0aCI6Ii8xNDAyOTUyODEvNTU3NjA2NzI0LTIyODg5ZGNjLTkyODctNDcxMi04ZmZiLWVjMTkzODE0NDRjOS5tcDQ_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjYwMzAzJTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI2MDMwM1QxNjE0NTdaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT03Y2IzMzNlMzhiYTAyZDRmMjE0OWY4ZmNiMmUxNzE4ZTE0YjMzZWU0OGE5MmQyOWYzMzYzZWViYmY5MWNjZWM4JlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCJ9.VDGlSlEVudf_rmavZpjUqkImO0O1gUYxEqDvDx6PQNo
 
 ---
 
-## Try it now
+## 1. Try it now
 
 **Four ways:**
 
-- 🎧 **Hear it now** &mdash; [latentscore.com/demo](https://latentscore.com/demo). Browser, no install.
-- 🐳 **Run the demo locally** &mdash; `docker compose` on any OS. See [Try the demo](#try-the-demo).
-- 📓 **Try the SDK in Colab** &mdash; [open the quickstart notebook](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart.ipynb). No install, runs in your browser.
-- 🛠 **Build with it locally** &mdash; `pip install latentscore` on macOS, Linux, or Windows WSL2. See [Install the SDK](#install-the-sdk).
+- 🎧 **Hear it now** - [latentscore.com/demo](https://latentscore.com/demo). Browser, no install.
+- 🐳 **Run the demo locally** - `docker compose` on any OS. See [Try the demo](#2-try-the-demo).
+- 📓 **Try the SDK in Colab** - [open the quickstart notebook](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart.ipynb). No install, runs in your browser.
+- 🛠 **Build with it locally** - `pip install latentscore` on macOS, Linux, or Windows WSL2. See [Install the SDK](#4-install-the-sdk).
 
 ```python
 import latentscore as ls
@@ -29,11 +29,11 @@ That's it. One line. You get audio playing on your speakers.
 
 ---
 
-## Try the demo
+## 2. Try the demo
 
 **No install needed:** open **[latentscore.com/demo](https://latentscore.com/demo)** in your browser.
 
-**Run it locally** &mdash; works on macOS, Linux, or Windows (any flavor) with [Docker Desktop](https://www.docker.com/products/docker-desktop/):
+**Run it locally** - works on macOS, Linux, or Windows (any flavor) with [Docker Desktop](https://www.docker.com/products/docker-desktop/):
 
 ```bash
 docker compose -f demo/docker-compose.yml up --build
@@ -43,30 +43,32 @@ Then open [`localhost:3002`](http://localhost:3002). More details in [demo/](dem
 
 ---
 
-## Contents
+## 3. Contents
 
-- [Try it now](#try-it-now) &mdash; four ways to get going (browser, Docker, Colab, pip)
-- [Try the demo](#try-the-demo) &mdash; deeper Docker setup
-- [Install the SDK](#install-the-sdk) &mdash; pip, 30 seconds
-- [Quick start](#quick-start) &mdash; Python in 5 lines
-- [Controlling the sound](#controlling-the-sound) &mdash; `MusicConfig` parameters
-- [Documentation](docs/latentscore-dx.md) &mdash; streaming, live playlists, async, bring-your-own-LLM
-- [How it works](docs/architecture.md#how-it-works) &mdash; embedding retrieval, no LLM hallucinations
-- [FAQ](docs/FAQ.md) &mdash; common questions
-- [Citation](#citation) &mdash; SIGGRAPH Talks '26 BibTeX
+- [1. Try it now](#1-try-it-now) - four ways to get going (browser, Docker, Colab, pip)
+- [2. Try the demo](#2-try-the-demo) - deeper Docker setup
+- [4. Install the SDK](#4-install-the-sdk) - pip, 30 seconds
+- [5. CLI](#5-cli) - `latentscore doctor`, `download`, `demo`
+- [6. Quick start](#6-quick-start) - Python in 5 lines
+- [7. Controlling the sound](#7-controlling-the-sound) - `MusicConfig` parameters
+- [8. Read more](#8-read-more) - docs, FAQ, research pipeline, contributing
+- [9. Citation](#9-citation) - SIGGRAPH Talks '26 BibTeX
+- [Documentation](docs/latentscore-dx.md) - streaming, live playlists, async, bring-your-own-LLM
+- [How it works](docs/architecture.md#how-it-works) - embedding retrieval, no LLM hallucinations
+- [FAQ](docs/FAQ.md) - common questions
 
 ---
 
-## Install the SDK
+## 4. Install the SDK
 
-### Requirements
+### 4.1 Requirements
 
-- **OS** &mdash; macOS, Linux, or Windows **ONLY** via [WSL2](docs/FAQ.md#can-i-run-this-on-windows). For the web UI on any OS, use the [Docker demo](#try-the-demo) instead.
-- **Python 3.10&ndash;3.12** &mdash; we test against [3.12](https://www.python.org/downloads/release/python-3120/) (matches our Docker image). Or use [conda](https://docs.conda.io/projects/miniconda/en/latest/) for environment management.
+- **OS** - macOS, Linux, or Windows **ONLY** via [WSL2](docs/FAQ.md#can-i-run-this-on-windows). For the web UI on any OS, use the [Docker demo](#2-try-the-demo) instead.
+- **python 3.10 to python 3.12** - we test against [3.12](https://www.python.org/downloads/release/python-3120/) (matches our Docker image). Or use [`conda`](https://docs.conda.io/projects/miniconda/en/latest/) for environment management.
 
-### Install
+### 4.2 Install
 
-With **venv** (regular Python):
+With `venv` (regular Python):
 
 ```bash
 python3.12 -m venv .venv
@@ -74,7 +76,7 @@ source .venv/bin/activate
 pip install latentscore
 ```
 
-With **conda**:
+With `conda`:
 
 ```bash
 conda create -n latentscore python=3.12 -y
@@ -82,9 +84,9 @@ conda activate latentscore
 pip install latentscore
 ```
 
-### What you get
+### 4.3 What you get
 
-`pip install latentscore` gives you text prompts (`ls.render("vibe")`), `MusicConfig` rendering, and local playback &mdash; the [Quick Start](#quick-start) below.
+The default install gives you text prompts, full parameter control, and local playback. See the [Quick start](#6-quick-start) below.
 
 Optional extras:
 
@@ -92,9 +94,9 @@ Optional extras:
 |---|---|
 | `pip install "latentscore[external]"` | bring-your-own hosted LLM via [LiteLLM](https://docs.litellm.ai/) (Anthropic, Gemini, OpenAI, &hellip;) |
 | `pip install "latentscore[heavy]"` | CLAP audio-based retrieval (`fast_heavy` model) |
-| `pip install "latentscore[expressive]"` | local LLM inference |
+| 🚧 `pip install "latentscore[expressive]"` | local LLM inference. **Extremely experimental, under testing.** |
 
-### Verify your install
+### 4.4 Verify your install
 
 ```bash
 latentscore doctor --strict --offline
@@ -105,7 +107,7 @@ Exits non-zero with a clear hint if anything's broken. Add `--json` for machine-
 
 ---
 
-## CLI
+## 5. CLI
 
 ```bash
 # Verify your install
@@ -124,9 +126,9 @@ latentscore demo --duration 30 --output ambient.wav   # 30 seconds, save to file
 
 ---
 
-## Quick Start
+## 6. Quick start
 
-### Render and play
+### 6.1 Render and play
 
 ```python
 import latentscore as ls
@@ -141,7 +143,7 @@ audio.play()              # plays on your speakers
 audio.save("output.wav")  # save to WAV
 ```
 
-### Different vibes
+### 6.2 Different vibes
 
 ```python
 ls.render("jazz cafe at midnight").play()
@@ -151,7 +153,7 @@ ls.render("lo-fi study beats").play()
 
 ---
 
-## Controlling the sound
+## 7. Controlling the sound
 
 Beyond text prompts, you can drive synthesis directly:
 
@@ -180,19 +182,19 @@ API, and bring-your-own-LLM cookbook.
 
 ---
 
-## Read more
+## 8. Read more
 
-- [Documentation](docs/latentscore-dx.md) &mdash; parameter reference, streaming, async API, bring-your-own-LLM
-- [How it works](docs/architecture.md) &mdash; embedding retrieval, explained
-- [FAQ](docs/FAQ.md) &mdash; first-call hang, system deps, Windows, citation, …
-- [Research pipeline](data_work/README.md) &mdash; how the dataset was built
-- [Contributing](CONTRIBUTE.md) &mdash; setup + [style rules](docs/contribute/coding-guidelines.md)
-- [Demo](demo/) &mdash; run the web demo locally
+- [Documentation](docs/latentscore-dx.md) - parameter reference, streaming, async API, bring-your-own-LLM
+- [How it works](docs/architecture.md) - embedding retrieval, explained
+- [FAQ](docs/FAQ.md) - first-call hang, system deps, Windows, citation, …
+- [Research pipeline](data_work/README.md) - how the dataset was built
+- [Contributing](CONTRIBUTE.md) - setup + [style rules](docs/contribute/coding-guidelines.md)
+- [Demo](demo/) - run the web demo locally
 
 ---
 
 
-## Citation
+## 9. Citation
 
 If you use LatentScore in your research, please cite the SIGGRAPH Talks '26 paper:
 
@@ -209,6 +211,6 @@ If you use LatentScore in your research, please cite the SIGGRAPH Talks '26 pape
 
 ---
 
-## License
+## 10. License
 
 LatentScore is released under the [Apache License 2.0](LICENSE).
