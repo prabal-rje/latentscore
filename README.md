@@ -20,6 +20,12 @@ https://private-user-images.githubusercontent.com/140295281/557606724-22889dcc-9
 
 ---
 
+## Live demo
+
+The interactive demo at **[latentscore.com/demo](https://latentscore.com/demo)** lets you type vibes and stream audio in the browser &mdash; no install needed. The full source (FastAPI backend + React frontend + Dockerfile) lives in [`demo/`](demo/). To run it locally: `docker compose -f demo/docker-compose.yml up --build` (see [`demo/README.md`](demo/README.md) for details).
+
+---
+
 ## Install
 
 **Requires Python 3.10&ndash;3.12.** If you don't have it: `brew install python@3.10` (macOS) or `pyenv install 3.10`.
