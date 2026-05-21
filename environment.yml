@@ -5,4 +5,8 @@ dependencies:
   - python=3.10
   - pip
   - pip:
-      - -r requirements.txt
+      # Editable install from this repo with the standard contributor extras.
+      # `conda env create -f environment.yml` runs from the repo root, so the
+      # `-e .` resolves correctly. Equivalent to:
+      #   pip install -e ".[external,heavy,expressive,dev]"
+      - -e ".[external,heavy,expressive,dev]"
