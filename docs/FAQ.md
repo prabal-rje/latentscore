@@ -85,20 +85,24 @@ Fix per platform:
 
 ## Can I run this on Windows?
 
-Short version (the README has a one-line warning pointing here):
+**The Docker demo (`demo/`) works on Windows** via Docker Desktop. The
+web UI runs in a Linux container, which sidesteps Windows wheel
+availability entirely.
 
-- **Native Windows** &mdash; core and `[external]` should work
-  (all deps ship Windows wheels) but we haven't tested. `[expressive]`
-  also installs and runs on Windows via the `transformers` backend.
-  Note this is the same backend that runs on every other platform too
-  &mdash; MLX integration isn't actually live, so even Apple Silicon
-  is on CPU. Expect ~30&ndash;100&nbsp;seconds per render.
-- **WSL2** &mdash; works identically to Linux. This is the
-  recommended path for native Windows users who want speed parity.
-- **Docker Desktop** &mdash; the bundled demo (`demo/`) runs fine.
+**The SDK (`pip install latentscore`) does not work on native Windows.**
+It depends on PyTorch, which doesn't ship Windows ARM64 wheels at all
+(empirically confirmed on Windows 11 ARM), and Windows x64 is
+untested. On Windows, install the SDK inside **WSL2** &mdash; WSL2
+runs a Linux kernel, so PyTorch wheels are available and the install
+path is identical to native Linux.
 
-If you successfully run native Windows, please open an issue so we
-can mark it tested.
+Install WSL2 via Microsoft's official guide: [Install WSL](https://learn.microsoft.com/en-us/windows/wsl/install).
+Once you have an Ubuntu shell, follow the standard Linux install
+instructions in the [README](../README.md#install-the-sdk).
+
+If you successfully install the SDK on native Windows x64 (where
+PyTorch wheels do exist but we haven't tested), please open an issue
+so we can update this answer.
 
 ---
 

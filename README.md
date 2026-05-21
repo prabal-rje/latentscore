@@ -6,6 +6,12 @@
 
 **Generate ambient music from text. Locally. No GPU required.**
 
+**Three ways to try it:**
+
+- 🎧 **Hear it now** &mdash; [latentscore.com/demo](https://latentscore.com/demo). Browser, no install.
+- 🐳 **Run the demo locally** &mdash; `docker compose` on any OS. See [Try the demo](#try-the-demo).
+- 🛠 **Build with it** &mdash; `pip install latentscore` on macOS, Linux, or Windows WSL2. See [Install the SDK](#install-the-sdk).
+
 ```python
 import latentscore as ls
 
@@ -20,23 +26,24 @@ https://private-user-images.githubusercontent.com/140295281/557606724-22889dcc-9
 
 ---
 
-## Live demo
+## Try the demo
 
-Try it in your browser: **[latentscore.com/demo](https://latentscore.com/demo)** &mdash; no install needed.
+**No install needed:** open **[latentscore.com/demo](https://latentscore.com/demo)** in your browser.
 
-To run it locally:
+**Run it locally** &mdash; works on macOS, Linux, or Windows (any flavor) with [Docker Desktop](https://www.docker.com/products/docker-desktop/):
 
 ```bash
 docker compose -f demo/docker-compose.yml up --build
 ```
 
-More details in [demo/](demo/).
+Then open [`localhost:3002`](http://localhost:3002). More details in [demo/](demo/).
 
 ---
 
 ## Contents
 
-- [Install](#install) &mdash; 30 seconds
+- [Try the demo](#try-the-demo) &mdash; browser, or local Docker (any OS)
+- [Install the SDK](#install-the-sdk) &mdash; pip, 30 seconds
 - [Quick start](#quick-start) &mdash; Python in 5 lines
 - [Controlling the sound](#controlling-the-sound) &mdash; `MusicConfig` parameters
 - [Documentation](docs/latentscore-dx.md) &mdash; streaming, live playlists, async, bring-your-own-LLM
@@ -46,7 +53,9 @@ More details in [demo/](demo/).
 
 ---
 
-## Install
+## Install the SDK
+
+**Supported platforms:** macOS, Linux, Windows via [WSL2](docs/FAQ.md#can-i-run-this-on-windows). Native Windows isn't supported &mdash; the SDK depends on PyTorch, which doesn't ship Windows-native wheels for ARM64. For the web UI on any OS, use the [Docker demo](#try-the-demo) instead.
 
 **Requires Python 3.10&ndash;3.12.** If you don't have it: `brew install python@3.10` (macOS) or `pyenv install 3.10`.
 
@@ -72,7 +81,6 @@ latentscore doctor --strict --offline
 
 Exits non-zero with a clear hint if anything's broken. Add `--json` for machine-readable output.
 
-> ⚠️ **Windows native is untested.** Core, [external], and [heavy] should work via pip wheels; [expressive] runs the local LLM through the CPU `transformers` backend (slow, see the [FAQ](docs/FAQ.md)). Use **WSL2** or **Docker Desktop** if you hit issues.
 
 ---
 
