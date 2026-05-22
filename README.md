@@ -36,10 +36,10 @@ That's it. One line. You get audio playing on your speakers.
 **Run it locally** - works on macOS, Linux, or Windows (any flavor) with [Docker Desktop](https://www.docker.com/products/docker-desktop/):
 
 ```bash
-docker compose -f demo/docker-compose.yml up --build
+docker compose -f demo/docker-compose.yml up
 ```
 
-Then open [`localhost:4242`](http://localhost:4242) for the demo UI, or [`localhost:8889`](http://localhost:8889) for a JupyterLab SDK playground. More details in [demo/](demo/).
+Pulls pre-built multi-arch images (~60s). Then open [`localhost:4242`](http://localhost:4242) for the demo UI, or [`localhost:8889`](http://localhost:8889) for a JupyterLab SDK playground. To build from source for reproducibility, see [demo/](demo/).
 
 ---
 

@@ -244,18 +244,45 @@ The Vite dev server prints its URL — usually <http://localhost:5173>.
 
 ### Full Docker Compose stack
 
+**Default - pull pre-built images** (~60&nbsp;s for first pull):
+
+```bash
+cd demo
+docker compose up
+```
+
+This pulls three multi-arch images from
+[GHCR](https://github.com/prabal-rje/latentscore/pkgs/container/latentscore-demo-backend):
+`latentscore-demo-backend`, `latentscore-demo-frontend`, and
+`latentscore-demo-notebook`. Reviewers and casual users get to a
+working stack in about a minute regardless of host architecture
+(amd64 or arm64).
+
+**From source - reproducibility build** (~5&nbsp;min first build):
+
+To verify that the published images match the source in this repo,
+edit `demo/docker-compose.yml`, comment out each `image:` line, and
+uncomment the matching `build:` block. Then:
+
 ```bash
 cd demo
 docker compose up --build
 ```
 
-Backend on <http://localhost:4244>, frontend on <http://localhost:4242>, and JupyterLab on <http://localhost:8889> (token-less, localhost only).
+This compiles each image locally from the bundled `Dockerfile`s.
+First build is slow because the backend image pre-downloads model
+weights at build time (MiniLM ~90&nbsp;MB, LAION-CLAP ~1.8&nbsp;GB,
+plus a CLAP embedding map). Subsequent rebuilds hit the Docker layer
+cache and finish in seconds unless you change `requirements.txt` or
+the latentscore source.
 
-The first build is slow because the backend image pre-downloads model
-weights at build time (MiniLM ~90&nbsp;MB, LAION-CLAP ~1.8&nbsp;GB, plus a
-CLAP embedding map). Subsequent rebuilds hit the Docker layer cache and
-finish in seconds unless you change the backend `requirements.txt` or the
-latentscore source.
+**Either way**, when the stack is up:
+
+| Service       | URL                                          |
+|---------------|----------------------------------------------|
+| Demo UI       | <http://localhost:4242>                      |
+| Backend API   | <http://localhost:4244>                      |
+| JupyterLab    | <http://localhost:8889> (token-less, 127.0.0.1 only) |
 
 ### Single-image production build (what Railway deploys)
 

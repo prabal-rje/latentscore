@@ -1,10 +1,18 @@
+# Demo stack: React frontend + FastAPI backend + JupyterLab SDK
+# playground. By default, services pull pre-built multi-arch images
+# from GHCR (~60s) instead of compiling from source (~5min).
+#
+# For reproducibility -- e.g. an OSS-track reviewer who wants to
+# verify the published images match the source -- comment out the
+# `image:` line and uncomment the matching `build:` block for that
+# service, then run `docker compose up --build`.
+
 services:
   backend:
-    build:
-      # Build from the latentscore repo root so the Dockerfile can install
-      # the bundled latentscore source via `pip install ./latentscore-src`.
-      context: ..
-      dockerfile: demo/backend/Dockerfile
+    image: ghcr.io/prabal-rje/latentscore-demo-backend:latest
+    # build:
+    #   context: ..
+    #   dockerfile: demo/backend/Dockerfile
     ports:
       - "4244:8000"
     healthcheck:
@@ -14,10 +22,11 @@ services:
       retries: 3
 
   frontend:
-    build:
-      context: ./frontend
-      args:
-        VITE_ANONYMOUS: "${VITE_ANONYMOUS:-false}"
+    image: ghcr.io/prabal-rje/latentscore-demo-frontend:latest
+    # build:
+    #   context: ./frontend
+    #   args:
+    #     VITE_ANONYMOUS: "${VITE_ANONYMOUS:-false}"
     ports:
       - "4242:80"
     depends_on:
@@ -25,15 +34,13 @@ services:
         condition: service_healthy
 
   notebook:
-    # Token-less Jupyter Lab with latentscore pre-installed. Same
-    # quickstart.ipynb as the Colab notebook, but runs locally so
-    # nobody has to set up Python on the host. Token auth is disabled
-    # since this is intended for localhost use only -- do NOT expose
-    # this port to the public internet.
-    build:
-      context: ..
-      dockerfile: demo/notebook/Dockerfile
+    # Token-less JupyterLab with latentscore pre-installed. Same
+    # quickstart.ipynb as the Colab notebook. Bound to 127.0.0.1
+    # only because token auth is disabled -- do NOT expose this
+    # port to the public internet.
+    image: ghcr.io/prabal-rje/latentscore-demo-notebook:latest
+    # build:
+    #   context: ..
+    #   dockerfile: demo/notebook/Dockerfile
     ports:
-      # Bind to loopback only - the notebook runs token-less, so we
-      # must not let it accept connections from outside this machine.
       - "127.0.0.1:8889:8888"
