@@ -37,14 +37,21 @@ in another terminal first.
 
 ## Notebook only
 
+Pull the pre-built image (~30 s):
+
 ```bash
 cd demo
 docker compose up notebook
 ```
 
-JupyterLab at <http://localhost:8889>. The image is rebuilt from
-`demo/notebook/Dockerfile` if you uncomment its `build:` block in
-`docker-compose.yml`.
+Or build it from source (~3 min, first time only):
+
+```bash
+cd demo
+docker compose up notebook --build
+```
+
+JupyterLab at <http://localhost:8889>.
 
 ## Full stack with from-source builds
 
