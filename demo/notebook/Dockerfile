@@ -3,7 +3,8 @@
 # a working SDK playground at http://localhost:8889 without touching
 # their host Python install.
 #
-# Same quickstart.ipynb as the Colab notebook (one source of truth).
+# Bundles notebooks/quickstart-docker.ipynb (the Docker-flavored
+# variant; the Colab path uses notebooks/quickstart-colab.ipynb).
 
 FROM quay.io/jupyter/scipy-notebook:python-3.12@sha256:15b50ef89a316b483279aa5f689c5b26947e586ddb403c504e65a73b47ff8569
 

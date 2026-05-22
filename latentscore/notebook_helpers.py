@@ -23,18 +23,17 @@ in environments without IPython installed (CLI, demo backend, etc.).
 
 from __future__ import annotations
 
+import html
 import os
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from . import Audio  # noqa: F401
-
+from .dx import Audio
 
 __all__ = ["listen", "check_key"]
 
 
 # Title style chosen for dark/light theme compatibility: white fill
-# with a 1px black outline via four offset text-shadows. Renders crisp
+# with a 1px black outline via 8 offset text-shadows. Renders crisp
 # in both JupyterLab themes, Colab, and the GitHub static notebook
 # viewer.
 _TITLE_CSS = (
@@ -59,10 +58,20 @@ _TITLE_CSS = (
 
 
 def _ipython_objects() -> tuple[Any, Any, Any, Any]:
-    """Return (HTML, Markdown, display, Audio). Imported lazily."""
-    from IPython.display import HTML, Markdown, display
-    from IPython.display import Audio as IPAudio
+    """Return (HTML, Markdown, display, Audio). Imported lazily.
 
+    Raises a friendly ImportError if IPython isn't available - these
+    helpers are only meaningful inside Jupyter / Colab kernels.
+    """
+    try:
+        from IPython.display import HTML, Markdown, display
+        from IPython.display import Audio as IPAudio
+    except ImportError as exc:
+        raise ImportError(
+            "latentscore.notebook_helpers requires IPython. "
+            "Install it with `pip install ipython`, or use these helpers "
+            "only from a Jupyter / Colab notebook kernel."
+        ) from exc
     return HTML, Markdown, display, IPAudio
 
 
@@ -72,17 +81,25 @@ def _render_metadata(audio: Audio) -> None:
     Skips empty fields so the fast / fast_heavy models don't show a
     bare "thinking:" with nothing after it - those are nearest-neighbor
     lookups, so there's no chain-of-thought to surface.
+
+    LLM-controlled fields (title, thinking) are HTML-escaped before
+    interpolation so they can't inject script or attributes when the
+    JupyterLab signature trusts the cell output.
     """
-    HTML, Markdown, display, _IPAudio = _ipython_objects()
+    HTML, _Markdown, display, _IPAudio = _ipython_objects()
     meta = audio.metadata
     if meta is None:
         return
     if meta.title:
-        display(HTML(f'<div style="{_TITLE_CSS}">{meta.title}</div>'))
+        safe_title = html.escape(meta.title)
+        display(HTML(f'<div style="{_TITLE_CSS}">{safe_title}</div>'))
     if meta.palettes:
         swatches = []
         for palette in meta.palettes:
             chips = "".join(
+                # c.hex is regex-constrained to ^#[0-9A-Fa-f]{6}$ and
+                # c.weight to a closed enum, so neither can break out
+                # of the attribute context.
                 f'<div title="{c.hex} ({c.weight})" '
                 f'style="width:36px;height:36px;background:{c.hex};'
                 f'border:1px solid rgba(0,0,0,0.08);border-radius:4px;"></div>'
@@ -97,12 +114,18 @@ def _render_metadata(audio: Audio) -> None:
             )
         )
     if meta.thinking:
-        display(Markdown(f"_{meta.thinking}_"))
+        safe_thinking = html.escape(meta.thinking)
+        display(
+            HTML(
+                f'<div style="font-style:italic;color:#444;white-space:pre-wrap;'
+                f'margin:6px 0 12px;line-height:1.5;">{safe_thinking}</div>'
+            )
+        )
 
 
 def listen(audio: Audio) -> Any:
     """Play audio inline, with the model's title + color palettes above it."""
-    _, _, _, IPAudio = _ipython_objects()
+    _HTML, _Markdown, _display, IPAudio = _ipython_objects()
     _render_metadata(audio)
     return IPAudio(audio.samples, rate=audio.sample_rate)
 
@@ -112,15 +135,16 @@ def check_key(model: str) -> bool:
 
     Lets external-LLM cells fail soft instead of dumping a deep LiteLLM
     stack trace. Non-external models (fast, fast_heavy, expressive) always
-    return True.
+    return True - they need no key, so we short-circuit before touching
+    IPython (lets this function be useful even outside notebook contexts).
     """
-    _HTML, Markdown, display, _IPAudio = _ipython_objects()
     if not model.startswith("external:"):
         return True
     provider = model.split(":", 1)[1].split("/", 1)[0].lower()
     env_var = f"{provider.upper()}_API_KEY"
     if os.environ.get(env_var):
         return True
+    _HTML, Markdown, display, _IPAudio = _ipython_objects()
     display(
         Markdown(
             f"> 🔑 **Skipping this cell** - `{env_var}` is not set in "
