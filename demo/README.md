@@ -52,21 +52,21 @@ local convenience. Do **not** publish port 8889 to the internet.
 
 ## 3. Reproducibility
 
-The default `docker compose up` **pulls** finished images. That's the
-fast path for users and reviewers.
+The default `docker compose up` pulls finished images (~60 s). That's
+the fast path.
 
-If you want to verify the published images match this source (the
-typical OSS-track-reviewer concern), edit `docker-compose.yml`,
-comment each `image:` line, uncomment the matching `build:` block,
-and run:
+To verify the published images match this source - the typical
+OSS-track-reviewer concern - just add `--build`:
 
 ```bash
 docker compose up --build
 ```
 
-First build takes ~5 minutes because the backend image pre-downloads
-model weights (MiniLM ~90 MB, LAION-CLAP ~1.8 GB). Subsequent
-rebuilds hit the Docker layer cache.
+That ignores the `image:` line and uses the `build:` block in each
+service definition. No file edits required. First build takes
+~5 min because the backend image pre-downloads model weights
+(MiniLM ~90 MB, LAION-CLAP ~1.8 GB). Subsequent rebuilds hit the
+Docker layer cache.
 
 ---
 

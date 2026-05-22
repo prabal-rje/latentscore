@@ -11,13 +11,15 @@ then verify with `docker ps`.
 ## `docker compose up` fails: "manifest unknown" on pull.
 
 The pre-built images haven't been published yet for the version your
-compose file references. Two options:
+compose file references. Pass `--build` to fall back to source:
 
-1. **Wait for a tagged release** - tagged releases trigger a CI build
-   that publishes the images to GHCR.
-2. **Build from source instead** - edit `docker-compose.yml`, comment
-   each `image:`, uncomment the matching `build:`, then
-   `docker compose up --build`.
+```bash
+docker compose up --build
+```
+
+That uses the `build:` block in each service definition, which is
+already in `docker-compose.yml` alongside `image:` for exactly this
+case. Takes ~5 min for the first build vs ~60 s for a pull.
 
 ## Backend stuck on "Waiting: Healthy" for several minutes.
 

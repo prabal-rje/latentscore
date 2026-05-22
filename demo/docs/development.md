@@ -48,19 +48,18 @@ JupyterLab at <http://localhost:8889>. The image is rebuilt from
 
 ## Full stack with from-source builds
 
-If you want all three services to build from your local source
-instead of pulling pre-built images from GHCR, edit
-`demo/docker-compose.yml`, comment out each `image:` line, and
-uncomment the matching `build:` block. Then:
+To build all three services from your local source instead of
+pulling pre-built images from GHCR, just pass `--build`:
 
 ```bash
 cd demo
 docker compose up --build
 ```
 
-First build takes ~5 min because the backend image pre-downloads model
-weights at build time (MiniLM ~90 MB, LAION-CLAP ~1.8 GB). Subsequent
-rebuilds hit the Docker layer cache.
+That ignores each service's `image:` line and uses the matching
+`build:` block. First build takes ~5 min because the backend image
+pre-downloads model weights (MiniLM ~90 MB, LAION-CLAP ~1.8 GB).
+Subsequent rebuilds hit the Docker layer cache.
 
 ## Common dev gotchas
 

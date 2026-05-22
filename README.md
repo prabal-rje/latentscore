@@ -12,11 +12,10 @@ https://private-user-images.githubusercontent.com/140295281/557606724-22889dcc-9
 
 ## 1. Try it now
 
-**Four ways:**
+**Three ways:**
 
 - 🎧 **Hear it now** - [latentscore.com/demo](https://latentscore.com/demo). Browser, no install.
-- 🐳 **Run the demo locally** - `docker compose` on any OS. See [Try the demo](#2-try-the-demo).
-- 📓 **Try the SDK in Colab** - [open the quickstart notebook](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart.ipynb). No install, runs in your browser.
+- 🐳 **Run the demo + JupyterLab locally** - `docker compose` gives you the demo UI **and** a JupyterLab playground where you can poke at the SDK without `pip install`. ~60s on any OS. See [Try the demo](#2-try-the-demo).
 - 🛠 **Build with it locally** - `pip install latentscore` on macOS, Linux, or Windows WSL2. See [Install the SDK](#4-install-the-sdk).
 
 ```python
@@ -33,13 +32,26 @@ That's it. One line. You get audio playing on your speakers.
 
 **No install needed:** open **[latentscore.com/demo](https://latentscore.com/demo)** in your browser.
 
-**Run it locally** - works on macOS, Linux, or Windows (any flavor) with [Docker Desktop](https://www.docker.com/products/docker-desktop/):
+**Run it locally** - works on macOS, Linux, or Windows WSL2 with [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+
+**Fast - pull pre-built images** (~60 s):
 
 ```bash
 docker compose -f demo/docker-compose.yml up
 ```
 
-Pulls pre-built multi-arch images (~60s). Then open [`localhost:4242`](http://localhost:4242) for the demo UI, or [`localhost:8889`](http://localhost:8889) for a JupyterLab SDK playground. To build from source for reproducibility, see [demo/](demo/).
+**From source - reproducibility build** (~5 min, first time only):
+
+```bash
+docker compose -f demo/docker-compose.yml up --build
+```
+
+Either way, open:
+
+- [`localhost:4242`](http://localhost:4242) - demo UI
+- [`localhost:8889`](http://localhost:8889) - JupyterLab playground (SDK pre-installed)
+
+See [demo/](demo/) for architecture, dev setup, and troubleshooting.
 
 ---
 

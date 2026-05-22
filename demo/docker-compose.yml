@@ -1,18 +1,24 @@
 # Demo stack: React frontend + FastAPI backend + JupyterLab SDK
-# playground. By default, services pull pre-built multi-arch images
-# from GHCR (~60s) instead of compiling from source (~5min).
+# playground.
 #
-# For reproducibility -- e.g. an OSS-track reviewer who wants to
-# verify the published images match the source -- comment out the
-# `image:` line and uncomment the matching `build:` block for that
-# service, then run `docker compose up --build`.
+# By default (`docker compose up`), each service pulls a pre-built
+# multi-arch image from GHCR. ~60 s on a warm network.
+#
+# To build from source instead (e.g. to verify the published images
+# match this repo's source - the OSS-track reviewer path), pass
+# `--build`:
+#
+#   docker compose up --build
+#
+# That ignores `image:` and uses the `build:` block. ~5 min on
+# first run because the backend pre-downloads model weights.
 
 services:
   backend:
     image: ghcr.io/prabal-rje/latentscore-demo-backend:latest
-    # build:
-    #   context: ..
-    #   dockerfile: demo/backend/Dockerfile
+    build:
+      context: ..
+      dockerfile: demo/backend/Dockerfile
     ports:
       - "4244:8000"
     healthcheck:
@@ -23,10 +29,10 @@ services:
 
   frontend:
     image: ghcr.io/prabal-rje/latentscore-demo-frontend:latest
-    # build:
-    #   context: ./frontend
-    #   args:
-    #     VITE_ANONYMOUS: "${VITE_ANONYMOUS:-false}"
+    build:
+      context: ./frontend
+      args:
+        VITE_ANONYMOUS: "${VITE_ANONYMOUS:-false}"
     ports:
       - "4242:80"
     depends_on:
@@ -36,11 +42,11 @@ services:
   notebook:
     # Token-less JupyterLab with latentscore pre-installed. Same
     # quickstart.ipynb as the Colab notebook. Bound to 127.0.0.1
-    # only because token auth is disabled -- do NOT expose this
+    # only because token auth is disabled - do NOT expose this
     # port to the public internet.
     image: ghcr.io/prabal-rje/latentscore-demo-notebook:latest
-    # build:
-    #   context: ..
-    #   dockerfile: demo/notebook/Dockerfile
+    build:
+      context: ..
+      dockerfile: demo/notebook/Dockerfile
     ports:
       - "127.0.0.1:8889:8888"
