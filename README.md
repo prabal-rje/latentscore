@@ -65,8 +65,7 @@ See the [demo documentation](demo/) for architecture, dev setup, and troubleshoo
 - [Controlling the sound](#7-controlling-the-sound) - `MusicConfig` parameters
 - [Read more](#8-read-more) - docs, FAQ, research pipeline, contributing
 - [Citation](#9-citation) - SIGGRAPH Talks '26 BibTeX
-- [Documentation](docs/latentscore-dx.md) - streaming, live playlists, async, bring-your-own-LLM
-- [How it works](docs/architecture.md#how-it-works) - embedding retrieval, no LLM hallucinations
+- [Documentation](docs/library.md) - streaming, live playlists, async, bring-your-own-LLM
 - [FAQ](docs/FAQ.md) - common questions
 
 ---
@@ -188,7 +187,7 @@ ls.render(
 ).play()
 ```
 
-See the [full documentation](docs/latentscore-dx.md) for the parameter
+See the [full documentation](docs/library.md) for the parameter
 reference, relative-step updates, streaming, live playlists, async
 API, and bring-your-own-LLM cookbook.
 
@@ -196,8 +195,7 @@ API, and bring-your-own-LLM cookbook.
 
 ## 8. Read more
 
-- [Documentation](docs/latentscore-dx.md) - parameter reference, streaming, async API, bring-your-own-LLM
-- [How it works](docs/architecture.md) - embedding retrieval, explained
+- [Documentation](docs/library.md) - parameter reference, streaming, async API, bring-your-own-LLM
 - [FAQ](docs/FAQ.md) - first-call hang, system deps, Windows, citation, …
 - [Research pipeline](data_work/README.md) - how the dataset was built
 - [Contributing](CONTRIBUTE.md) - setup + [style rules](docs/contribute/coding-guidelines.md)

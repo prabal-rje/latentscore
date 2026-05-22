@@ -41,4 +41,4 @@ latentscore doctor
 
 ## More details
 
-See `docs/latentscore-dx.md` for the full DX guide, model options, and audio contract.
+See [`docs/library.md`](../docs/library.md) for the full library guide, model options, and audio contract.

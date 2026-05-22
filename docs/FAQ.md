@@ -1,7 +1,7 @@
 # Frequently Asked Questions
 
 If you have a question that isn't here, open an issue or check the
-top-level [`README.md`](../README.md) and [`latentscore-dx.md`](latentscore-dx.md).
+top-level [`README.md`](../README.md) and [`library.md`](library.md).
 
 ---
 
@@ -147,7 +147,7 @@ ls.render(
 ).play()
 ```
 
-The full parameter reference is in [`docs/latentscore-dx.md`](latentscore-dx.md).
+The full parameter reference is in [`docs/library.md`](library.md).
 
 ---
 

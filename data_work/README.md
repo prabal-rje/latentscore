@@ -343,7 +343,7 @@ python -m data_work.03_modal_train --advanced grpo \
   --audio-weight 0.3
 ```
 
-See `docs/ablation-guide.md` for full parameter reference.
+See [`docs/ablation-guide.md`](docs/ablation-guide.md) for full parameter reference.
 
 #### Usage Examples
 
