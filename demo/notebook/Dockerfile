@@ -31,7 +31,7 @@ RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTr
 # only -- the docker-compose mapping intentionally binds to the host's
 # loopback. Do NOT expose this port to the internet.
 RUN mkdir -p /home/jovyan/.jupyter && \
-    printf "c.ServerApp.token = ''\nc.ServerApp.password = ''\nc.ServerApp.ip = '0.0.0.0'\nc.ServerApp.default_url = '/lab/tree/quickstart.ipynb'\n" \
+    printf "c.ServerApp.token = ''\nc.ServerApp.password = ''\nc.ServerApp.ip = '0.0.0.0'\nc.ServerApp.default_url = '/lab/tree/quickstart.ipynb'\nc.LabApp.default_url = '/lab/tree/quickstart.ipynb'\nc.LabServerApp.default_url = '/lab/tree/quickstart.ipynb'\n" \
         > /home/jovyan/.jupyter/jupyter_server_config.py && \
     chown -R jovyan:users /home/jovyan/.jupyter
 
@@ -62,4 +62,5 @@ EXPOSE 8888
 # browser instead of the quickstart notebook.
 CMD ["start-notebook.sh", \
      "--ServerApp.root_dir=/home/jovyan/work", \
-     "--ServerApp.default_url=/lab/tree/quickstart.ipynb"]
+     "--ServerApp.default_url=/lab/tree/quickstart.ipynb", \
+     "--LabApp.default_url=/lab/tree/quickstart.ipynb"]
