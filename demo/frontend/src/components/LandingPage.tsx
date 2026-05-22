@@ -572,6 +572,18 @@ export default function LandingPage() {
               Live Demo
             </Link>
             <a
+              href="http://localhost:8889/lab/tree/quickstart.ipynb"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-ghost"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+              </svg>
+              Notebook
+            </a>
+            <a
               href="https://github.com/prabal-rje/latentscore"
               target="_blank"
               rel="noopener noreferrer"
@@ -696,6 +708,24 @@ export default function LandingPage() {
               <div className="link-card-text">
                 <span className="link-card-label">Google Colab</span>
                 <span className="link-card-desc">Run in notebook</span>
+              </div>
+            </a>
+
+            <a
+              href="http://localhost:8889/lab/tree/quickstart.ipynb"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="link-card"
+            >
+              <div className="link-card-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ivory)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                </svg>
+              </div>
+              <div className="link-card-text">
+                <span className="link-card-label">Local Jupyter</span>
+                <span className="link-card-desc">SDK playground on this machine</span>
               </div>
             </a>
 

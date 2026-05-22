@@ -39,7 +39,7 @@ That's it. One line. You get audio playing on your speakers.
 docker compose -f demo/docker-compose.yml up --build
 ```
 
-Then open [`localhost:3002`](http://localhost:3002). More details in [demo/](demo/).
+Then open [`localhost:4242`](http://localhost:4242) for the demo UI, or [`localhost:8889`](http://localhost:8889) for a JupyterLab SDK playground. More details in [demo/](demo/).
 
 ---
 

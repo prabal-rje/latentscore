@@ -197,5 +197,5 @@ Yes. The repo ships a [CITATION.cff](../CITATION.cff) with the
 SIGGRAPH Talks '26 paper details. Most bibliography managers
 (Zotero, BibTeX-style tooling) read CFF automatically; the
 BibTeX block is also in the main README's
-[Citation](../README.md#citation) section. License is Apache 2.0
+[Citation](../README.md#9-citation) section. License is Apache 2.0
 - see [LICENSE](../LICENSE).

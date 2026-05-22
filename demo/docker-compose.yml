@@ -6,7 +6,7 @@ services:
       context: ..
       dockerfile: demo/backend/Dockerfile
     ports:
-      - "8001:8000"
+      - "4244:8000"
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 10s
@@ -19,7 +19,21 @@ services:
       args:
         VITE_ANONYMOUS: "${VITE_ANONYMOUS:-false}"
     ports:
-      - "3002:80"
+      - "4242:80"
     depends_on:
       backend:
         condition: service_healthy
+
+  notebook:
+    # Token-less Jupyter Lab with latentscore pre-installed. Same
+    # quickstart.ipynb as the Colab notebook, but runs locally so
+    # nobody has to set up Python on the host. Token auth is disabled
+    # since this is intended for localhost use only -- do NOT expose
+    # this port to the public internet.
+    build:
+      context: ..
+      dockerfile: demo/notebook/Dockerfile
+    ports:
+      # Bind to loopback only - the notebook runs token-less, so we
+      # must not let it accept connections from outside this machine.
+      - "127.0.0.1:8889:8888"

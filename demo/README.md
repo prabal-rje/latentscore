@@ -85,13 +85,13 @@ people who want to modify the demo itself.
 ```
 ┌──────────────────────────────────┐
 │  Browser                         │  React 19 + Vite + TypeScript
-│  http://localhost:3002 (Compose) │  demo/frontend/
+│  http://localhost:4242 (Compose) │  demo/frontend/
 └────────────────┬─────────────────┘
                  │  HTTP for Render mode, WebSocket for Live mode
                  ▼
 ┌──────────────────────────────────┐
 │  FastAPI server                  │  ~900 LOC, single main.py
-│  http://localhost:8001 (Compose) │  demo/backend/main.py
+│  http://localhost:4244 (Compose) │  demo/backend/main.py
 │                                  │
 │  • routes (REST + WS)            │
 │  • session state (in-memory)     │
@@ -150,7 +150,7 @@ interactive artifact, not a service.
 ```
 demo/
 ├── README.md            this file
-├── docker-compose.yml   2-service local stack (backend + frontend)
+├── docker-compose.yml   3-service local stack (backend + frontend + Jupyter)
 ├── Dockerfile           single-image multi-stage build (production deploy)
 │
 ├── backend/
@@ -249,7 +249,7 @@ cd demo
 docker compose up --build
 ```
 
-Backend on <http://localhost:8001>, frontend on <http://localhost:3002>.
+Backend on <http://localhost:4244>, frontend on <http://localhost:4242>, and JupyterLab on <http://localhost:8889> (token-less, localhost only).
 
 The first build is slow because the backend image pre-downloads model
 weights at build time (MiniLM ~90&nbsp;MB, LAION-CLAP ~1.8&nbsp;GB, plus a
@@ -308,9 +308,10 @@ Make sure you've clicked something on the page (not just typed) before the
 first render. On iOS, also turn the silent-mode switch off — the demo
 shows a banner about this on iPhones.
 
-**Port already in use.** The compose ports (8001 for backend, 3002 for
-frontend) are mapped from the host. If something's already on those
-ports, edit `demo/docker-compose.yml` or stop the conflicting process.
+**Port already in use.** The compose ports (4244 backend, 4242 frontend,
+8889 JupyterLab) are mapped from the host. If something's already on
+those ports, edit `demo/docker-compose.yml` or stop the conflicting
+process.
 
 **`fast_heavy` model fails with `laion_clap` ImportError.** You're running
 locally without the `[heavy]` extra. Either install with `[heavy]` or stick
