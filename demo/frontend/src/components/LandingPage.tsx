@@ -698,7 +698,7 @@ export default function LandingPage() {
             </a>
             */}
 
-            <a href="https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart.ipynb" target="_blank" rel="noopener noreferrer" className="link-card">
+            <a href="https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart-colab.ipynb" target="_blank" rel="noopener noreferrer" className="link-card">
               <div className="link-card-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2">
                   <circle cx="12" cy="12" r="10" />

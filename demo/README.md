@@ -42,7 +42,7 @@ Once the stack is up, three services are running:
 | Service     | URL                                         | What's there                                |
 |-------------|---------------------------------------------|---------------------------------------------|
 | **Demo UI** | <http://localhost:4242>                     | The interactive web app (vibe input → audio) |
-| **JupyterLab** 📓 | <http://localhost:8889>               | Pre-installed SDK + `quickstart.ipynb`, runs locally - the same notebook content as the [Colab](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart.ipynb) version |
+| **JupyterLab** 📓 | <http://localhost:8889>               | Pre-installed SDK + `quickstart.ipynb`, runs locally - the same notebook content as the [Colab](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart-colab.ipynb) version |
 | Backend API | <http://localhost:4244>                     | FastAPI server (only relevant if you're poking the API directly) |
 
 JupyterLab is bound to `127.0.0.1` only and runs token-less for
