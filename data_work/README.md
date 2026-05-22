@@ -5,6 +5,11 @@ or rerun the paper's evaluation harness. It's standalone — the published `late
 library doesn't depend on anything here, and `pip install latentscore` does not pull
 `data_work/` into your environment.
 
+> 📋 **What does the pipeline actually produce?**
+> The output artifact is the retrieval map that powers the default `fast` model.
+> See [`RETRIEVAL_MAP_CARD.md`](RETRIEVAL_MAP_CARD.md) for the full dataset card:
+> row schema, construction pipeline, models used, known biases, license, citation.
+
 ## Directory layout
 
 ```

@@ -188,6 +188,9 @@ _DEFAULT_MAX_RETRIES = 3
 _LLM_MAX_TOKENS = 3_000
 _EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 _LOCAL_EMBEDDING_DIR = Path("models") / _EMBEDDING_MODEL_NAME
+# The retrieval map this loads is documented in
+# ../data_work/RETRIEVAL_MAP_CARD.md - row schema, construction
+# pipeline, models used, biases, license, rebuild instructions.
 _EMBED_MAP_REPO = os.environ.get(
     "LATENTSCORE_EMBED_MAP_REPO",
     "guprab/latentscore-data",
