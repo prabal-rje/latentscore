@@ -51,7 +51,7 @@ Either way, open:
 - [`localhost:4242`](http://localhost:4242) - demo UI
 - [`localhost:8889`](http://localhost:8889) - JupyterLab playground (SDK pre-installed)
 
-See [demo/](demo/) for architecture, dev setup, and troubleshooting.
+See the [demo documentation](demo/) for architecture, dev setup, and troubleshooting.
 
 ---
 

@@ -1,6 +1,6 @@
 # LatentScore Demo
 
-[![Live Demo](https://img.shields.io/badge/▶_Live_Demo-latentscore.com-8A2BE2?style=flat)](https://latentscore.com/demo) [![Jupyter Bundled](https://img.shields.io/badge/📓_JupyterLab-Bundled-F37626?style=flat)](#2-what-you-get) [![GHCR](https://img.shields.io/badge/🐳_GHCR-Pre--built_images-2496ED?style=flat)](https://github.com/prabal-rje/latentscore/pkgs/container/latentscore-demo-backend) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue?style=flat)](../LICENSE)
+[![Live Demo](https://img.shields.io/badge/▶_Live_Demo-latentscore.com-8A2BE2?style=flat)](https://latentscore.com/demo) [![Jupyter Bundled](https://img.shields.io/badge/📓_JupyterLab-Bundled-F37626?style=flat)](#2-what-you-get) [![GHCR](https://img.shields.io/badge/🐳_Multi--arch_images-CI-2496ED?style=flat)](https://github.com/prabal-rje/latentscore/actions/workflows/publish-images.yml) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue?style=flat)](../LICENSE)
 
 **A bundled, runnable artifact of LatentScore.** One `docker compose up`
 gives you the web UI **and** a JupyterLab playground with the SDK
