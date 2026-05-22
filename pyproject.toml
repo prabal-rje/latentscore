@@ -77,7 +77,7 @@ extend-select = ["I"]
 quote-style = "double"
 
 [tool.pyright]
-exclude = ["demo", "**/__pycache__", "**/node_modules"]
+exclude = ["demo", "notebooks", "**/__pycache__", "**/node_modules"]
 
 [tool.pytest.ini_options]
 addopts = "--asyncio-mode=auto --maxfail=1 --cov=latentscore --cov=data_work --cov-report=term-missing"

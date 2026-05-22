@@ -35,14 +35,24 @@ RUN mkdir -p /home/jovyan/.jupyter && \
         > /home/jovyan/.jupyter/jupyter_server_config.py && \
     chown -R jovyan:users /home/jovyan/.jupyter
 
-# Ship the display helpers (listen, _render_metadata, check_key) as a
-# Python module + IPython startup script so they're pre-imported into
-# every kernel. This means the user can run any notebook cell in any
-# order without first running the "Setup" cell - critical because
-# JupyterLab has no way to force a hidden cell to run.
+# Pre-seed a Jupyter notebook-trust secret so the `jupyter trust` call
+# below uses the same secret the running JupyterLab will use for
+# signature verification (otherwise the live server would generate
+# a fresh secret on first launch and refuse to trust the bundled
+# notebook's signature).
+RUN mkdir -p /home/jovyan/.local/share/jupyter && \
+    python -c "import secrets; open('/home/jovyan/.local/share/jupyter/notebook_secret','wb').write(secrets.token_bytes(64))" && \
+    chown -R jovyan:users /home/jovyan/.local
+
+# Ship the display helpers (listen, check_key, _render_metadata) as a
+# Python module + IPython startup script that pre-imports them on
+# every kernel boot. This means the user can run any notebook cell in
+# any order without first running the notebook's RUN ME FIRST cell.
+# (Cell 3 in the notebook still defines the same helpers inline for
+# the Colab path, where this startup script doesn't apply.)
 COPY demo/notebook/latentscore_demo_helpers.py /opt/conda/lib/python3.12/site-packages/latentscore_demo_helpers.py
 RUN mkdir -p /home/jovyan/.ipython/profile_default/startup && \
-    printf 'from latentscore_demo_helpers import *  # noqa: F401, F403\n' \
+    printf 'import latentscore as ls  # noqa: F401\nfrom latentscore_demo_helpers import *  # noqa: F401, F403\n' \
         > /home/jovyan/.ipython/profile_default/startup/00-latentscore-helpers.py && \
     chown -R jovyan:users /home/jovyan/.ipython
 
@@ -65,6 +75,18 @@ RUN chown -R jovyan:users /home/jovyan
 
 USER jovyan
 WORKDIR /home/jovyan/work
+
+# Sign the bundled notebook so JupyterLab treats its baked outputs as
+# trusted on load. Without this, audio players in pre-baked cells show
+# up but refuse to play (untrusted HTML is sanitized client-side).
+# Sign via nbformat directly using the secret we seeded above, so the
+# running JupyterLab (which reads the same secret) verifies the sig
+# and renders the outputs as trusted.
+RUN python -c "import nbformat; from nbformat.sign import NotebookNotary; \
+    nb = nbformat.read('/home/jovyan/work/quickstart.ipynb', as_version=4); \
+    NotebookNotary().sign(nb); \
+    nbformat.write(nb, '/home/jovyan/work/quickstart.ipynb')"
+
 EXPOSE 8888
 
 # Use the jupyter docker stacks' start.sh entrypoint. The CLI
