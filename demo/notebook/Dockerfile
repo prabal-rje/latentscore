@@ -35,6 +35,17 @@ RUN mkdir -p /home/jovyan/.jupyter && \
         > /home/jovyan/.jupyter/jupyter_server_config.py && \
     chown -R jovyan:users /home/jovyan/.jupyter
 
+# Ship the display helpers (listen, _render_metadata, check_key) as a
+# Python module + IPython startup script so they're pre-imported into
+# every kernel. This means the user can run any notebook cell in any
+# order without first running the "Setup" cell - critical because
+# JupyterLab has no way to force a hidden cell to run.
+COPY demo/notebook/latentscore_demo_helpers.py /opt/conda/lib/python3.12/site-packages/latentscore_demo_helpers.py
+RUN mkdir -p /home/jovyan/.ipython/profile_default/startup && \
+    printf 'from latentscore_demo_helpers import *  # noqa: F401, F403\n' \
+        > /home/jovyan/.ipython/profile_default/startup/00-latentscore-helpers.py && \
+    chown -R jovyan:users /home/jovyan/.ipython
+
 # Copy the quickstart notebook and strip the Colab-only `pip install +
 # os.kill` cell. The source notebook is authored for Colab; here in
 # the local Docker image latentscore is already installed, so that
