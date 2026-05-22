@@ -288,8 +288,16 @@ async def startup_warmup():
 async def vibe_to_config(vibe: str, model: str = "fast") -> _VibeResult:
     """Convert vibe text → config + optional metadata from the embed map."""
     if model == "fast_heavy" and fast_heavy_model is not None:
-        config = await fast_heavy_model.generate(vibe)
-        return _VibeResult(config)
+        # FastHeavyModel.generate() returns GenerateResult since
+        # latentscore commit 1862efb - unwrap it so _VibeResult gets
+        # the bare MusicConfig plus the title/palettes the embed map
+        # already carries.
+        result = await fast_heavy_model.generate(vibe)
+        return _VibeResult(
+            result.config,
+            title=result.title,
+            palettes=[p.model_dump() for p in result.palettes] if result.palettes else None,
+        )
     if vibe_model is not None:
         return await vibe_model.generate_with_meta(vibe)
     return _VibeResult(_heuristic_config(vibe))
