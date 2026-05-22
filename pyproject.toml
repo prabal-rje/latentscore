@@ -12,18 +12,21 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = [
     # Synthesis + audio I/O + playback + CLI rendering.
-    "numpy",
-    "scipy",
+    # Pinned exactly for reproducibility (ACM MM submission). Versions
+    # match what resolved cleanly in the demo Docker build on 2026-05-21
+    # and are known to interoperate.
+    "numpy==2.4.6",
+    "scipy==1.17.1",
     "soundfile",
     "sounddevice",
     "pydantic>=2",
     "rich",
     # Default text-prompt retrieval (the "fast" model). Embedding-match quality
     # out of the box — no extra needed for the headline `ls.render("text")` API.
-    "sentence-transformers",
-    "torch",
-    "huggingface_hub>=0.20",
-    "transformers>=4.57.0,<5",
+    "sentence-transformers==5.5.1",
+    "torch==2.12.0",
+    "huggingface_hub==0.36.2",
+    "transformers==4.57.6",
     "tokenizers>=0.20.0",
     "sentencepiece",
 ]

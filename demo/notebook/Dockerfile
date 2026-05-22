@@ -5,7 +5,7 @@
 #
 # Same quickstart.ipynb as the Colab notebook (one source of truth).
 
-FROM quay.io/jupyter/scipy-notebook:python-3.12
+FROM quay.io/jupyter/scipy-notebook:python-3.12@sha256:15b50ef89a316b483279aa5f689c5b26947e586ddb403c504e65a73b47ff8569
 
 USER root
 
@@ -31,16 +31,35 @@ RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTr
 # only -- the docker-compose mapping intentionally binds to the host's
 # loopback. Do NOT expose this port to the internet.
 RUN mkdir -p /home/jovyan/.jupyter && \
-    printf "c.ServerApp.token = ''\nc.ServerApp.password = ''\nc.ServerApp.ip = '0.0.0.0'\n" \
+    printf "c.ServerApp.token = ''\nc.ServerApp.password = ''\nc.ServerApp.ip = '0.0.0.0'\nc.ServerApp.default_url = '/lab/tree/quickstart.ipynb'\n" \
         > /home/jovyan/.jupyter/jupyter_server_config.py && \
     chown -R jovyan:users /home/jovyan/.jupyter
 
-# Copy the quickstart notebook into the default working directory.
-COPY --chown=jovyan:users notebooks/quickstart.ipynb /home/jovyan/work/quickstart.ipynb
+# Copy the quickstart notebook and strip the Colab-only `pip install +
+# os.kill` cell. The source notebook is authored for Colab; here in
+# the local Docker image latentscore is already installed, so that
+# cell would re-fetch from git@main and kill the kernel for no reason.
+COPY --chown=jovyan:users notebooks/quickstart.ipynb /tmp/quickstart-source.ipynb
+COPY --chown=jovyan:users demo/notebook/strip_colab_cells.py /tmp/strip_colab_cells.py
+RUN python /tmp/strip_colab_cells.py /tmp/quickstart-source.ipynb /home/jovyan/work/quickstart.ipynb \
+    && chown jovyan:users /home/jovyan/work/quickstart.ipynb \
+    && rm /tmp/quickstart-source.ipynb /tmp/strip_colab_cells.py
+
+# The jupyter base image sets HOME=/home/jovyan even for root-run
+# commands, so the MiniLM pre-download above wrote
+# /home/jovyan/.cache/huggingface/ as root. Hand the whole home dir
+# back to jovyan so runtime writes (latentscore's log dir,
+# huggingface_hub's cache updates, etc.) don't hit Errno 13.
+RUN chown -R jovyan:users /home/jovyan
 
 USER jovyan
 WORKDIR /home/jovyan/work
 EXPOSE 8888
 
-# Use the jupyter docker stacks' start.sh entrypoint (default).
-CMD ["start-notebook.sh", "--ServerApp.root_dir=/home/jovyan/work"]
+# Use the jupyter docker stacks' start.sh entrypoint. The CLI
+# --ServerApp.default_url flag wins over the entrypoint's built-in
+# default (/lab?), which would otherwise drop users into the file
+# browser instead of the quickstart notebook.
+CMD ["start-notebook.sh", \
+     "--ServerApp.root_dir=/home/jovyan/work", \
+     "--ServerApp.default_url=/lab/tree/quickstart.ipynb"]

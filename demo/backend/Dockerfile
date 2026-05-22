@@ -2,7 +2,7 @@
 # demo/docker-compose.yml), so we have access to the latentscore source
 # at ./latentscore/ relative to the build context and install it directly.
 
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:9d3abd9fc11d06998ccdbdd93b4dd49b5ad7d67fcbbc11c016eb0eb2c2194891
 
 WORKDIR /app
 

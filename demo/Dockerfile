@@ -8,7 +8,7 @@
 # dockerfilePath="demo/Dockerfile".
 
 # ── Stage 1: Build frontend ──────────────────────────────────────────────────
-FROM node:22-alpine AS frontend
+FROM node:22-alpine@sha256:968df39aedcea65eeb078fb336ed7191baf48f972b4479711397108be0966920 AS frontend
 WORKDIR /app
 COPY demo/frontend/package.json demo/frontend/package-lock.json* ./
 RUN npm ci
@@ -16,7 +16,7 @@ COPY demo/frontend/ .
 RUN npm run build
 
 # ── Stage 2: Build Python deps (with compilers) ─────────────────────────────
-FROM python:3.12-slim AS pydeps
+FROM python:3.12-slim@sha256:9d3abd9fc11d06998ccdbdd93b4dd49b5ad7d67fcbbc11c016eb0eb2c2194891 AS pydeps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ make cmake libc6-dev libasound2-dev libsndfile1-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -38,7 +38,7 @@ RUN python -c "import laion_clap; m = laion_clap.CLAP_Module(enable_fusion=False
 RUN python -c "from latentscore.models import FastHeavyModel; FastHeavyModel().warmup()"
 
 # ── Stage 3: Final slim image ────────────────────────────────────────────────
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:9d3abd9fc11d06998ccdbdd93b4dd49b5ad7d67fcbbc11c016eb0eb2c2194891
 WORKDIR /app
 
 # Runtime libs only (no compilers)
