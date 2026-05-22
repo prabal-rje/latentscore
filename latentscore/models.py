@@ -21,6 +21,7 @@ from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from common import build_config_generation_prompt
+from common.music_schema import Palette
 
 from .config import (
     MAX_LONG_FIELD_CHARS,
@@ -525,9 +526,33 @@ class _GgufInstructorModel:
         )
 
 
+def _parse_palettes(raw: object) -> tuple[Palette, ...]:
+    """Coerce raw JSON palettes from embed-map rows into validated Palettes.
+
+    Defensive: returns () for missing, malformed, or partially-invalid input
+    so a bad row never crashes the embed-map load.
+    """
+    if not isinstance(raw, list):
+        return ()
+    out: list[Palette] = []
+    for item in cast(list[Any], raw):
+        try:
+            out.append(Palette.model_validate(item))
+        except ValidationError:
+            continue
+    return tuple(out)
+
+
 class ExampleConfig(BaseModel):
     vibe: str
     config: MusicConfig
+    # Lookup metadata - present for embed-map-backed rows, default-empty for
+    # hand-authored FAST_EXAMPLES and any row that came in without these.
+    # Lets the fast / fast_heavy models populate GenerateResult.title and
+    # GenerateResult.palettes from the same nearest-neighbor lookup that
+    # already returns .config - no LLM call needed.
+    title: str = ""
+    palettes: tuple[Palette, ...] = ()
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -773,12 +798,12 @@ class FastEmbeddingModel:
         _ = self._example_matrix()
         _ = self._load_encoder()
 
-    async def generate(self, vibe: str) -> MusicConfig:
+    async def generate(self, vibe: str) -> GenerateResult:
         try:
             return await asyncio.to_thread(self._embed_and_select, vibe)
         except Exception as exc:  # pragma: no cover - runtime fallback
             _LOGGER.warning("Fast model fallback: %s", exc, exc_info=True)
-            return _heuristic_config(vibe)
+            return GenerateResult(config=_heuristic_config(vibe), thinking="")
 
     @functools.lru_cache(maxsize=1)
     def _load_encoder(self) -> Any:
@@ -814,14 +839,22 @@ class FastEmbeddingModel:
         embeddings = encoder.encode(texts, normalize_embeddings=True)
         return np.asarray(embeddings, dtype=np.float32)
 
-    def _embed_and_select(self, vibe: str) -> MusicConfig:
+    def _embed_and_select(self, vibe: str) -> GenerateResult:
         encoder = self._load_encoder()
         example_matrix = self._example_matrix()
         query = encoder.encode([vibe], normalize_embeddings=True)
         query_vec = np.asarray(query, dtype=np.float32)[0]
         scores = example_matrix @ query_vec
         best_idx = int(np.argmax(scores))
-        return self._examples()[best_idx].config
+        example = self._examples()[best_idx]
+        # `thinking` is "" rather than None for lookup-based models -
+        # it's lookup, there's no chain-of-thought to surface.
+        return GenerateResult(
+            config=example.config,
+            title=example.title or None,
+            thinking="",
+            palettes=example.palettes,
+        )
 
     @functools.lru_cache(maxsize=1)
     def _embed_map_examples(self) -> tuple[tuple[ExampleConfig, ...], NDArray[np.float32] | None]:
@@ -854,7 +887,16 @@ class FastEmbeddingModel:
                             music_config = MusicConfig.model_validate(config)
                         except ValidationError:
                             continue
-                    examples.append(ExampleConfig(vibe=str(vibe), config=music_config))
+                    title = row.get("title")
+                    palettes = _parse_palettes(row.get("palettes"))
+                    examples.append(
+                        ExampleConfig(
+                            vibe=str(vibe),
+                            config=music_config,
+                            title=str(title) if isinstance(title, str) else "",
+                            palettes=palettes,
+                        )
+                    )
                     embed: object = row.get("embedding")
                     if isinstance(embed, list):
                         embeddings.append([float(v) for v in cast(list[Any], embed)])
@@ -942,12 +984,12 @@ class FastHeavyModel:
         _ = self._example_matrix()
         _ = self._load_clap()
 
-    async def generate(self, vibe: str) -> MusicConfig:
+    async def generate(self, vibe: str) -> GenerateResult:
         try:
             return await asyncio.to_thread(self._embed_and_select, vibe)
         except Exception as exc:  # pragma: no cover - runtime fallback
             _LOGGER.warning("FastHeavy model fallback: %s", exc, exc_info=True)
-            return _heuristic_config(vibe)
+            return GenerateResult(config=_heuristic_config(vibe), thinking="")
 
     @functools.lru_cache(maxsize=1)
     def _load_clap(self) -> Any:
@@ -983,7 +1025,7 @@ class FastHeavyModel:
             "Download it or set LATENTSCORE_CLAP_EMBED_MAP to a local path."
         )
 
-    def _embed_and_select(self, vibe: str) -> MusicConfig:
+    def _embed_and_select(self, vibe: str) -> GenerateResult:
         clap = self._load_clap()
         example_matrix = self._example_matrix()
         query = clap.get_text_embedding([vibe])
@@ -993,7 +1035,13 @@ class FastHeavyModel:
             query_vec = query_vec / norm
         scores = example_matrix @ query_vec
         best_idx = int(np.argmax(scores))
-        return self._examples()[best_idx].config
+        example = self._examples()[best_idx]
+        return GenerateResult(
+            config=example.config,
+            title=example.title or None,
+            thinking="",
+            palettes=example.palettes,
+        )
 
     @functools.lru_cache(maxsize=1)
     def _clap_embed_map_examples(
@@ -1029,7 +1077,16 @@ class FastHeavyModel:
                             music_config = MusicConfig.model_validate(config)
                         except ValidationError:
                             continue
-                    examples.append(ExampleConfig(vibe=str(vibe), config=music_config))
+                    title = row.get("title")
+                    palettes = _parse_palettes(row.get("palettes"))
+                    examples.append(
+                        ExampleConfig(
+                            vibe=str(vibe),
+                            config=music_config,
+                            title=str(title) if isinstance(title, str) else "",
+                            palettes=palettes,
+                        )
+                    )
                     embed: object = row.get("clap_audio_embedding")
                     if isinstance(embed, list):
                         embeddings.append([float(v) for v in cast(list[Any], embed)])
@@ -1191,7 +1248,7 @@ class InterpEmbeddingModel(FastEmbeddingModel):
         super().__init__(model_dir, exclude_splits=exclude_splits)
         self._top_k = top_k
 
-    def _embed_and_select(self, vibe: str) -> MusicConfig:
+    def _embed_and_select(self, vibe: str) -> GenerateResult:
         encoder = self._load_encoder()
         example_matrix = self._example_matrix()
         query = encoder.encode([vibe], normalize_embeddings=True)
@@ -1201,8 +1258,18 @@ class InterpEmbeddingModel(FastEmbeddingModel):
         actual_k = min(self._top_k, len(self._examples()))
         top_indices = np.argsort(scores)[-actual_k:][::-1]
         top_scores = [float(scores[int(i)]) for i in top_indices]
+        # Carry the top-1 neighbor's metadata. Title/palettes were authored
+        # for one specific row - we use the closest match rather than try
+        # to "interpolate" text or color, which doesn't have a meaningful
+        # blending operation the way ordinal labels do.
+        top1 = self._examples()[int(top_indices[0])]
         if all(s <= 0 for s in top_scores):
-            return self._examples()[int(top_indices[0])].config
+            return GenerateResult(
+                config=top1.config,
+                title=top1.title or None,
+                thinking="",
+                palettes=top1.palettes,
+            )
         weights = _log_inverse_weights(top_scores)
         configs = [self._examples()[int(i)].config for i in top_indices]
 
@@ -1260,7 +1327,12 @@ class InterpEmbeddingModel(FastEmbeddingModel):
         depth_vals = [c.depth for c in configs]
         data["depth"] = sum(w for v, w in zip(depth_vals, weights) if v) > 0.5
 
-        return MusicConfig.model_validate(data)
+        return GenerateResult(
+            config=MusicConfig.model_validate(data),
+            title=top1.title or None,
+            thinking="",
+            palettes=top1.palettes,
+        )
 
 
 # ---------------------------------------------------------------------------
