@@ -6,7 +6,7 @@
 | **Artifact (heavy)** | `2026-01-26_scored/vibe_and_clap_audio_embeddings_to_config_map.jsonl` |
 | **Rows** | 10,558 |
 | **Hosted at** | [guprab/latentscore-data](https://huggingface.co/datasets/guprab/latentscore-data) |
-| **Embedding dim** | 384 (MiniLM) |
+| **Embedding dim** | 384 (MiniLM, default) / 512 (LAION-CLAP, heavy) |
 | **Splits** | SFT-Train (5,749) / SFT-Val (534) / GRPO (2,672) / TEST (1,603) |
 | **License** | Apache 2.0 |
 
