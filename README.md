@@ -197,6 +197,7 @@ API, and bring-your-own-LLM cookbook.
 
 - [Documentation](docs/library.md) - parameter reference, streaming, async API, bring-your-own-LLM
 - [FAQ](docs/FAQ.md) - first-call hang, system deps, Windows, citation, …
+- [Retrieval map card](RETRIEVAL_MAP_CARD.md) - what powers the default `fast` model: row schema, construction pipeline, models used, biases, license
 - [Research pipeline](data_work/README.md) - how the dataset was built
 - [Contributing](CONTRIBUTE.md) - setup + [style rules](docs/contribute/coding-guidelines.md)
 - [Demo](demo/) - run the web demo locally
