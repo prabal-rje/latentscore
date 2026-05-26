@@ -12,11 +12,12 @@ https://private-user-images.githubusercontent.com/140295281/557606724-22889dcc-9
 
 ## 1. Try it now
 
-**Three ways:**
+**Four ways:**
 
 - 🎧 **Hear it now** - [latentscore.com/demo](https://latentscore.com/demo). Browser, no install.
 - 🐳 **Run the demo + JupyterLab locally** - `docker compose` gives you the demo UI **and** a JupyterLab playground where you can poke at the SDK without `pip install`. ~60s on any OS. See [Try the demo](#2-try-the-demo).
-- 🛠 **Build with it locally** - `pip install latentscore` on macOS, Linux, or Windows WSL2. See [Install the SDK](#4-install-the-sdk).
+- 🟧 [**Open in Colab**](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart-colab.ipynb) - free CPU runtime, no local setup, no key required.
+- 🛠 **Build with it locally** - `pip install latentscore` on macOS, Linux, or Windows WSL2. See [Try the SDK](#4-try-the-sdk).
 
 ```python
 import latentscore as ls
@@ -40,7 +41,7 @@ That's it. One line. You get audio playing on your speakers.
 docker compose -f demo/docker-compose.yml up
 ```
 
-**From source - reproducibility build** (~5 min, first time only):
+**From source - reproducibility build** (~10 min, first time only):
 
 ```bash
 docker compose -f demo/docker-compose.yml up --build
@@ -59,7 +60,7 @@ See the [demo documentation](demo/) for architecture, dev setup, and troubleshoo
 
 - [Try it now](#1-try-it-now) - four ways to get going (browser, Docker, Colab, pip)
 - [Try the demo](#2-try-the-demo) - deeper Docker setup
-- [Install the SDK](#4-install-the-sdk) - pip, 30 seconds
+- [Try the SDK](#4-try-the-sdk) - Colab (recommended) or local install
 - [CLI](#5-cli) - `latentscore doctor`, `download`, `demo`
 - [Quick start](#6-quick-start) - Python in 5 lines
 - [Controlling the sound](#7-controlling-the-sound) - `MusicConfig` parameters
@@ -70,12 +71,26 @@ See the [demo documentation](demo/) for architecture, dev setup, and troubleshoo
 
 ---
 
-## 4. Install the SDK
+## 4. Try the SDK
+
+> 🟧 **Easiest path: [Open the Colab notebook](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart-colab.ipynb)** — same SDK, free CPU runtime, no install, no system deps to wrangle.
+
+If you'd rather install locally, read on.
+
+> ⚠️ **System dependencies vary by OS.** Local audio playback and WAV I/O
+> depend on native libraries that don't ship with pip — `libportaudio`
+> (for live playback via `sounddevice`) and `libsndfile` (for `soundfile`).
+> Typical install:
+> - **macOS:** `brew install sox`
+> - **Linux:** `apt install sox libasound2-dev`
+> - **Windows:** WSL2 only (see [FAQ](docs/FAQ.md#can-i-run-this-on-windows))
+>
+> Skip all of this by running in [Colab](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart-colab.ipynb) — everything's preinstalled.
 
 ### 4.1 Requirements
 
 - **OS** - macOS, Linux, or Windows **ONLY** via [WSL2](docs/FAQ.md#can-i-run-this-on-windows). For the web UI on any OS, use the [Docker demo](#2-try-the-demo) instead.
-- **python 3.10 to python 3.12** - we test against [3.12](https://www.python.org/downloads/release/python-3120/) (matches our Docker image). Or use [`conda`](https://docs.conda.io/projects/miniconda/en/latest/) for environment management.
+- **python 3.11 to python 3.12** - we test against [3.12](https://www.python.org/downloads/release/python-3120/) (matches our Docker image). Or use [`conda`](https://docs.conda.io/projects/miniconda/en/latest/) for environment management.
 
 ### 4.2 Install
 
@@ -120,6 +135,8 @@ Exits non-zero with a clear hint if anything's broken. Add `--json` for machine-
 
 ## 5. CLI
 
+> ⚠️ The CLI ships with the SDK install — same system-deps caveats as [Try the SDK](#4-try-the-sdk) above. Skip the headache by running [the Colab notebook](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart-colab.ipynb) instead; most of these CLI commands have equivalent Python calls (`ls.prefetch(...)`, `ls.render(...)`) you can run there.
+
 ```bash
 # Verify your install
 latentscore doctor                       # human-readable summary
@@ -138,6 +155,8 @@ latentscore demo --duration 30 --output ambient.wav   # 30 seconds, save to file
 ---
 
 ## 6. Quick start
+
+> 🟧 **Don't want to install?** [Try the same code in Colab](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart-colab.ipynb) — free CPU runtime, no install.
 
 ### 6.1 Render and play
 

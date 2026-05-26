@@ -4,12 +4,12 @@
 
 ### 1. Install Conda (recommended)
 
-Download [Miniconda](https://docs.conda.io/en/latest/miniconda.html) or [Anaconda](https://www.anaconda.com/products/distribution) if you don't have it already. The project pins Python 3.10–3.12.
+Download [Miniconda](https://docs.conda.io/en/latest/miniconda.html) or [Anaconda](https://www.anaconda.com/products/distribution) if you don't have it already. The project pins Python 3.11–3.12.
 
 ### 2. Create the environment
 
 ```bash
-conda create -n latentscore python=3.10 -y
+conda create -n latentscore python=3.11 -y
 conda activate latentscore
 ```
 

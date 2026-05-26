@@ -1,6 +1,31 @@
-# LatentScore Library DX
+# LatentScore Library Guide
 
-## Tier 0: I just want sound
+> 🟧 **Don't want to install?** [Try the SDK in Colab](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart-colab.ipynb) — free CPU runtime, no setup, no key required.
+
+## Contents
+
+**Scenarios:**
+
+- ["I just want sound"](#i-just-want-sound)
+- ["I'm gonna play this live"](#im-gonna-play-this-live)
+- ["I want to steer it live"](#i-want-to-steer-it-live)
+- ["I want to nudge a vibe"](#i-want-to-nudge-a-vibe)
+- ["I want full control over every knob"](#i-want-full-control-over-every-knob)
+- ["I want a smarter model (BYO LLM)"](#i-want-a-smarter-model-byo-llm)
+
+**More:**
+
+- [Other built-in models](#other-built-in-models)
+- [Advanced](#advanced)
+
+**Reference:**
+
+- [Parameter reference](#parameter-reference)
+- [Audio contract](#audio-contract)
+
+---
+
+## "I just want sound"
 
 ```python
 import latentscore as ls
@@ -10,180 +35,98 @@ audio.play()
 audio.save("cave.wav")
 ```
 
-- `render(...)` returns an `Audio` object (not a raw numpy array).
-- `Audio` supports `.play()`, `.save()`, and `np.asarray(audio)`.
+- `render(...)` returns an `Audio` object.
+- `Audio` supports `.play()`, `.save("file.wav")`, and `np.asarray(audio)`.
 
-## Tier 1: I want a stream of chunks
+## "I'm gonna play this live"
 
-```python
-import latentscore as ls
-
-for chunk in ls.stream("dark ambient", "sunrise"):
-    speaker.write(chunk)
-```
-
-- `stream(...)` yields `np.float32` mono chunks.
-- `duration` is total duration across all items (split evenly).
-- `AudioStream` also supports `.save()` and `.play()`.
-- `stream(...)` accepts a single sequence of items (e.g., `ls.stream(["dark ambient", "sunrise"])`).
-
-## Live generator stream (dynamic playlist)
-
-```python
-import latentscore as ls
-from collections.abc import Iterable
-from latentscore.playback import play_stream
-
-def live_items() -> Iterable[ls.Streamable]:
-    for vibe in ["misty harbor", "neon rain", "quiet orchard"]:
-        yield ls.Streamable(content=vibe, duration=6.0, transition_duration=1.5)
-
-chunks = ls.stream_raw(live_items(), chunk_seconds=1.0, model="fast")
-play_stream(chunks, sample_rate=ls.SAMPLE_RATE)
-```
-
-## Tier 2: Same stream, but with knobs
+Chain a few vibes together with crossfades. One call, one continuous stream:
 
 ```python
 import latentscore as ls
 
-async for chunk in ls.stream(
-    "dark ambient",
-    "sunrise",
-    duration=120,
-    transition=5,
-    chunk_seconds=1.0,
-    model="fast",
-):
-    await speaker.write(chunk)
+ls.stream(
+    "morning coffee",
+    "afternoon focus",
+    "evening wind-down",
+    duration=45,        # total seconds, split evenly across the vibes
+    transition=3.0,     # crossfade seconds
+).play()
 ```
 
-- `stream(...)` supports both `for` and `async for`.
-- `chunk_seconds` controls chunk sizing.
+## "I want to steer it live"
 
-## Tier 3: Composition primitives
+When you don't know the next vibe up front — driving it off user input,
+sensor data, an LLM, whatever — hand `ls.live(...)` a generator instead
+of fixed arguments. The engine pulls the next item when it's ready to
+transition, and crossfades into it.
+
+```python
+import asyncio
+import latentscore as ls
+from collections.abc import AsyncIterator
+
+
+async def my_set() -> AsyncIterator[str | ls.MusicConfigUpdate]:
+    yield "warm jazz cafe at midnight"
+    await asyncio.sleep(10)
+
+    yield "thunderstorm on a tin roof"
+    await asyncio.sleep(10)
+
+    # Override specific knobs while staying within the current config
+    yield ls.MusicConfigUpdate(tempo="fast", brightness="very_bright", rhythm="electronic")
+
+
+ls.live(my_set(), transition_seconds=3.0).play()
+```
+
+Sync generators work too (just `def` / `yield`, no `async`). The
+`await asyncio.sleep(...)` calls above are stand-ins for "wait for the
+next event" — replace them with whatever real signal your application
+uses (a `queue.get()`, a websocket message, a UI button, an LLM call).
+
+> `.play()` is what makes time pass for the generator — it consumes
+> chunks at the speaker's real-time rate, which gives the generator
+> wall-clock time to yield the next item. `.collect()` won't do that
+> (no backpressure → generator never gets to advance).
+
+## "I want to nudge a vibe"
+
+Start from a vibe string, override specific knobs:
 
 ```python
 import latentscore as ls
 
-playlist = ls.Playlist(
-    tracks=[
-        ls.Track(content="dark ambient", duration=60),
-        ls.Track(content="sunrise", duration=120, transition=10),
-        ls.Track(content=ls.MusicConfig(tempo="fast", mode="minor"), duration=60),
-        ls.Track(content=ls.MusicConfigUpdate(tempo="slow", brightness="dark"), duration=60),
-    ]
-)
-playlist.stream().play()
+ls.render(
+    "morning coffee shop",
+    update=ls.MusicConfigUpdate(
+        tempo="very_fast",
+        brightness="very_dark",
+        echo="infinite",
+    ),
+).play()
 ```
 
-- `Track` accepts `str`, `MusicConfig`, or `MusicConfigUpdate`.
-- `Playlist.stream()` returns the same dual sync/async `AudioStream`.
-
-## Model selection
-
-- `"fast"` (default): MiniLM text-embedding retrieval (384-dim, sub-second). Included in the core install.
-- `"fast_heavy"`: LAION-CLAP audio-embedding retrieval (512-dim, matches text against rendered audio). Requires `pip install "latentscore[heavy]"`.
-- `"expressive"` or `"local"`: local LLM (270M Gemma 3). Always runs through the CPU `transformers` backend in the current release &mdash; MLX integration is declared in pyproject markers but not yet wired into the runtime, so even on Apple Silicon you're on CPU. Expect ~30&ndash;100&nbsp;s per render. Requires `pip install "latentscore[expressive]"`.
-- `"external:<model-name>"`: shorthand for `LiteLLMAdapter`. Requires `pip install "latentscore[external]"`.
+Or the equivalent with relative `Step(±N)` (stops at the highest or lowest value):
 
 ```python
-import latentscore as ls
+from latentscore.config import Step
 
-audio = ls.render("late night neon", model="external:gemini/gemini-3-flash-preview")
+ls.render(
+    "morning coffee shop",
+    update=ls.MusicConfigUpdate(
+        tempo=Step(+4),
+        brightness=Step(-4),
+        echo=Step(+4),
+    ),
+).play()
 ```
 
-For advanced LiteLLM control (timeouts, API keys, etc.), instantiate the adapter:
+## "I want full control over every knob"
 
-```python
-import os
-import latentscore as ls
-from latentscore.providers.litellm import LiteLLMAdapter
-
-adapter = LiteLLMAdapter(
-    model="external:gemini/gemini-3-flash-preview",
-    api_key=os.getenv("GEMINI_API_KEY"),
-    litellm_kwargs={"timeout": 60},
-)
-
-audio = ls.render("late night neon", model=adapter)
-```
-
-You can also pass a typed external spec instead of instantiating the adapter:
-
-```python
-import latentscore as ls
-
-spec = ls.ExternalModelSpec(
-    model="gemini/gemini-3-flash-preview",
-    api_key=None,
-    litellm_kwargs={"timeout": 60},
-)
-audio = ls.render("late night neon", model=spec)
-```
-
-## Playback notes
-
-CLI playback uses sounddevice/simpleaudio by default. Install `ipython` if you want inline notebook playback. If playback is unavailable, `.play()` raises a friendly error that suggests using `.save()`.
-
-## Progress indicators
-
-- `render(...)` and `stream(...)` show Rich spinners in TTYs (model load, LLM config, audio generation).
-- `.play()` shows a progress bar for buffered audio and a music-note spinner for streams.
-- To silence indicators, pass empty hooks: `hooks=ls.RenderHooks()` or `hooks=ls.StreamHooks()`.
-
-## Advanced: raw API
-
-Core functions remain available for advanced use:
-
-```python
-from latentscore import render_raw, stream_raw, astream_raw, Streamable
-```
-
-- `stream_raw(...)` expects an iterable of `Streamable`.
-- `astream_raw(...)` yields chunks asynchronously without the `AudioStream` wrapper.
-
-## Render hooks
-
-Render hooks help surface progress during blocking renders:
-
-```python
-import latentscore as ls
-
-events: list[str] = []
-hooks = ls.RenderHooks(
-    on_start=lambda: events.append("start"),
-    on_model_start=lambda model: events.append(f"model:{model}"),
-    on_synth_start=lambda: events.append("synth_start"),
-    on_end=lambda: events.append("end"),
-)
-
-audio = ls.render("underwater cave", hooks=hooks)
-```
-
-## Audio Contract
-
-- dtype: `float32`
-- range: `[-1, 1]`
-- sample rate: `44100`
-- shape: `(n,)` (mono)
-
-```python
-import numpy as np
-import latentscore as ls
-
-audio = ls.render("deep ocean")
-samples = np.asarray(audio)  # NDArray[np.float32]
-```
-
----
-
-## Controlling the sound
-
-### `MusicConfig` (full control)
-
-Build a config directly with human-readable labels and skip the
-text-prompt retrieval step entirely:
+Skip the vibe string and the retrieval step entirely. Build a
+`MusicConfig` directly with human-readable labels:
 
 ```python
 import latentscore as ls
@@ -206,42 +149,141 @@ config = ls.MusicConfig(
 ls.render(config, duration=10.0).play()
 ```
 
-### `MusicConfigUpdate` (tweak a vibe)
+Valid labels per field are in the [parameter reference](#parameter-reference) below.
 
-Start from a vibe and override specific parameters:
+## "I want a smarter model (BYO LLM)"
+
+The default `"fast"` model is a CPU embedding lookup — instant, no key
+required, ships with the core install. To route through an LLM instead,
+install the extra and name a model:
+
+```bash
+pip install "latentscore[external]"
+```
+
+This example uses Google's Gemini, so it needs `GEMINI_API_KEY`. Grab
+a free one at [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey):
+
+```python
+import os
+import latentscore as ls
+
+os.environ["GEMINI_API_KEY"] = "your-key-here"
+
+ls.render(
+    "cyberpunk rain on neon streets",
+    model="external:gemini/gemini-3-flash-preview",
+).play()
+```
+
+For other providers, set their `{PROVIDER}_API_KEY` (e.g.
+`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) — full list of [100+ providers](https://docs.litellm.ai/docs/providers).
+
+LLM responses carry richer metadata than the lookup path:
+
+```python
+audio = ls.render("cyberpunk rain", model="external:gemini/gemini-3-flash-preview")
+
+if audio.metadata is not None:
+    print(audio.metadata.title)      # e.g. "Neon Rain Drift"
+    print(audio.metadata.thinking)   # the LLM's reasoning
+    print(audio.metadata.config)     # the MusicConfig it chose
+```
+
+> LLM models are slower than `"fast"` (network round-trips) and can
+> occasionally return invalid configs. `"fast"` is recommended for
+> production use.
+
+## Other built-in models
+
+Beyond the default `"fast"` and `"external:*"` for BYO LLM, two more
+models ship with the library:
+
+### `"fast_heavy"` — CLAP audio-embedding retrieval
+
+Same retrieval idea as `fast`, but matches against CLAP audio
+embeddings (512-dim) instead of MiniLM text embeddings.
+
+Often sharper for sonically-specific prompts ("muffled bass through a
+wall", "glass shattering in slow motion") than scene descriptions.
+
+```bash
+pip install "latentscore[heavy]"
+```
 
 ```python
 import latentscore as ls
 
-audio = ls.render(
-    "morning coffee shop",
-    duration=10.0,
-    update=ls.MusicConfigUpdate(
-        brightness="very_bright",
-        rhythm="electronic",
-    ),
-)
-audio.play()
+ls.render("muffled bass through a wall", model="fast_heavy").play()
 ```
 
-### Relative steps
+Trade-off: CLAP weights are ~1.8 GB (vs ~90 MB for MiniLM), so first-call
+download is slower and disk footprint is bigger.
 
-`Step(+1)` moves one level up the scale, `Step(-1)` moves one down.
-Saturates at the boundaries.
+### 🚧 `"expressive"` — local LLM (Gemma 3 270M, CPU)
+
+> [!WARNING]
+> 🚧 ⚠️ **Experimental — not recommended for production.**
+> ~30–100 s per render and barely beats a random baseline on the
+> CLAP benchmark. Useful only if you want fully offline operation
+> and don't care about latency or quality.
+
+Runs a small Gemma 3 LLM locally via `transformers` on CPU.
+
+```bash
+pip install "latentscore[expressive]"
+latentscore download expressive
+```
 
 ```python
-from latentscore.config import Step
-
-audio = ls.render(
-    "morning coffee shop",
-    duration=10.0,
-    update=ls.MusicConfigUpdate(
-        brightness=Step(+2),   # two levels brighter
-        space=Step(-1),        # one level less spacious
-    ),
-)
-audio.play()
+ls.render("jazz cafe at midnight", model="expressive").play()
 ```
+
+## Advanced
+
+### Prefetching model assets
+
+The first `render()` call downloads model weights and the embedding map
+on demand, which can look like a hang for 30–60 seconds. Call
+`ls.prefetch(...)` once at startup if you want that download to be
+explicit:
+
+```python
+import latentscore as ls
+
+ls.prefetch("fast")           # ~90 MB MiniLM + embedding map
+ls.prefetch("fast_heavy")     # ~1.8 GB LAION-CLAP weights
+```
+
+### Render hooks
+
+`render(...)` accepts a `hooks` argument that fires a callback at each
+lifecycle stage — useful for progress UIs or measuring which stage
+takes how long:
+
+```python
+import latentscore as ls
+
+hooks = ls.RenderHooks(
+    on_start=lambda: print("start"),
+    on_model_start=lambda model: print(f"model: {model}"),
+    on_synth_start=lambda: print("synth_start"),
+    on_end=lambda: print("end"),
+)
+
+ls.render("underwater cave", hooks=hooks).play()
+```
+
+Pass an empty `RenderHooks()` to suppress the default Rich indicators.
+
+**Streaming?** `ls.stream(...)` and `ls.live(...)` use a different
+hooks shape — `ls.StreamHooks(on_event=callback)`, a single callback
+receiving a tagged `StreamEvent` you pattern-match on. See
+[`data_work/13_live_timing.py`](../data_work/13_live_timing.py) for a
+worked example with timestamp logging across the full set of streaming
+events.
+
+---
 
 ## Parameter reference
 
@@ -273,67 +315,16 @@ Every `MusicConfig` field uses human-readable labels.
 | `texture` | `none` `shimmer` `shimmer_slow` `vinyl_crackle` `breath` `stars` `glitch` `noise_wash` `crystal` `pad_whisper` |
 | `accent` | `none` `bells` `pluck` `chime` `bells_dense` `blip` `blip_random` `brass_hit` `wind` `arp_accent` `piano_note` |
 
-## Bring your own LLM
+## Audio contract
 
-Use any LLM through [LiteLLM](https://docs.litellm.ai/docs/providers)
-&mdash; OpenAI, Anthropic, Google, Mistral, Groq, and
-[100+ others](https://docs.litellm.ai/docs/providers). Install with
-`pip install "latentscore[external]"`.
+- dtype: `float32`
+- range: `[-1, 1]`
+- sample rate: `44100` (`ls.SAMPLE_RATE`)
+- shape: `(n,)` (mono)
 
 ```python
+import numpy as np
 import latentscore as ls
 
-# Gemini (free tier available)
-ls.render("cyberpunk rain on neon streets", model="external:gemini/gemini-3-flash-preview").play()
-
-# Claude
-ls.render("cozy library with rain outside", model="external:anthropic/claude-sonnet-4-5-20250929").play()
-
-# GPT
-ls.render("space station ambient", model="external:openai/gpt-4o").play()
-```
-
-API keys are read from environment variables automatically
-(`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`).
-
-### LLM metadata
-
-External models return rich metadata alongside audio:
-
-```python
-audio = ls.render("cyberpunk rain", model="external:gemini/gemini-3-flash-preview")
-
-if audio.metadata is not None:
-    print(audio.metadata.title)      # e.g. "Neon Rain Drift"
-    print(audio.metadata.thinking)   # the LLM's reasoning
-    print(audio.metadata.config)     # the MusicConfig it chose
-    for palette in audio.metadata.palettes:
-        print([c.hex for c in palette.colors])
-```
-
-> **Note:** LLM models are slower than the default `fast` model
-> (network round-trips) and can occasionally produce invalid configs.
-> The built-in `fast` model is recommended for production use.
-
-## Local LLM (`expressive` / `local`) ⚠️
-
-> **Not recommended for general use.** The default `fast` and
-> `fast_heavy` models are faster, more reliable, and produce
-> higher-quality results. Expressive mode exists for experimentation.
-
-Runs a 270M-parameter Gemma 3 LLM locally via the `transformers`
-backend on CPU &mdash; **including on Apple Silicon**. MLX integration
-is declared in pyproject markers but isn't actually wired into the
-runtime yet, so every platform falls back to CPU `transformers`.
-Expect ~30&ndash;100&nbsp;seconds per render on a laptop. The local
-model can also produce invalid configs and our benchmarks showed it
-barely outperforms a random baseline.
-
-```bash
-pip install 'latentscore[expressive]'
-latentscore download expressive
-```
-
-```python
-ls.render("jazz cafe at midnight", model="expressive").play()
+samples = np.asarray(ls.render("deep ocean"))  # NDArray[np.float32]
 ```

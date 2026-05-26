@@ -19,7 +19,7 @@ docker compose up --build
 
 That uses the `build:` block in each service definition, which is
 already in `docker-compose.yml` alongside `image:` for exactly this
-case. Takes ~5 min for the first build vs ~60 s for a pull.
+case. Takes ~10 min for the first build vs ~60 s for a pull.
 
 ## Backend stuck on "Waiting: Healthy" for several minutes.
 

@@ -18,15 +18,15 @@ title, color palettes, and a text embedding. At runtime, the user's
 prompt is embedded and the nearest neighbor is returned.
 
 A second variant ships alongside it with 512-dim LAION-CLAP
-audio embeddings instead of MiniLM text embeddings, powering
-the optional `fast_heavy` model (`pip install latentscore[heavy]`).
+embeddings of the **rendered audio** (not the description),
+powering the optional `fast_heavy` model (`pip install latentscore[heavy]`).
 
 ## Row fields
 
 | Field | Type | Notes |
 |---|---|---|
 | `vibe_original` | string | Natural-language scene description |
-| `embedding` | float[384] | MiniLM unit-normalized text embedding |
+| `embedding` | float[384] | MiniLM (`all-MiniLM-L6-v2`) embedding of `vibe_original` |
 | `config` | object | Schema-valid MusicConfig (34 fields) |
 | `title` | string | Short evocative name |
 | `palettes` | list | Three 5-color weighted palettes |
@@ -45,7 +45,10 @@ Full pipeline in `data_work/`. Four stages:
 3. Gemini 3 Flash Preview generates N=5 candidate configs
    per vibe. Each is rendered to audio and scored with
    LAION-CLAP. The highest scorer is selected.
-4. Each vibe is embedded with all-MiniLM-L6-v2.
+4. Each `vibe_original` is encoded with MiniLM (`all-MiniLM-L6-v2`)
+   into the 384-dim `embedding`. For the heavy variant, the winning
+   config is rendered to audio and encoded with LAION-CLAP into a
+   512-dim audio embedding instead.
 
 ## Known limitations
 

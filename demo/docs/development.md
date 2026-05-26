@@ -64,14 +64,14 @@ docker compose up --build
 ```
 
 That ignores each service's `image:` line and uses the matching
-`build:` block. First build takes ~5 min because the backend image
+`build:` block. First build takes ~10 min because the backend image
 pre-downloads model weights (MiniLM ~90 MB, LAION-CLAP ~1.8 GB).
 Subsequent rebuilds hit the Docker layer cache.
 
 ## Common dev gotchas
 
 - **`pip install` fails on Python 3.13.** The library targets
-  Python 3.10-3.12. Some of `laion-clap`'s transitive deps don't
+  Python 3.11-3.12. Some of `laion-clap`'s transitive deps don't
   have 3.13 wheels yet.
 - **`npm install` engine errors.** Use Node 22+. Vite 7 requires
   Node 18+ but the Dockerfile pins to Node 22, so match it to avoid

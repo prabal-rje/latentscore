@@ -177,7 +177,7 @@ which of the 10 checks failed and why. Common failures:
 
 | Check | What it means | Fix |
 |---|---|---|
-| `python_version` | Python &lt; 3.10 or &ge; 3.13 | Use a 3.10–3.12 venv/conda env |
+| `python_version` | Python &lt; 3.11 or &ge; 3.13 | Use a 3.11–3.12 venv/conda env |
 | `license_present` | Editable install metadata is stale | `pip install --force-reinstall latentscore` |
 | `audio_write` | Can't write a WAV via `soundfile` | Install `libsndfile` (see "import latentscore fails" above) |
 | `render_core` | Synthesis is broken | File a bug with the doctor `--json` output |

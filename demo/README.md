@@ -64,7 +64,7 @@ docker compose up --build
 
 That ignores the `image:` line and uses the `build:` block in each
 service definition. No file edits required. First build takes
-~5 min because the backend image pre-downloads model weights
+~10 min because the backend image pre-downloads model weights
 (MiniLM ~90 MB, LAION-CLAP ~1.8 GB). Subsequent rebuilds hit the
 Docker layer cache.
 
