@@ -9,7 +9,7 @@ from rich.console import Console
 
 from .audio import SAMPLE_RATE
 from .dx import render
-from .errors import ModelNotAvailableError
+from .errors import ModelNotAvailableError, PlaybackError
 from .logging_utils import configure_logging, log_exception
 from .spinner import Spinner, render_error
 
@@ -52,9 +52,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="latentscore")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    demo = sub.add_parser("demo", help="Render a short demo clip.")
+    demo = sub.add_parser(
+        "demo",
+        help="Play a short demo clip (or save to file with --output).",
+    )
     demo.add_argument("--duration", type=float, default=2.5)
-    demo.add_argument("--output", type=str, default="demo.wav")
+    demo.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Save to this WAV path instead of playing through speakers.",
+    )
 
     download = sub.add_parser("download", help="Download model assets.")
     download.add_argument("model", choices=["expressive", "fast", "fast_heavy"], type=str)
@@ -99,8 +107,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "demo":
             with Spinner("Rendering demo audio"):
                 audio = render("warm sunrise", duration=args.duration)
-            path = audio.save(args.output)
-            _CONSOLE.print(f"Wrote demo to {path} (sr={SAMPLE_RATE})")
+
+            if args.output:
+                path = audio.save(args.output)
+                _CONSOLE.print(f"Wrote demo to {path} (sr={SAMPLE_RATE})")
+                return 0
+
+            try:
+                audio.play()
+            except PlaybackError as exc:
+                path = audio.save("demo.wav")
+                _CONSOLE.print(f"No audio device ({exc}); wrote to {path}")
             return 0
 
         if args.command == "download":

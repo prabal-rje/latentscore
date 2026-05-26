@@ -326,7 +326,7 @@ def _ensure_tqdm_lock() -> None:
         return
     if not hasattr(tqdm.tqdm, "_lock"):
         try:
-            tqdm.tqdm._lock = None  # type: ignore[attr-defined]
+            tqdm.tqdm.get_lock()
         except Exception:
             return
 
@@ -1752,7 +1752,7 @@ class ExpressiveMlxModel:
                     load_in_4bit=True,
                     bnb_4bit_quant_type="nf4",
                     bnb_4bit_use_double_quant=True,
-                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_compute_dtype=torch.float16,  # pyright: ignore[reportPrivateImportUsage]
                 )
             except Exception:
                 use_bnb = False
@@ -1767,12 +1767,12 @@ class ExpressiveMlxModel:
             self._download_expressive(model_dir)
 
         tokenizer: Any = AutoTokenizer.from_pretrained(str(model_dir))
-        dtype: Any = torch.float16 if use_cuda else torch.float32
+        dtype: Any = torch.float16 if use_cuda else torch.float32  # pyright: ignore[reportPrivateImportUsage]
         if use_bnb and bnb_config is not None:
             model: Any = AutoModelForCausalLM.from_pretrained(
                 str(model_dir),
                 device_map="auto",
-                dtype=torch.float16,
+                dtype=torch.float16,  # pyright: ignore[reportPrivateImportUsage]
                 quantization_config=bnb_config,
             )
         else:
@@ -1789,7 +1789,9 @@ class ExpressiveMlxModel:
                 # PT2 export-based quantization is the successor but requires
                 # torch.export which is impractical here.
                 model = torch.ao.quantization.quantize_dynamic(  # pyright: ignore[reportDeprecated]
-                    model, {torch.nn.Linear}, dtype=torch.qint8
+                    model,
+                    {torch.nn.Linear},
+                    dtype=torch.qint8,  # pyright: ignore[reportPrivateImportUsage]
                 )
             except Exception as exc:
                 _LOGGER.warning("Dynamic int8 quantization failed: %s", exc)

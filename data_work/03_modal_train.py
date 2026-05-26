@@ -122,6 +122,33 @@ class _ModalStubApp:
         return _ModalStubRun()
 
 
+# Module-level so it's importable for tests even when modal isn't installed.
+TRAIN_IMAGE_PACKAGES = (
+    "accelerate==1.5.2",
+    "bitsandbytes==0.46.0",
+    "datasets==3.5.1",
+    "hf_transfer==0.1.9",
+    "huggingface_hub==0.34.4",
+    "laion-clap",
+    "numpy==2.2.6",
+    "peft==0.17.1",
+    "protobuf==5.29.5",
+    "pydantic==2.11.7",
+    "scipy==1.16.1",
+    "sentencepiece==0.2.0",
+    "soundfile",
+    "torchvision",
+    "torchaudio",
+    "tqdm==4.67.1",
+    "transformers==4.54.1",
+    "trl==0.19.1",
+    "unsloth[cu128-torch270]==2025.7.8",
+    "unsloth_zoo==2025.7.10",
+    "wandb==0.21.0",
+    "weave==0.50.0",
+)
+
+
 if modal is None:
     RETRY_POLICY = None
     OUTPUTS_VOLUME = None
@@ -129,30 +156,6 @@ if modal is None:
     WANDB_SECRETS: list[Any] = []
     app = _ModalStubApp()
 else:
-    TRAIN_IMAGE_PACKAGES = (
-        "accelerate==1.5.2",
-        "bitsandbytes==0.46.0",
-        "datasets==3.5.1",
-        "hf_transfer==0.1.9",
-        "huggingface_hub==0.34.4",
-        "laion-clap",
-        "numpy==2.2.6",
-        "peft==0.17.1",
-        "protobuf==5.29.5",
-        "pydantic==2.11.7",
-        "scipy==1.16.1",
-        "sentencepiece==0.2.0",
-        "soundfile",
-        "torchvision",
-        "torchaudio",
-        "tqdm==4.67.1",
-        "transformers==4.54.1",
-        "trl==0.19.1",
-        "unsloth[cu128-torch270]==2025.7.8",
-        "unsloth_zoo==2025.7.10",
-        "wandb==0.21.0",
-        "weave==0.50.0",
-    )
     RETRY_POLICY = modal.Retries(
         max_retries=MAX_RETRIES,
         backoff_coefficient=DEFAULT_RETRY_BACKOFF,

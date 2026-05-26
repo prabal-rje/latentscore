@@ -48,7 +48,6 @@ from common.music_schema import (
     MotionLabel,
     PadStyle,
     Palette,
-    PaletteColor,  # noqa: F401 - re-exported for schema parity tests
     PhraseLengthBars,
     RhythmStyle,
     RootNote,
@@ -60,7 +59,12 @@ from common.music_schema import (
     TempoLabel,
     TensionCurve,
     TextureStyle,
-    WeightLabel,  # noqa: F401 - re-exported for schema parity tests
+)
+from common.music_schema import (
+    PaletteColor as PaletteColor,  # re-exported for schema parity tests
+)
+from common.music_schema import (
+    WeightLabel as WeightLabel,  # re-exported for schema parity tests
 )
 
 from .errors import InvalidConfigError

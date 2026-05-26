@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Notebook display helpers for LatentScore.
 
 Import in a Jupyter / Colab notebook to get a `listen(audio)` that
@@ -29,11 +30,11 @@ from typing import Any
 
 from .dx import Audio
 
-__all__ = ["listen", "check_key"]
+__all__ = ["listen", "check_key", "live_capture"]
 
 
 # Title style chosen for dark/light theme compatibility: white fill
-# with a 1px black outline via 8 offset text-shadows. Renders crisp
+# with a thin black outline via 4 NSEW text-shadows. Renders crisp
 # in both JupyterLab themes, Colab, and the GitHub static notebook
 # viewer.
 _TITLE_CSS = (
@@ -43,10 +44,6 @@ _TITLE_CSS = (
     "font-weight:500;"
     "color:#ffffff;"
     "text-shadow:"
-    "-1px -1px 0 #000,"
-    " 1px -1px 0 #000,"
-    "-1px  1px 0 #000,"
-    " 1px  1px 0 #000,"
     " 0   -1px 0 #000,"
     " 0    1px 0 #000,"
     "-1px  0   0 #000,"
@@ -123,11 +120,101 @@ def _render_metadata(audio: Audio) -> None:
         )
 
 
-def listen(audio: Audio) -> Any:
-    """Play audio inline, with the model's title + color palettes above it."""
+def _render_config(audio: Audio) -> None:
+    """Pretty-print the MusicConfig as collapsible, syntax-styled JSON.
+
+    Only renders when `audio.metadata.config` is present (i.e. the model
+    returned one). Field values are LLM/internal-controlled but all
+    serialise through Pydantic, so we still HTML-escape defensively.
+    """
+    HTML, _Markdown, display, _IPAudio = _ipython_objects()
+    meta = audio.metadata
+    if meta is None:
+        return
+    config_json = meta.config.model_dump_json(indent=2)
+    safe_config = html.escape(config_json)
+    display(
+        HTML(
+            '<details open style="margin:6px 0 14px;">'
+            '<summary style="cursor:pointer;color:#555;font-weight:500;'
+            'font-family:-apple-system,Segoe UI,sans-serif;font-size:0.9em;">'
+            "MusicConfig (JSON)</summary>"
+            '<pre style="background:#f6f8fa;border:1px solid rgba(0,0,0,0.08);'
+            "border-radius:6px;padding:12px;font-size:0.82em;line-height:1.45;"
+            'overflow:auto;margin:6px 0 0;color:#24292f;">'
+            f"{safe_config}</pre>"
+            "</details>"
+        )
+    )
+
+
+def listen(audio: Audio, *, with_config: bool = False) -> Any:
+    """Play audio inline, with the model's title + color palettes above it.
+
+    If `with_config=True`, also renders the full `MusicConfig` as a
+    collapsible pretty-printed JSON block (useful for inspecting LLM
+    output in the BYOL section). Off by default — for the fast/lookup
+    path the config is verbose noise.
+    """
     _HTML, _Markdown, _display, IPAudio = _ipython_objects()
     _render_metadata(audio)
+    if with_config:
+        _render_config(audio)
     return IPAudio(audio.samples, rate=audio.sample_rate)
+
+
+def live_capture(stream: Any, seconds: float, *, show_progress: bool = True) -> Audio:
+    """Capture a live-steering stream into a buffered `Audio`, paced at wall-clock.
+
+    Notebooks (Jupyter / Colab) can't real-time stream audio — they have no
+    backpressure mechanism that would slow the consumer to audio-clock rate.
+    Without that pacing, a generator-based source (`ls.live(my_gen())`) never
+    gets wall-clock time to yield its next item between transitions, so the
+    audio gets stuck on the first piece.
+
+    This helper drains `stream.chunks(seconds=seconds)` at one chunk per
+    wall-clock second, accumulates them, and returns a buffered `Audio`
+    you can pass to `listen(...)` or `.save(...)`. The cell hangs for the
+    full session duration; a `tqdm` bar shows progress if installed.
+
+    Usage::
+
+        async def my_set():
+            yield "warm jazz cafe at midnight"
+            await asyncio.sleep(10)
+            yield "thunderstorm on a tin roof"
+
+        audio = live_capture(ls.live(my_set()), seconds=20)
+        listen(audio)
+    """
+    import time
+
+    import numpy as np
+
+    chunks: list[Any] = []
+    t0 = time.monotonic()
+    bar = None
+    if show_progress:
+        try:
+            from tqdm.auto import tqdm
+            bar = tqdm(total=int(seconds), unit="s", desc="Live session")
+        except ImportError:
+            bar = None
+    try:
+        for i, chunk in enumerate(stream.chunks(seconds=seconds)):
+            chunks.append(chunk)
+            if bar is not None:
+                bar.update(1)
+            deadline = t0 + (i + 1)  # default chunk_seconds = 1.0
+            delay = deadline - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+    finally:
+        if bar is not None:
+            bar.close()
+    if not chunks:
+        return Audio(samples=np.array([], dtype=np.float32), sample_rate=stream.sample_rate)
+    return Audio(samples=np.concatenate(chunks), sample_rate=stream.sample_rate)
 
 
 def check_key(model: str) -> bool:

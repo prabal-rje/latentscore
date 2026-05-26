@@ -134,7 +134,7 @@ def test_doctor_required_check_failure_triggers_warn_overall() -> None:
     # In the dev env, litellm IS installed, so we can't test the missing path
     # directly. Use a constructed report to verify the rollup logic.
     checks = (
-        DoctorCheck(name="python_version", status="pass", required=True, detail="3.10"),
+        DoctorCheck(name="python_version", status="pass", required=True, detail="3.11"),
         DoctorCheck(
             name="external_available",
             status="fail",

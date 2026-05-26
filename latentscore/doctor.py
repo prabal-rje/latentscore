@@ -23,10 +23,11 @@ import logging
 import os
 import sys
 import tempfile
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Callable, Iterator, Literal
+from typing import Callable, Literal
 
 import numpy as np
 
@@ -71,7 +72,7 @@ _OFFLINE_ENV_VARS = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")
 
 
 @contextmanager
-def _offline_env(enabled: bool) -> Iterator[None]:
+def _offline_env(enabled: bool) -> Generator[None, None, None]:
     if not enabled:
         yield
         return
@@ -95,13 +96,13 @@ def _offline_env(enabled: bool) -> Iterator[None]:
 
 def _check_python_version() -> DoctorCheck:
     v = sys.version_info
-    ok = (3, 10) <= (v.major, v.minor) < (3, 13)
+    ok = (3, 11) <= (v.major, v.minor) < (3, 13)
     return DoctorCheck(
         name="python_version",
         status="pass" if ok else "fail",
         required=True,
         detail=f"{v.major}.{v.minor}.{v.micro}",
-        hint=None if ok else "Use Python >=3.10,<3.13.",
+        hint=None if ok else "Use Python >=3.11,<3.13.",
     )
 
 

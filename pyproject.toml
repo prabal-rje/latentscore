@@ -7,7 +7,7 @@ name = "latentscore"
 version = "0.1.4"
 description = "Generate ambient music from text. Locally. No GPU required."
 readme = "README.md"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.11,<3.13"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = [
@@ -56,6 +56,19 @@ expressive = [
     "mlx; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "mlx-lm; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "llama-cpp-python; platform_machine != 'arm64' and sys_platform != 'win32'",
+]
+# Contributor tooling: lint/format, type-check, test, notebook display helpers,
+# plus pyyaml / tqdm used by examples in submissions/test_scripts/ and notebooks.
+dev = [
+    "ruff",
+    "pyright",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "ipython",
+    "pyyaml",
+    "tqdm",
+    "aiosqlite",       # data_work pipeline runtime dep, imported by tests/data_work/
 ]
 
 [project.scripts]

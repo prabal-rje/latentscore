@@ -5,8 +5,9 @@ import sys
 import threading
 import time
 import traceback
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import IO, TYPE_CHECKING, Any, Iterator
+from typing import IO, TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from rich.console import Console as RichConsole
@@ -283,7 +284,7 @@ def spinner(
     stream: IO[str] | None = None,
     enabled: bool | None = None,
     show_elapsed: bool = False,
-) -> Iterator[Spinner]:
+) -> Generator[Spinner, None, None]:
     handle = Spinner(
         message,
         interval=interval,
