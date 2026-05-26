@@ -47,7 +47,7 @@ import latentscore as ls
 
 ls.stream(
     "morning coffee shop",
-    "a critical alert",
+    "critical alert",
     "tension over a treasured object",
     duration=45,        # total seconds, split evenly across the vibes
     transition=3.0,     # crossfade seconds
@@ -74,7 +74,7 @@ async def my_set() -> AsyncIterator[str]:
     yield "nintendo nes mario game"
     await asyncio.sleep(10)
 
-    yield "a critical alert"
+    yield "critical alert"
 
 
 ls.live(my_set(), transition_seconds=3.0).play()
