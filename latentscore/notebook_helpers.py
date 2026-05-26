@@ -197,6 +197,7 @@ def live_capture(stream: Any, seconds: float, *, show_progress: bool = True) -> 
     if show_progress:
         try:
             from tqdm.auto import tqdm
+
             bar = tqdm(total=int(seconds), unit="s", desc="Live session")
         except ImportError:
             bar = None
