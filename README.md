@@ -168,7 +168,7 @@ import latentscore as ls
 # on the first render anyway; this just makes it explicit and visible.
 ls.prefetch("fast")
 
-audio = ls.render("warm sunset over water", duration=10.0)
+audio = ls.render("morning coffee shop", duration=10.0)
 audio.play()              # plays on your speakers
 audio.save("output.wav")  # save to WAV
 ```
@@ -176,9 +176,9 @@ audio.save("output.wav")  # save to WAV
 ### 6.2 Different vibes
 
 ```python
-ls.render("jazz cafe at midnight").play()
+ls.render("morning coffee shop").play()
 ls.render("thunderstorm on a tin roof").play()
-ls.render("lo-fi study beats").play()
+ls.render("tension over a treasured object").play()
 ```
 
 ---
@@ -192,17 +192,29 @@ import latentscore as ls
 
 # Full control: build a MusicConfig with human-readable labels
 config = ls.MusicConfig(
-    tempo="slow", mode="dorian", root="d",
-    bass="drone", pad="ambient_drift", melody="contemplative",
-    rhythm="minimal", texture="shimmer", echo="heavy",
-    density=3, brightness="dark", space="vast",
+    tempo="slow",
+    mode="dorian",
+    root="d",
+    bass="drone",
+    pad="ambient_drift",
+    melody="contemplative",
+    rhythm="minimal",
+    texture="shimmer",
+    echo="heavy",
+    density=3,
+    brightness="dark",
+    space="vast",
 )
 ls.render(config, duration=10.0).play()
 
-# Or start from a vibe and nudge specific parameters
+# Or start from a vibe and slam knobs to opposites
 ls.render(
     "morning coffee shop",
-    update=ls.MusicConfigUpdate(brightness="very_bright", rhythm="electronic"),
+    update=ls.MusicConfigUpdate(
+        tempo="very_fast",
+        brightness="very_dark",
+        echo="infinite",
+    ),
 ).play()
 ```
 

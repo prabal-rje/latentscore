@@ -30,7 +30,7 @@
 ```python
 import latentscore as ls
 
-audio = ls.render("underwater cave")
+audio = ls.render("deep underwater cave")
 audio.play()
 audio.save("cave.wav")
 ```
@@ -46,9 +46,9 @@ Chain a few vibes together with crossfades. One call, one continuous stream:
 import latentscore as ls
 
 ls.stream(
-    "morning coffee",
-    "afternoon focus",
-    "evening wind-down",
+    "morning coffee shop",
+    "a critical alert",
+    "tension over a treasured object",
     duration=45,        # total seconds, split evenly across the vibes
     transition=3.0,     # crossfade seconds
 ).play()
@@ -67,15 +67,14 @@ import latentscore as ls
 from collections.abc import AsyncIterator
 
 
-async def my_set() -> AsyncIterator[str | ls.MusicConfigUpdate]:
-    yield "warm jazz cafe at midnight"
+async def my_set() -> AsyncIterator[str]:
+    yield "morning coffee shop"
     await asyncio.sleep(10)
 
-    yield "thunderstorm on a tin roof"
+    yield "nintendo nes mario game"
     await asyncio.sleep(10)
 
-    # Override specific knobs while staying within the current config
-    yield ls.MusicConfigUpdate(tempo="fast", brightness="very_bright", rhythm="electronic")
+    yield "a critical alert"
 
 
 ls.live(my_set(), transition_seconds=3.0).play()
@@ -171,7 +170,7 @@ import latentscore as ls
 os.environ["GEMINI_API_KEY"] = "your-key-here"
 
 ls.render(
-    "cyberpunk rain on neon streets",
+    "a father's eternal memory",
     model="external:gemini/gemini-3-flash-preview",
 ).play()
 ```
@@ -182,10 +181,10 @@ For other providers, set their `{PROVIDER}_API_KEY` (e.g.
 LLM responses carry richer metadata than the lookup path:
 
 ```python
-audio = ls.render("cyberpunk rain", model="external:gemini/gemini-3-flash-preview")
+audio = ls.render("a father's eternal memory", model="external:gemini/gemini-3-flash-preview")
 
 if audio.metadata is not None:
-    print(audio.metadata.title)      # e.g. "Neon Rain Drift"
+    print(audio.metadata.title)      # the LLM's chosen title
     print(audio.metadata.thinking)   # the LLM's reasoning
     print(audio.metadata.config)     # the MusicConfig it chose
 ```
@@ -236,7 +235,7 @@ latentscore download expressive
 ```
 
 ```python
-ls.render("jazz cafe at midnight", model="expressive").play()
+ls.render("a father's eternal memory", model="expressive").play()
 ```
 
 ## Advanced
@@ -326,5 +325,5 @@ Every `MusicConfig` field uses human-readable labels.
 import numpy as np
 import latentscore as ls
 
-samples = np.asarray(ls.render("deep ocean"))  # NDArray[np.float32]
+samples = np.asarray(ls.render("deep underwater cave"))  # NDArray[np.float32]
 ```
