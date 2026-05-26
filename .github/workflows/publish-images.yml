@@ -52,6 +52,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The notebook image installs latentscore[external,heavy], which pulls
+      # in torch + a pile of NVIDIA CUDA wheels (even on CPU-only builds).
+      # Multi-arch buildx (amd64 + arm64 in parallel under QEMU) doubles
+      # the peak disk pressure. The runner's ~14 GB usable disk is too
+      # small. This step reclaims ~30 GB by purging GitHub-pre-installed
+      # toolchains we don't use (Android, .NET, Haskell, etc.).
+      - name: Free disk space (notebook only)
+        if: matrix.service == 'notebook'
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: false
+          swap-storage: true
+
       - name: Set up QEMU (for cross-arch builds)
         uses: docker/setup-qemu-action@v3
 
