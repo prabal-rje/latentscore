@@ -22,7 +22,7 @@ https://private-user-images.githubusercontent.com/140295281/557606724-22889dcc-9
 ```python
 import latentscore as ls
 
-ls.render("warm sunset over water").play()
+ls.render("morning coffee shop").play()
 ```
 
 That's it. One line. You get audio playing on your speakers.
