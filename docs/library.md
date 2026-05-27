@@ -286,33 +286,72 @@ events.
 
 ## Parameter reference
 
-Every `MusicConfig` field uses human-readable labels.
+Full `MusicConfig` schema — 34 fields across five groups. Fields marked
+⋆ accept relative `Step(±N)` adjustments in `MusicConfigUpdate`
+(everything else takes absolute labels only).
 
-| Field | Labels |
-|-------|--------|
-| `tempo` | `very_slow` `slow` `medium` `fast` `very_fast` |
-| `brightness` | `very_dark` `dark` `medium` `bright` `very_bright` |
-| `space` | `dry` `small` `medium` `large` `vast` |
-| `motion` | `static` `slow` `medium` `fast` `chaotic` |
-| `stereo` | `mono` `narrow` `medium` `wide` `ultra_wide` |
-| `echo` | `none` `subtle` `medium` `heavy` `infinite` |
-| `human` | `robotic` `tight` `natural` `loose` `drunk` |
-| `attack` | `soft` `medium` `sharp` |
-| `grain` | `clean` `warm` `gritty` |
-| `density` | `2` `3` `4` `5` `6` |
-| `root` | `c` `c#` `d` ... `a#` `b` |
-| `mode` | `major` `minor` `dorian` `mixolydian` |
+**Type column key:** *Ord. label* = ordered enum (`Step` works if ⋆);
+*Enum* = unordered choices; *Bnd. int* = bounded integer;
+*Boolean* = `true` / `false`; *Style sel.* = unordered layer-style selection.
 
-**Layer styles:**
+### Global parameters (8)
 
-| Layer | Styles |
-|-------|--------|
-| `bass` | `drone` `sustained` `pulsing` `walking` `fifth_drone` `sub_pulse` `octave` `arp_bass` |
-| `pad` | `warm_slow` `dark_sustained` `cinematic` `thin_high` `ambient_drift` `stacked_fifths` `bright_open` |
-| `melody` | `procedural` `contemplative` `rising` `falling` `minimal` `ornamental` `arp_melody` `contemplative_minor` `call_response` `heroic` |
-| `rhythm` | `none` `minimal` `heartbeat` `soft_four` `hats_only` `electronic` `kit_light` `kit_medium` `military` `tabla_essence` `brush` |
-| `texture` | `none` `shimmer` `shimmer_slow` `vinyl_crackle` `breath` `stars` `glitch` `noise_wash` `crystal` `pad_whisper` |
-| `accent` | `none` `bells` `pluck` `chime` `bells_dense` `blip` `blip_random` `brass_hit` `wind` `arp_accent` `piano_note` |
+| Field | Type | Allowed values |
+|-------|------|----------------|
+| `tempo` ⋆ | Ord. label | `very_slow` `slow` `medium` `fast` `very_fast` |
+| `root` | Enum | `c` `c#` `d` `d#` `e` `f` `f#` `g` `g#` `a` `a#` `b` |
+| `mode` | Enum | `major` `minor` `dorian` `mixolydian` |
+| `brightness` ⋆ | Ord. label | `very_dark` `dark` `medium` `bright` `very_bright` |
+| `space` ⋆ | Ord. label | `dry` `small` `medium` `large` `vast` |
+| `density` ⋆ | Bnd. int | `2` `3` `4` `5` `6` |
+| `motion` ⋆ | Ord. label | `static` `slow` `medium` `fast` `chaotic` |
+| `attack` | Enum | `soft` `medium` `sharp` |
+
+### Orchestration layers (6)
+
+| Field | Type | Allowed values |
+|-------|------|----------------|
+| `bass` | Style sel. | `drone` `sustained` `pulsing` `walking` `fifth_drone` `sub_pulse` `octave` `arp_bass` |
+| `pad` | Style sel. | `warm_slow` `dark_sustained` `cinematic` `thin_high` `ambient_drift` `stacked_fifths` `bright_open` |
+| `melody` | Style sel. | `procedural` `contemplative` `rising` `falling` `minimal` `ornamental` `arp_melody` `contemplative_minor` `call_response` `heroic` |
+| `rhythm` | Style sel. | `none` `minimal` `heartbeat` `soft_four` `hats_only` `electronic` `kit_light` `kit_medium` `military` `tabla_essence` `brush` |
+| `texture` | Style sel. | `none` `shimmer` `shimmer_slow` `vinyl_crackle` `breath` `stars` `glitch` `noise_wash` `crystal` `pad_whisper` |
+| `accent` | Style sel. | `none` `bells` `pluck` `chime` `bells_dense` `blip` `blip_random` `brass_hit` `wind` `arp_accent` `piano_note` |
+
+### Spatial / texture (5)
+
+| Field | Type | Allowed values |
+|-------|------|----------------|
+| `stereo` ⋆ | Ord. label | `mono` `narrow` `medium` `wide` `ultra_wide` |
+| `depth` | Boolean | `true` `false` |
+| `echo` ⋆ | Ord. label | `none` `subtle` `medium` `heavy` `infinite` |
+| `human` ⋆ | Ord. label | `robotic` `tight` `natural` `loose` `drunk` |
+| `grain` | Enum | `clean` `warm` `gritty` |
+
+### Melody generation (10)
+
+| Field | Type | Allowed values |
+|-------|------|----------------|
+| `melody_engine` | Enum | `pattern` `procedural` |
+| `phrase_len_bars` | Bnd. int | `2` `4` `8` |
+| `melody_density` | Ord. label | `very_sparse` `sparse` `medium` `busy` `very_busy` |
+| `syncopation` | Ord. label | `straight` `light` `medium` `heavy` |
+| `swing` | Ord. label | `none` `light` `medium` `heavy` |
+| `motif_repeat_prob` | Ord. label | `rare` `sometimes` `often` |
+| `step_bias` | Enum | `step` `balanced` `leapy` |
+| `chromatic_prob` | Ord. label | `none` `light` `medium` `heavy` |
+| `register_min_oct` | Bnd. int | `1` – `8` |
+| `register_max_oct` | Bnd. int | `1` – `8` (must exceed `register_min_oct`) |
+
+### Harmony (5)
+
+| Field | Type | Allowed values |
+|-------|------|----------------|
+| `cadence_strength` | Ord. label | `weak` `medium` `strong` |
+| `tension_curve` | Enum | `arc` `ramp` `waves` |
+| `harmony_style` | Enum | `auto` `pop` `jazz` `cinematic` `ambient` |
+| `chord_change_bars` | Ord. label | `very_slow` `slow` `medium` `fast` |
+| `chord_extensions` | Enum | `triads` `sevenths` `lush` |
 
 ## Audio contract
 
