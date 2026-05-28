@@ -1,7 +1,11 @@
 # Development
 
 Only relevant if you're modifying the demo source. To **use** the demo,
-the [README](../README.md) `docker compose up` path is enough.
+the [README](../README.md) Docker Compose path is enough:
+
+```bash
+docker compose -f demo/docker-compose.yml up --build
+```
 
 ## Backend only
 
@@ -37,14 +41,7 @@ in another terminal first.
 
 ## Notebook only
 
-Pull the pre-built image (~30 s):
-
-```bash
-cd demo
-docker compose up notebook
-```
-
-Or build it from source (~3 min, first time only):
+Build the notebook image from source:
 
 ```bash
 cd demo
@@ -53,20 +50,18 @@ docker compose up notebook --build
 
 JupyterLab at <http://localhost:8889>.
 
-## Full stack with from-source builds
+## Full stack from source
 
-To build all three services from your local source instead of
-pulling pre-built images from GHCR, just pass `--build`:
+Build all three services from local source:
 
 ```bash
 cd demo
 docker compose up --build
 ```
 
-That ignores each service's `image:` line and uses the matching
-`build:` block. First build takes ~10 min because the backend image
-pre-downloads model weights (MiniLM ~90 MB, LAION-CLAP ~1.8 GB).
-Subsequent rebuilds hit the Docker layer cache.
+That uses each service's `build:` block. First build takes ~15 min
+because the backend image pre-downloads model weights (MiniLM ~90 MB,
+LAION-CLAP ~1.8 GB). Subsequent rebuilds hit the Docker layer cache.
 
 ## Common dev gotchas
 

@@ -22,8 +22,11 @@ to run the full test suite, build the docs, exercise the demo, and
 iterate on the library:
 
 ```bash
-pip install -e ".[external,heavy,expressive,dev]"
+pip install -e ".[external,heavy,dev]"
 ```
+
+`[expressive]` is experimental and optional; install it only when
+working on the local-LLM path.
 
 The extras:
 
@@ -32,7 +35,7 @@ The extras:
 - `[heavy]` — laion-clap for `fast_heavy` retrieval.
 - `[expressive]` — local LLM (270M Gemma 3). Currently runs through the CPU `transformers` backend on every platform; MLX / llama-cpp markers exist in `pyproject.toml` but aren't wired into the runtime yet, so renders take ~30–100&nbsp;s.
 
-For a lighter setup that skips local LLM tooling:
+For a lighter setup:
 
 ```bash
 pip install -e ".[external,heavy,dev]"

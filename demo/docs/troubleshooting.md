@@ -8,24 +8,24 @@ broader library issues.
 Docker Desktop (or Docker Engine on Linux) isn't running. Start it,
 then verify with `docker ps`.
 
-## `docker compose up` fails: "manifest unknown" on pull.
+## `docker compose up` fails: "manifest unknown".
 
-The pre-built images haven't been published yet for the version your
-compose file references. Pass `--build` to fall back to source:
+The documented default is `docker compose up --build`, which builds
+from source and doesn't depend on any pre-built image being available:
 
 ```bash
-docker compose up --build
+docker compose -f demo/docker-compose.yml up --build
 ```
 
-That uses the `build:` block in each service definition, which is
-already in `docker-compose.yml` alongside `image:` for exactly this
-case. Takes ~10 min for the first build vs ~60 s for a pull.
+That uses the `build:` block in each service definition, already in
+`docker-compose.yml`. Takes ~15 min for the first build on a typical
+machine; subsequent rebuilds usually hit Docker's layer cache.
 
 ## Backend stuck on "Waiting: Healthy" for several minutes.
 
 Normal on the first run. The backend container loads MiniLM and
 LAION-CLAP at startup; on a cold cache that's a multi-minute pause.
-The healthcheck retries every 10s. If it's still red after ~2 min,
+The healthcheck retries every 10s. If it's still red after ~10 min,
 `docker compose logs backend` will show whether it's a network issue
 or insufficient disk.
 

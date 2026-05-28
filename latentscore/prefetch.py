@@ -59,7 +59,7 @@ def prefetch(*targets: PrefetchTarget) -> None:
 def _prefetch_fast() -> None:
     print('[latentscore.prefetch] Fetching "fast" model assets...')
     print("  - sentence-transformers/all-MiniLM-L6-v2 (~90 MB)")
-    print("  - embedding map JSONL (~few MB)")
+    print("  - embedding map JSONL (~100 MB)")
 
     from .models import FastEmbeddingModel
 

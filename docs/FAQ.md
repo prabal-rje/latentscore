@@ -8,7 +8,7 @@ top-level [`README.md`](../README.md) and [`library.md`](library.md).
 ## Why does the first `ls.render(...)` call appear to hang?
 
 The first text-prompt render silently downloads the MiniLM embedding
-model (~90&nbsp;MB) and the embedding-map dataset (~few&nbsp;MB) from
+model (~90&nbsp;MB) and the embedding-map dataset (~100&nbsp;MB) from
 Hugging Face. On a fresh machine this takes 30&ndash;60&nbsp;seconds and
 looks indistinguishable from a frozen kernel.
 
@@ -56,11 +56,10 @@ often does better.
 
 ## I ran `pip install latentscore` and it succeeded, but `import latentscore` fails. What happened?
 
-This is almost always a missing **system library** that the bundled
-`soundfile` or `sounddevice` wheels link against at import time. The
-PyPI wheels ship binary copies of `libsndfile` and `PortAudio`, but
-they rely on the host OS providing the corresponding runtime `.so`
-files.
+This usually means the local Python environment can import the package,
+but the host machine's audio/runtime stack is missing something needed
+for playback or WAV I/O. Local installs depend on OS-level audio
+libraries, so behavior can vary by machine.
 
 Quick diagnostic:
 
@@ -71,15 +70,9 @@ latentscore doctor --strict --offline
 The `audio_write` and `render_core` checks will fail with a clear
 hint pointing at `libsndfile` / `portaudio` if that's the issue.
 
-Fix per platform:
-
-- **Linux:** `sudo apt-get install -y libsndfile1 libasound2`
-  (Ubuntu/Debian) or equivalent. ALSA headers (`libasound2-dev`)
-  are only needed for source compilation.
-- **macOS:** the Homebrew Python comes with these by default. If
-  it's still failing, `brew install sox` is usually enough.
-- **Windows native:** see the [Windows answer](#can-i-run-this-on-windows)
-  below. WSL2 is the recommended path.
+If `doctor` reports an audio-library issue, install the missing OS
+package it suggests. For the most reproducible path, use Docker or
+Colab instead — both bundle all dependencies.
 
 ---
 
@@ -89,36 +82,28 @@ Fix per platform:
 web UI runs in a Linux container, which sidesteps Windows wheel
 availability entirely.
 
-**The SDK (`pip install latentscore`) does not work on native Windows.**
-It depends on PyTorch, which doesn't ship Windows ARM64 wheels at all
-(empirically confirmed on Windows 11 ARM), and Windows x64 is
-untested. On Windows, install the SDK inside **WSL2** - WSL2
-runs a Linux kernel, so PyTorch wheels are available and the install
-path is identical to native Linux.
-
-Install WSL2 via Microsoft's official guide: [Install WSL](https://learn.microsoft.com/en-us/windows/wsl/install).
-Once you have an Ubuntu shell, follow the standard Linux install
-instructions in the [README](../README.md#4-install-the-sdk).
-
-If you successfully install the SDK on native Windows x64 (where
-PyTorch wheels do exist but we haven't tested), please open an issue
-so we can update this answer.
+On Windows, use **Docker Desktop with the WSL2 backend** for both the
+demo and SDK exploration via the bundled JupyterLab playground. Native
+Windows pip is unsupported, and WSL2 pip is not part of the supported
+SDK path.
 
 ---
 
 ## Do I need a GPU?
 
-No. The entire library is CPU-only. The headline `fast` model is
-nearest-neighbor lookup over a precomputed 384-dim embedding matrix
-- effectively a dot product. Audio synthesis is pure NumPy.
+No GPU is required. The default `fast` path and Docker demo are
+CPU-only. The headline `fast` model is nearest-neighbor lookup over
+a precomputed 384-dim embedding matrix — effectively a dot product.
+Audio synthesis is pure NumPy.
 
-`[expressive]` (local LLM inference) runs through the `transformers`
-backend on every platform (including macOS - MLX integration is
-declared in pyproject markers but not actually wired into the runtime
-yet). CUDA is used if available; otherwise it's CPU. A single render
-on macOS / CPU takes ~30&ndash;100&nbsp;seconds, so expressive mode is
-slow even on a fast laptop - stick with `fast` or `fast_heavy`
-unless you specifically need LLM-generated configs.
+`[expressive]` (local LLM inference) may use CUDA if the host has it,
+but it's optional and not the default path. It runs through the
+`transformers` backend on every platform (including macOS — MLX
+integration is declared in pyproject markers but not actually wired
+into the runtime yet). A single render on macOS / CPU takes
+~30&ndash;100&nbsp;seconds, so expressive mode is slow even on a fast
+laptop — stick with `fast` or `fast_heavy` unless you specifically
+need LLM-generated configs.
 
 ---
 
@@ -173,18 +158,18 @@ than free-form generation does.
 ## `latentscore doctor` failed. What now?
 
 `latentscore doctor --json` prints structured output that pinpoints
-which of the 10 checks failed and why. Common failures:
+which checks failed and why. Common failures:
 
 | Check | What it means | Fix |
 |---|---|---|
-| `python_version` | Python outside 3.11–3.12 (warn, not fail) | Tested range is 3.11–3.12; other versions install but may surface dependency quirks |
+| `python_version` | Python outside 3.11–3.12 | Use Python 3.11 or 3.12; pip requires this range |
 | `license_present` | Editable install metadata is stale | `pip install --force-reinstall latentscore` |
 | `audio_write` | Can't write a WAV via `soundfile` | Install `libsndfile` (see "import latentscore fails" above) |
 | `render_core` | Synthesis is broken | File a bug with the doctor `--json` output |
 | `render_retrieval` (warn) | Falling back to a heuristic mapper because retrieval failed | `latentscore download fast` to seed the model cache |
 | `external_available` (fail) | You ran `--require-external` and `litellm` is missing | `pip install "latentscore[external]"` |
 | `heavy_available` (fail) | Same for `laion_clap` | `pip install "latentscore[heavy]"` |
-| `expressive_available` (fail) | Same for `outlines` (and friends) | `pip install "latentscore[expressive]"` |
+| `expressive_available` (fail) | Only appears with `--require-expressive` | `pip install "latentscore[expressive]"` |
 
 `--require-*` flags promote those checks to required so they can
 fail strict mode; default behavior treats them as warnings.

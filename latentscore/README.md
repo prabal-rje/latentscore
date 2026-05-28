@@ -30,7 +30,14 @@ audio.save(".examples/quickstart.wav")
 ## Demo
 
 ```bash
-python -m latentscore.demo
+latentscore demo
+```
+
+For the full web demo and JupyterLab playground, use Docker Compose from
+the repository root:
+
+```bash
+docker compose -f demo/docker-compose.yml up --build
 ```
 
 ## Doctor
