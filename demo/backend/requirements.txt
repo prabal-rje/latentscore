@@ -1,9 +1,9 @@
+# NOTE: torch + torchvision are installed (CPU-only, pinned) in
+# demo/backend/Dockerfile BEFORE this file is processed, so they are
+# intentionally NOT listed here -- listing them would risk pip resolving the
+# CUDA build. The CPU index below is a safety net for any transitive torch pin.
 --extra-index-url https://download.pytorch.org/whl/cpu
-# latentscore itself is installed from the parent repo by the surrounding
-# build (Dockerfile pip-installs the repo root before this file is processed,
-# and the README walks local-dev users through `pip install -e .` first).
+
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
-# Optional extras the backend touches at runtime:
-torchvision        # required by laion-clap
-laion-clap         # fast_heavy model path
+laion-clap          # fast_heavy model path (pulls torchvision; already satisfied)

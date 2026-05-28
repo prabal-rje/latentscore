@@ -1,34 +1,56 @@
-# Demo stack: React frontend + FastAPI backend + JupyterLab SDK
-# playground.
+# Demo stack: React frontend + FastAPI backend + JupyterLab SDK playground.
 #
-# By default (`docker compose up`), each service pulls a pre-built
-# multi-arch image from GHCR. ~60 s on a warm network.
+# Officially supported artifact path:
+#   - Linux x86_64 / amd64 Docker + Docker Compose
 #
-# To build from source instead (e.g. to verify the published images
-# match this repo's source - the OSS-track reviewer path), pass
-# `--build`:
+# Best-effort paths:
+#   - macOS Docker Desktop (set LATENTSCORE_DOCKER_PLATFORM=linux/arm64 to avoid emulation)
+#   - Windows Docker Desktop with WSL2 integration
 #
-#   docker compose up --build
+# Unsupported:
+#   - native Windows pip install / native Windows Python runtime
 #
-# That ignores `image:` and uses the `build:` block. ~5 min on
-# first run because the backend pre-downloads model weights.
+# Notes:
+#   - `docker compose up` pulls prebuilt images when available.
+#   - `docker compose up --build` builds the images from this source tree.
+#   - Default platform is linux/amd64 for reproducibility; override with
+#     LATENTSCORE_DOCKER_PLATFORM=linux/arm64.
 
 services:
   backend:
     image: ghcr.io/prabal-rje/latentscore-demo-backend:latest
+    platform: ${LATENTSCORE_DOCKER_PLATFORM:-linux/amd64}
     build:
       context: ..
       dockerfile: demo/backend/Dockerfile
     ports:
       - "4244:8000"
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      # 127.0.0.1 avoids IPv6 "localhost" quirks inside the container; timeout=3
+      # bounds the request itself (distinct from the per-check `timeout` below).
+      # python:3.12-slim has no `curl`, so this MUST stay a Python one-liner.
+      #
+      # The backend loads CLAP + FastHeavyModel + MiniLM + DSP warmup before
+      # uvicorn answers /api/health at all, so start_period gives it a long
+      # grace window. A PASSING probe flips it healthy immediately, regardless of
+      # how much of start_period remains -- so this does NOT delay a fast boot.
+      # retries stays small: that is the steady-state liveness sensitivity AFTER
+      # warmup, and you want a real hang flagged promptly, not 10 min later.
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)",
+        ]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 600s
 
   frontend:
     image: ghcr.io/prabal-rje/latentscore-demo-frontend:latest
+    platform: ${LATENTSCORE_DOCKER_PLATFORM:-linux/amd64}
     build:
       context: ./frontend
       args:
@@ -40,11 +62,10 @@ services:
         condition: service_healthy
 
   notebook:
-    # Token-less JupyterLab with latentscore pre-installed. Same
-    # quickstart.ipynb as the Colab notebook. Bound to 127.0.0.1
-    # only because token auth is disabled - do NOT expose this
-    # port to the public internet.
+    # Token-less JupyterLab with latentscore pre-installed. Bound to 127.0.0.1
+    # only because token auth is disabled. Do NOT expose this port publicly.
     image: ghcr.io/prabal-rje/latentscore-demo-notebook:latest
+    platform: ${LATENTSCORE_DOCKER_PLATFORM:-linux/amd64}
     build:
       context: ..
       dockerfile: demo/notebook/Dockerfile
