@@ -352,13 +352,20 @@ def build_doctor_report(
                 "heavy",
                 required=require_heavy,
             ),
-            _check_extra(
-                "expressive_available",
-                ("outlines",),
-                "expressive",
-                required=require_expressive,
-            ),
         ]
+        # [expressive] is "extremely experimental" — only probed when the
+        # caller explicitly opts in via --require-expressive. Otherwise we
+        # stay silent so the default `doctor` run isn't noisy about an
+        # extra most users intentionally skip.
+        if require_expressive:
+            checks_list.append(
+                _check_extra(
+                    "expressive_available",
+                    ("outlines",),
+                    "expressive",
+                    required=True,
+                )
+            )
     checks = tuple(checks_list)
     return DoctorReport(
         status=_overall_status(checks),

@@ -46,8 +46,14 @@ def test_doctor_json_output_is_parseable(capsys) -> None:
     assert payload["offline"] is True
 
 
-def test_doctor_report_includes_all_checks() -> None:
-    """Build the report directly and assert the contract."""
+def test_doctor_report_includes_default_checks() -> None:
+    """Build the default report and assert the contract.
+
+    The expressive extra is "extremely experimental" and is intentionally
+    omitted from the default check set so a vanilla `doctor` run isn't noisy
+    about it. It only appears when the caller opts in via --require-expressive
+    (see ``test_doctor_report_includes_expressive_when_required``).
+    """
     report = _build_dev_report()
     names = {c.name for c in report.checks}
     expected = {
@@ -60,9 +66,24 @@ def test_doctor_report_includes_all_checks() -> None:
         "render_retrieval",
         "external_available",
         "heavy_available",
-        "expressive_available",
     }
     assert expected.issubset(names), f"missing checks: {expected - names}"
+    assert "expressive_available" not in names, (
+        "expressive_available must not appear unless --require-expressive is set"
+    )
+
+
+def test_doctor_report_includes_expressive_when_required() -> None:
+    """Opting in via require_expressive=True adds the expressive_available check."""
+    report = build_doctor_report(
+        strict=True,
+        offline=True,
+        require_external=False,
+        require_heavy=False,
+        require_expressive=True,
+    )
+    names = {c.name for c in report.checks}
+    assert "expressive_available" in names
 
 
 def test_doctor_exit_code_pass_when_not_strict() -> None:

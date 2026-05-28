@@ -71,7 +71,7 @@ async def my_set() -> AsyncIterator[str]:
     yield "morning coffee shop"
     await asyncio.sleep(10)
 
-    yield "nintendo nes mario game"
+    yield "8-bit arcade chase"
     await asyncio.sleep(10)
 
     yield "critical alert"

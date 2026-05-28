@@ -37,7 +37,7 @@ install: check-system
 	@echo $(MSG_PREFIX) "Installing dependencies..."
 ifdef CONDA_EXE
 	# Create Conda env if missing
-	conda create -n $(ENV_NAME) python=3.10 -y || true
+	conda create -n $(ENV_NAME) python=3.12 -y || true
 	# Install pip-tools inside Conda
 	$(PIP_CMD) install pip-tools
 else

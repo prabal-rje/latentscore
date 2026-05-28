@@ -15,9 +15,9 @@ https://private-user-images.githubusercontent.com/140295281/557606724-22889dcc-9
 **Four ways:**
 
 - 🎧 **Hear it now** - [latentscore.com/demo](https://latentscore.com/demo). Browser, no install.
-- 🐳 **Run the demo + JupyterLab locally** - `docker compose` gives you the demo UI **and** a JupyterLab playground where you can poke at the SDK without `pip install`. ~60s on any OS. See [Try the demo](#2-try-the-demo).
+- 🐳 **Run the demo + JupyterLab locally** - `docker compose` builds the full demo from source in an isolated environment — demo UI **and** a JupyterLab playground, no local Python needed. ~15 min first build. See [Try the demo](#2-try-the-demo).
 - 🟧 [**Open in Colab**](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart-colab.ipynb) - free CPU runtime, no local setup, no key required.
-- 🛠 **Build with it locally** - `pip install latentscore` on macOS, Linux, or Windows WSL2. See [Try the SDK](#4-try-the-sdk).
+- 🛠 **Build with it locally** - `pip install latentscore` on macOS or Linux (Python 3.11/3.12). Secondary path — use Docker for the full demo. See [Try the SDK](#4-try-the-sdk).
 
 ```python
 import latentscore as ls
@@ -33,21 +33,17 @@ That's it. One line. You get audio playing on your speakers.
 
 **No install needed:** open **[latentscore.com/demo](https://latentscore.com/demo)** in your browser.
 
-**Run it locally** - works on macOS, Linux, or Windows WSL2 with [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+**Run it locally** — tested on Linux, macOS, and Windows with [Docker Desktop](https://www.docker.com/products/docker-desktop/) (WSL2 backend on Windows).
 
-**Fast - pull pre-built images** (~60 s):
-
-```bash
-docker compose -f demo/docker-compose.yml up
-```
-
-**From source - reproducibility build** (~10 min, first time only):
+**Build from source** (~15 min first time, near-instant after):
 
 ```bash
 docker compose -f demo/docker-compose.yml up --build
 ```
 
-Either way, open:
+The first prompt after build takes ~30 seconds as model weights load; subsequent responses are near-instant.
+
+Then open:
 
 - [`localhost:4242`](http://localhost:4242) - demo UI
 - [`localhost:8889`](http://localhost:8889) - JupyterLab playground (SDK pre-installed)
@@ -73,7 +69,11 @@ See the [demo documentation](demo/) for architecture, dev setup, and troubleshoo
 
 ## 4. Try the SDK
 
-> 🟧 **Easiest path: [Open the Colab notebook](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart-colab.ipynb)** — same SDK, free CPU runtime, no install, no system deps to wrangle.
+> 🐳 **For the full demo, use Docker.** The `pip install` path is for
+> library/scripting use on macOS and Linux.
+>
+> 🟧 **Easiest SDK path:** [Open the Colab notebook](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart-colab.ipynb) — free CPU
+> runtime, no install, no system deps to wrangle.
 
 If you'd rather install locally, read on.
 
@@ -89,7 +89,7 @@ If you'd rather install locally, read on.
 
 ### 4.1 Requirements
 
-- **OS** - macOS, Linux, or Windows **ONLY** via [WSL2](docs/FAQ.md#can-i-run-this-on-windows). For the web UI on any OS, use the [Docker demo](#2-try-the-demo) instead.
+- **OS** — macOS or Linux. Windows: use [Docker](#2-try-the-demo) for the demo, or install the SDK inside WSL2. Native Windows pip is not tested.
 - **python 3.11 or 3.12 recommended** - we test against [3.12](https://www.python.org/downloads/release/python-3120/) (matches our Docker image). Other versions install fine (`pip` won't refuse you) but emit a `UserWarning` at import — most things still work, but you may hit dependency-resolution quirks outside the tested range. Or use [`conda`](https://docs.conda.io/projects/miniconda/en/latest/) for environment management.
 
 ### 4.2 Install
