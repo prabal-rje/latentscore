@@ -18,7 +18,7 @@
 
 services:
   backend:
-    image: ghcr.io/prabal-rje/latentscore-demo-backend:${LATENTSCORE_IMAGE_TAG:-0.1.7}
+    image: ghcr.io/prabal-rje/latentscore-demo-backend:${LATENTSCORE_IMAGE_TAG:-0.1.8}
     platform: ${LATENTSCORE_DOCKER_PLATFORM:-linux/amd64}
     build:
       context: ..
@@ -49,7 +49,7 @@ services:
       start_period: 600s
 
   frontend:
-    image: ghcr.io/prabal-rje/latentscore-demo-frontend:${LATENTSCORE_IMAGE_TAG:-0.1.7}
+    image: ghcr.io/prabal-rje/latentscore-demo-frontend:${LATENTSCORE_IMAGE_TAG:-0.1.8}
     platform: ${LATENTSCORE_DOCKER_PLATFORM:-linux/amd64}
     build:
       context: ./frontend
@@ -64,7 +64,7 @@ services:
   notebook:
     # Token-less JupyterLab with latentscore pre-installed. Bound to 127.0.0.1
     # only because token auth is disabled. Do NOT expose this port publicly.
-    image: ghcr.io/prabal-rje/latentscore-demo-notebook:${LATENTSCORE_IMAGE_TAG:-0.1.7}
+    image: ghcr.io/prabal-rje/latentscore-demo-notebook:${LATENTSCORE_IMAGE_TAG:-0.1.8}
     platform: ${LATENTSCORE_DOCKER_PLATFORM:-linux/amd64}
     build:
       context: ..
