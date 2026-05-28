@@ -105,15 +105,16 @@ conda activate latentscore
 pip install latentscore
 ```
 
-On Linux, PyTorch's default wheel bundles ~5 GB of CUDA libraries.
-LatentScore is CPU-only, so Linux users can skip them with PyTorch's
-CPU index:
-
-```bash
-pip install latentscore --extra-index-url https://download.pytorch.org/whl/cpu
-```
-
-macOS installs are CPU-only already. For the full demo, use Docker.
+> [!NOTE]
+> **Linux: smaller CPU-only install.** PyTorch's default Linux wheel
+> bundles ~5 GB of CUDA libraries. LatentScore is CPU-only, so you can
+> skip them with PyTorch's CPU index:
+>
+> ```bash
+> pip install latentscore --extra-index-url https://download.pytorch.org/whl/cpu
+> ```
+>
+> macOS is CPU-only already, so plain `pip install` is fine there.
 
 ### 4.3 What you get
 
