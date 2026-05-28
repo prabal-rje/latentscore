@@ -9,7 +9,6 @@ import math
 import os
 import platform
 import random
-import re
 import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -213,11 +212,6 @@ _chat_role_warning_emitted = False
 _cpu_backend_warning_emitted = False
 _mlx_integration_warning_emitted = False
 _snapshot_download_lock = threading.Lock()
-
-_TRACK_EXAMPLE_PATTERN = re.compile(
-    r"\*\*Example\s+(?P<num>\d+)\*\*\s*Input:\s*\"(?P<input>.*?)\"\s*Output:\s*\n\n```json\n(?P<json>.*?)\n```",
-    re.DOTALL,
-)
 
 
 def _fast_fallback_enabled() -> bool:
@@ -687,30 +681,11 @@ FAST_EXAMPLES: tuple[ExampleConfig, ...] = (
 
 @functools.lru_cache(maxsize=1)
 def _fast_track_examples() -> tuple[ExampleConfig, ...]:
-    try:
-        from .prompt_examples import FEW_SHOT_EXAMPLES  # type: ignore[reportMissingImports]
-    except Exception as exc:  # pragma: no cover - optional import
-        _LOGGER.warning("Fast track examples unavailable: %s", exc, exc_info=True)
-        return FAST_EXAMPLES
-
-    examples: list[ExampleConfig] = []
-    few_shot: str = FEW_SHOT_EXAMPLES
-    for match in _TRACK_EXAMPLE_PATTERN.finditer(few_shot):
-        input_text = match.group("input").strip()
-        payload = match.group("json").strip()
-        if not input_text or not payload:
-            continue
-        try:
-            wrapper = MusicConfigPromptPayload.model_validate_json(payload)
-            config = wrapper.config.to_config()
-        except ValidationError:
-            try:
-                config = MusicConfig.model_validate_json(payload)
-            except ValidationError:
-                continue
-        examples.append(ExampleConfig(vibe=input_text, config=config))
-
-    return tuple(examples) if examples else FAST_EXAMPLES
+    # The hand-authored FAST_EXAMPLES tuple is the example set used by the
+    # offline heuristic fallback. (An earlier design loaded few-shot examples
+    # from a separate module that no longer exists; FAST_EXAMPLES is the
+    # intended source now.)
+    return FAST_EXAMPLES
 
 
 def _heuristic_config(vibe: str) -> MusicConfig:
@@ -806,7 +781,15 @@ class FastEmbeddingModel:
         try:
             return await asyncio.to_thread(self._embed_and_select, vibe)
         except Exception as exc:  # pragma: no cover - runtime fallback
-            _LOGGER.warning("Fast model fallback: %s", exc, exc_info=True)
+            # Handled fallback: on a cold/offline install the model assets
+            # aren't cached yet, so the embedding load fails and we fall back to
+            # the offline heuristic. Log a clean one-liner, not a full traceback
+            # (a traceback here reads like a hard crash on the recommended
+            # `latentscore doctor --offline` verify command). Set
+            # LATENTSCORE_DEBUG=1 for the full traceback.
+            _LOGGER.warning(
+                "Fast model fallback: %s", exc, exc_info=bool(os.environ.get("LATENTSCORE_DEBUG"))
+            )
             return GenerateResult(config=_heuristic_config(vibe), thinking="")
 
     @functools.lru_cache(maxsize=1)
@@ -814,7 +797,9 @@ class FastEmbeddingModel:
         try:
             from sentence_transformers import SentenceTransformer  # type: ignore[import]
         except ImportError as exc:
-            _LOGGER.warning("sentence-transformers not installed: %s", exc, exc_info=True)
+            # Clean one-liner; the raised ModelNotAvailableError below carries
+            # the actionable message and full chained context.
+            _LOGGER.warning("sentence-transformers not installed: %s", exc)
             raise ModelNotAvailableError(
                 "sentence-transformers is a required dependency of latentscore but is not "
                 "importable. Reinstall with: pip install --force-reinstall latentscore"

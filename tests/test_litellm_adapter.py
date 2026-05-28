@@ -7,7 +7,6 @@ import warnings
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import litellm
 import pytest
 
 from latentscore import MusicConfig
@@ -15,6 +14,11 @@ from latentscore.config import MusicConfigPromptPayload
 from latentscore.errors import ConfigGenerateError
 from latentscore.models import build_litellm_prompt
 from latentscore.providers.litellm import LiteLLMAdapter, _safe_async_cleanup
+
+# litellm ships in the [external] extra, not [dev]. Skip this whole module
+# cleanly when it isn't installed instead of failing collection (which, with
+# --maxfail=1, would abort the entire suite).
+litellm = pytest.importorskip("litellm")
 
 
 def _sample_palettes() -> list[dict[str, object]]:

@@ -7,6 +7,7 @@ dependencies:
   - pip:
       # Editable install from this repo with the standard contributor extras.
       # `conda env create -f environment.yml` runs from the repo root, so the
-      # `-e .` resolves correctly. Equivalent to:
-      #   pip install -e ".[external,heavy,expressive,dev]"
-      - -e ".[external,heavy,expressive,dev]"
+      # `-e .` resolves correctly. Matches the canonical contributor install
+      # in CONTRIBUTE.md. `[expressive]` is intentionally omitted — it's
+      # experimental and pulls heavy/compiled deps (bitsandbytes, llama-cpp).
+      - -e ".[external,heavy,dev]"

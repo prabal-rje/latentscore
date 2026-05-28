@@ -1,4 +1,4 @@
-.PHONY: install dev-install setup format fmt-check lint typecheck test check run download-models download-llm download-embeddings
+.PHONY: install dev-install setup format fmt-check lint typecheck test check check-system download-models download-llm download-embeddings
 
 # 1. Configuration
 ENV_NAME ?= latentscore
@@ -33,24 +33,23 @@ check-system:
 		test -f /usr/include/alsa/asoundlib.h || (echo "❌ ALSA headers missing (Linux only). Run: apt install libasound2-dev" && exit 1); \
 	fi
 
+# Canonical contributor install: the latentscore SDK in editable mode with the
+# demo + dev extras. NOT the data_work/ research pipeline (that lives in a
+# separate `latentscore-data` conda env — see data_work/README.md).
 install: check-system
-	@echo $(MSG_PREFIX) "Installing dependencies..."
+	@echo $(MSG_PREFIX) "Installing latentscore (editable, with [external,heavy,dev])..."
 ifdef CONDA_EXE
 	# Create Conda env if missing
 	conda create -n $(ENV_NAME) python=3.12 -y || true
-	# Install pip-tools inside Conda
-	$(PIP_CMD) install pip-tools
-else
-	# Ensure pip-tools is installed in current venv
-	$(PIP_CMD) install pip-tools
 endif
-	# Sync requirements (Handles the 'mlx' condition automatically!)
-	$(RUN_CMD) pip-sync data_work/requirements.txt
-	@echo "✅ Dependencies synced."
+	$(PIP_CMD) install -e ".[external,heavy,dev]"
+	@echo "✅ Installed."
 
+# Lighter install: just the package + dev/test toolchain (ruff, pyright,
+# pytest + pytest-asyncio + pytest-cov). Enough to run `make check`.
 dev-install:
-	@echo $(MSG_PREFIX) "Installing Dev Tools..."
-	$(PIP_CMD) install ruff pyright pytest
+	@echo $(MSG_PREFIX) "Installing dev tools..."
+	$(PIP_CMD) install -e ".[dev]"
 	@echo "✅ Dev tools installed."
 
 setup: install dev-install download-models
@@ -87,6 +86,3 @@ test:
 	$(RUN_CMD) pytest
 
 check: lint fmt-check typecheck test
-
-run:
-	$(PYTHON_CMD) -m app

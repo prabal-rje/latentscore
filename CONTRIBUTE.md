@@ -35,10 +35,11 @@ The extras:
 - `[heavy]` — laion-clap for `fast_heavy` retrieval.
 - `[expressive]` — local LLM (270M Gemma 3). Currently runs through the CPU `transformers` backend on every platform; MLX / llama-cpp markers exist in `pyproject.toml` but aren't wired into the runtime yet, so renders take ~30–100&nbsp;s.
 
-For a lighter setup:
+For a lighter setup — just the package plus the lint/type/test toolchain,
+skipping the LiteLLM bridge and CLAP retrieval:
 
 ```bash
-pip install -e ".[external,heavy,dev]"
+pip install -e ".[dev]"
 ```
 
 ### 4. System prerequisites for audio playback
