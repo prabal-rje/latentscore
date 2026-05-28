@@ -4,7 +4,7 @@
 
 ### 1. Install Conda (recommended)
 
-Download [Miniconda](https://docs.conda.io/en/latest/miniconda.html) or [Anaconda](https://www.anaconda.com/products/distribution) if you don't have it already. The project pins Python 3.11–3.12.
+Download [Miniconda](https://docs.conda.io/en/latest/miniconda.html) or [Anaconda](https://www.anaconda.com/products/distribution) if you don't have it already. The project is tested on Python 3.11–3.12 (other versions install but emit a runtime warning).
 
 ### 2. Create the environment
 

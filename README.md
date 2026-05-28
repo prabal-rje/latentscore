@@ -90,7 +90,7 @@ If you'd rather install locally, read on.
 ### 4.1 Requirements
 
 - **OS** - macOS, Linux, or Windows **ONLY** via [WSL2](docs/FAQ.md#can-i-run-this-on-windows). For the web UI on any OS, use the [Docker demo](#2-try-the-demo) instead.
-- **python 3.11 to python 3.12** - we test against [3.12](https://www.python.org/downloads/release/python-3120/) (matches our Docker image). Or use [`conda`](https://docs.conda.io/projects/miniconda/en/latest/) for environment management.
+- **python 3.11 or 3.12 recommended** - we test against [3.12](https://www.python.org/downloads/release/python-3120/) (matches our Docker image). Other versions install fine (`pip` won't refuse you) but emit a `UserWarning` at import — most things still work, but you may hit dependency-resolution quirks outside the tested range. Or use [`conda`](https://docs.conda.io/projects/miniconda/en/latest/) for environment management.
 
 ### 4.2 Install
 

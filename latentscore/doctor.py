@@ -96,13 +96,18 @@ def _offline_env(enabled: bool) -> Generator[None, None, None]:
 
 def _check_python_version() -> DoctorCheck:
     v = sys.version_info
-    ok = (3, 11) <= (v.major, v.minor) < (3, 13)
+    in_sweet_spot = (3, 11) <= (v.major, v.minor) <= (3, 12)
     return DoctorCheck(
         name="python_version",
-        status="pass" if ok else "fail",
-        required=True,
+        status="pass" if in_sweet_spot else "warn",
+        required=False,
         detail=f"{v.major}.{v.minor}.{v.micro}",
-        hint=None if ok else "Use Python >=3.11,<3.13.",
+        hint=None
+        if in_sweet_spot
+        else (
+            "latentscore is tested on Python 3.11-3.12; other versions "
+            "may have dependency or behaviour quirks."
+        ),
     )
 
 
