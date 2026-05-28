@@ -4,7 +4,7 @@
 
 ### 1. Install Conda (recommended)
 
-Download [Miniconda](https://docs.conda.io/en/latest/miniconda.html) or [Anaconda](https://www.anaconda.com/products/distribution) if you don't have it already. The project is tested on Python 3.11–3.12 (other versions install but emit a runtime warning).
+Download [Miniconda](https://docs.conda.io/en/latest/miniconda.html) or [Anaconda](https://www.anaconda.com/products/distribution) if you don't have it already. The project requires Python 3.11–3.12. For artifact review and the full demo stack, use Docker.
 
 ### 2. Create the environment
 

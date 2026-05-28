@@ -70,12 +70,7 @@ Subsequent rebuilds hit the Docker layer cache.
 
 ## Common dev gotchas
 
-- **`pip install` warns on Python outside 3.11-3.12.** The library
-  is tested on Python 3.11-3.12. Other versions install fine but
-  emit a UserWarning at import. The `[heavy]` extra in particular
-  may struggle on 3.13+ because some of `laion-clap`'s transitive
-  deps don't
-  have 3.13 wheels yet.
+- **`pip install` requires Python 3.11-3.12.** For other Python versions, use Docker or Colab.
 - **`npm install` engine errors.** Use Node 22+. Vite 7 requires
   Node 18+ but the Dockerfile pins to Node 22, so match it to avoid
   bundle differences.

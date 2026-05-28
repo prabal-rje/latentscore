@@ -1,21 +1,17 @@
-# Publish demo container images to GHCR.
-#
-# Fires on:
-#   - tag push matching v*  (e.g. `git tag v0.1.5 && git push --tags`)
-#   - manual dispatch        (Actions tab -> "Run workflow" -- useful for
-#                             dry-run testing without cutting a real release)
-#
-# Produces three multi-arch (linux/amd64 + linux/arm64) images:
+# Produces demo images:
 #   - ghcr.io/prabal-rje/latentscore-demo-backend
 #   - ghcr.io/prabal-rje/latentscore-demo-frontend
 #   - ghcr.io/prabal-rje/latentscore-demo-notebook
 #
-# Reviewers can then `docker compose up` and pull finished images
-# (~60 s) instead of compiling from source (~5 min). The compose file
-# in `demo/docker-compose.yml` ships with a commented `build:` block so
-# anyone who wants from-source reproducibility (e.g. an OSS-track
-# reviewer checking that the image matches the source) can uncomment
-# it and rebuild locally.
+# Reviewers should use:
+#   docker compose -f demo/docker-compose.yml up --build
+#
+# Prebuilt images are published for convenience and are tagged by release.
+#
+# Fires on:
+#   - tag push matching v*  (e.g. `git tag v0.1.7 && git push --tags`)
+#   - manual dispatch        (Actions tab -> "Run workflow" -- useful for
+#                             dry-run testing without cutting a real release)
 
 name: Publish demo images
 

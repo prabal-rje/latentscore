@@ -77,20 +77,15 @@ See the [demo documentation](demo/) for architecture, dev setup, and troubleshoo
 
 If you'd rather install locally, read on.
 
-> ⚠️ **System dependencies vary by OS.** Local audio playback and WAV I/O
-> depend on native libraries that don't ship with pip — `libportaudio`
-> (for live playback via `sounddevice`) and `libsndfile` (for `soundfile`).
-> Typical install:
-> - **macOS:** `brew install sox`
-> - **Linux:** `apt install sox libasound2-dev`
-> - **Windows:** WSL2 only (see [FAQ](docs/FAQ.md#can-i-run-this-on-windows))
->
-> Skip all of this by running in [Colab](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart-colab.ipynb) — everything's preinstalled.
+> ⚠️ Local pip installs may require system audio libraries depending
+> on your OS. If you hit issues, use Docker or
+> [Colab](https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart-colab.ipynb)
+> instead — both include all dependencies.
 
 ### 4.1 Requirements
 
-- **OS** — macOS or Linux. Windows: use [Docker](#2-try-the-demo) for the demo, or install the SDK inside WSL2. Native Windows pip is not tested.
-- **python 3.11 or 3.12 recommended** - we test against [3.12](https://www.python.org/downloads/release/python-3120/) (matches our Docker image). Other versions install fine (`pip` won't refuse you) but emit a `UserWarning` at import — most things still work, but you may hit dependency-resolution quirks outside the tested range. Or use [`conda`](https://docs.conda.io/projects/miniconda/en/latest/) for environment management.
+- **OS** — macOS or Linux. Windows: use Docker Desktop with the WSL2 backend for the demo. Native Windows pip is unsupported, and WSL2 pip is not part of the supported SDK path.
+- **Python 3.11 or 3.12** - local SDK installs require this range via package metadata. For other Python versions, use Docker or Colab.
 
 ### 4.2 Install
 
