@@ -21,6 +21,16 @@ That uses the `build:` block in each service definition, already in
 `docker-compose.yml`. Takes ~15 min for the first build on a typical
 machine; subsequent rebuilds usually hit Docker's layer cache.
 
+## ⚠️ Build or startup is very slow on an Apple Silicon Mac
+
+The default platform is `linux/amd64` (for reproducible images), so on
+M-series Macs the build and model load run under QEMU emulation, which
+is slow. Build natively instead:
+
+```bash
+LATENTSCORE_DOCKER_PLATFORM=linux/arm64 docker compose -f demo/docker-compose.yml up --build
+```
+
 ## Backend stuck on "Waiting: Healthy" for several minutes.
 
 Normal on the first run. The backend container loads MiniLM and

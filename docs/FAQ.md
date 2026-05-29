@@ -89,6 +89,18 @@ SDK path.
 
 ---
 
+## ⚠️ Why is the Docker build slow on my Mac?
+
+On Apple Silicon (M-series) Macs, the demo defaults to the `linux/amd64`
+image for reproducibility, which runs under QEMU emulation and is slow.
+For a native, much faster build, set the platform:
+
+```bash
+LATENTSCORE_DOCKER_PLATFORM=linux/arm64 docker compose -f demo/docker-compose.yml up --build
+```
+
+---
+
 ## Do I need a GPU?
 
 No GPU is required. The default `fast` path and Docker demo are

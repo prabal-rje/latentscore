@@ -66,6 +66,7 @@ LAION-CLAP ~1.8 GB). Subsequent rebuilds hit the Docker layer cache.
 ## Common dev gotchas
 
 - **`pip install` requires Python 3.11-3.12.** For other Python versions, use Docker or Colab.
+- ⚠️ **Apple Silicon: prefix builds with `LATENTSCORE_DOCKER_PLATFORM=linux/arm64`.** The default `linux/amd64` runs under emulation and is slow; the override builds natively.
 - **`npm install` engine errors.** Use Node 22+. Vite 7 requires
   Node 18+ but the Dockerfile pins to Node 22, so match it to avoid
   bundle differences.

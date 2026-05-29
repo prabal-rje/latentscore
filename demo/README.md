@@ -34,6 +34,13 @@ installed). First build takes ~15 min; the first prompt takes ~30
 seconds as model weights load. Tested on Linux, macOS, and Windows
 (Docker Desktop with WSL2) — both Intel and Apple Silicon.
 
+> ⚠️ **Apple Silicon (M-series) Macs:** the build defaults to `linux/amd64` for reproducibility,
+> which runs under emulation and is slow. For a native, much faster build, prefix the command:
+>
+> ```bash
+> LATENTSCORE_DOCKER_PLATFORM=linux/arm64 docker compose up --build
+> ```
+
 ---
 
 ## 2. What you get

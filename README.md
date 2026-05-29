@@ -41,6 +41,13 @@ That's it. One line. You get audio playing on your speakers.
 docker compose -f demo/docker-compose.yml up --build
 ```
 
+> ⚠️ **Apple Silicon (M-series) Macs:** the build defaults to `linux/amd64` for reproducibility,
+> which runs under emulation and is slow. For a native, much faster build, prefix the command:
+>
+> ```bash
+> LATENTSCORE_DOCKER_PLATFORM=linux/arm64 docker compose -f demo/docker-compose.yml up --build
+> ```
+
 The first prompt after build takes ~30 seconds as model weights load; subsequent responses are near-instant.
 
 Then open:
