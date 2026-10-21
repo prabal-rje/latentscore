@@ -15,7 +15,8 @@ FROM python:3.12-slim@sha256:9d3abd9fc11d06998ccdbdd93b4dd49b5ad7d67fcbbc11c016e
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    LATENTSCORE_MODEL_DIR=/root/.cache/latentscore/models
 
 # Pinned for reproducibility. No "+cpu" suffix: --index-url already forces CPU
 # wheels, "==2.12.0" matches "2.12.0+cpu" on x86_64, and the plain version also
@@ -54,9 +55,9 @@ RUN pip install ./latentscore-src
 COPY demo/backend/requirements.txt ./requirements.txt
 RUN pip install -r requirements.txt
 
-# Bake model assets at build time so runtime startup isn't network-bound.
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
-RUN python -c "import laion_clap; m = laion_clap.CLAP_Module(enable_fusion=False); m.load_ckpt()"
+# Bake model assets at build time so runtime startup isn't network-bound. Fail
+# the build if the map did not load: warmup() would quietly use 5 examples.
+RUN python -c "from latentscore.models import FastEmbeddingModel; m = FastEmbeddingModel(); m.warmup(); assert m._embed_map_examples()[1] is not None, 'MiniLM embedding map missing'"
 RUN python -c "from latentscore.models import FastHeavyModel; FastHeavyModel().warmup()"
 
 COPY demo/backend/main.py .

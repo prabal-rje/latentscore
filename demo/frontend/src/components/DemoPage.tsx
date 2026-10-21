@@ -99,6 +99,12 @@ function DemoPage() {
     staleTime: Infinity,
   });
   const expressiveAvailable = capabilities?.expressive_available ?? false;
+  const heavyAvailable = capabilities?.models.includes("fast_heavy") ?? false;
+
+  // A saved "fast_heavy" choice falls back to "fast" when the server runs without CLAP.
+  useEffect(() => {
+    if (capabilities && !heavyAvailable && selectedModel === "fast_heavy") setSelectedModel("fast");
+  }, [capabilities, heavyAvailable, selectedModel, setSelectedModel]);
 
   // Auto-advance to next ready track when stream ends naturally
   const handleStreamEnd = useCallback(() => {
@@ -1989,16 +1995,18 @@ function DemoPage() {
               </button>
             </div>
             <div className="modal-body">
-              <button
-                className={`model-option ${selectedModel === "fast_heavy" ? "active" : ""}`}
-                onClick={() => { setSelectedModel("fast_heavy"); setShowModelDialog(false); }}
-              >
-                <span className="model-name">Fast (Heavy)</span>
-                <span className="model-desc-long">
-                  CLAP audio-grounded matching. Matches your vibe text against how each
-                  pre-computed configuration actually sounds. Best quality, instant results.
-                </span>
-              </button>
+              {heavyAvailable && (
+                <button
+                  className={`model-option ${selectedModel === "fast_heavy" ? "active" : ""}`}
+                  onClick={() => { setSelectedModel("fast_heavy"); setShowModelDialog(false); }}
+                >
+                  <span className="model-name">Fast (Heavy)</span>
+                  <span className="model-desc-long">
+                    CLAP audio-grounded matching. Matches your vibe text against how each
+                    pre-computed configuration actually sounds. Best quality, instant results.
+                  </span>
+                </button>
+              )}
 
               <button
                 className={`model-option ${selectedModel === "fast" ? "active" : ""}`}

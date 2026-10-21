@@ -6,4 +6,4 @@
 
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
-laion-clap          # fast_heavy model path (pulls torchvision; already satisfied)
+laion-clap==1.1.7   # fast_heavy model path (pulls torchvision; already satisfied). Pinned: the lean CLAP loader expects its checkpoint layout

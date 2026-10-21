@@ -53,7 +53,11 @@ interactive artifact, not a service.
   audio + text encoder. The `fast_heavy` model uses it to match a
   prompt against the *sound* of each library config, not just its
   description. ~1.8 GB checkpoint, only loaded when the `[heavy]`
-  extra is installed.
+  extra is installed and `LATENTSCORE_DEMO_HEAVY` is not `0`. CLAP
+  also scores best-of-N LLM candidates. The single-image
+  `demo/Dockerfile` (Railway) defaults to `LATENTSCORE_DEMO_HEAVY=0`,
+  which saves ~1.4 GB of RAM; set it to `1` as a build argument or a
+  Railway variable to turn CLAP back on.
 - **MusicConfig** - the library's central data type. A frozen Pydantic
   model describing one piece of music (tempo, mode, instrument styles,
   density, etc.). See `latentscore/config.py`.

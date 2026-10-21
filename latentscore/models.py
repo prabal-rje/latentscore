@@ -13,7 +13,17 @@ import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Literal, Protocol, Sequence, TypeGuard, cast, get_args
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Literal,
+    Protocol,
+    Sequence,
+    TypeGuard,
+    cast,
+    get_args,
+)
 
 import numpy as np
 from numpy.typing import NDArray
@@ -37,6 +47,9 @@ try:
     from json_repair import repair_json  # type: ignore[import]
 except ImportError:
     repair_json: Callable[[str], str] | None = None
+
+if TYPE_CHECKING:
+    import torch
 
 
 def _clamp_int(value: object, lo: int, hi: int) -> int | None:
@@ -541,6 +554,12 @@ def _parse_palettes(raw: object) -> tuple[Palette, ...]:
     return tuple(out)
 
 
+def _embedding_row(values: list[Any]) -> NDArray[np.float32]:
+    # One float32 array per row, not a list of Python floats: across ~10k rows
+    # those lists cost ~170 MB at peak and leave the heap fragmented.
+    return np.asarray(values, dtype=np.float32)
+
+
 class ExampleConfig(BaseModel):
     vibe: str
     config: MusicConfig
@@ -852,7 +871,7 @@ class FastEmbeddingModel:
             return _fast_track_examples(), None
 
         examples: list[ExampleConfig] = []
-        embeddings: list[list[float]] = []
+        embeddings: list[NDArray[np.float32]] = []
         try:
             with map_path.open("r", encoding="utf-8") as handle:
                 for line in handle:
@@ -888,7 +907,7 @@ class FastEmbeddingModel:
                     )
                     embed: object = row.get("embedding")
                     if isinstance(embed, list):
-                        embeddings.append([float(v) for v in cast(list[Any], embed)])
+                        embeddings.append(_embedding_row(cast(list[Any], embed)))
         except OSError as exc:  # pragma: no cover - filesystem edge case
             _LOGGER.warning("Failed reading embedding map: %s", exc, exc_info=True)
             return _fast_track_examples(), None
@@ -898,7 +917,7 @@ class FastEmbeddingModel:
 
         matrix: NDArray[np.float32] | None = None
         if len(embeddings) == len(examples):
-            mat = np.asarray(embeddings, dtype=np.float32)
+            mat = np.stack(embeddings)
             norms = np.linalg.norm(mat, axis=1, keepdims=True)
             norms[norms == 0] = 1.0
             matrix = mat / norms
@@ -951,6 +970,44 @@ class FastEmbeddingModel:
 # CLAP audio-embedding model: text-to-audio nearest-neighbor
 # ---------------------------------------------------------------------------
 
+# laion_clap's default checkpoint for CLAP_Module(enable_fusion=False).
+_CLAP_CHECKPOINT = "630k-audioset-best.pt"
+
+
+class _ClapModule(Protocol):
+    @property
+    def model(self) -> torch.nn.Module: ...
+
+
+def _load_clap_weights(module: _ClapModule, checkpoint: Path) -> None:
+    """Load the model weights from a laion_clap training checkpoint into ``module.model``.
+
+    The checkpoint also holds ~1.2 GB of optimizer state. ``CLAP_Module.load_ckpt``
+    unpickles all of it, and on Linux about 1.3 GB stays resident afterwards.
+    Memory-mapping reads only the weight pages. ``weights_only`` limits unpickling
+    to tensors and the numpy types listed below.
+    """
+    import torch
+
+    try:
+        from numpy._core.multiarray import scalar  # type: ignore[attr-defined]
+    except ImportError:  # numpy < 1.26
+        from numpy.core.multiarray import scalar  # type: ignore[attr-defined,no-redef]
+
+    # The checkpoint pickles a few numpy scalars next to the tensors.
+    numpy_scalars: list[Callable[..., Any] | tuple[Callable[..., Any], str]] = [
+        (scalar, "numpy.core.multiarray.scalar"),  # how numpy 1.x pickles scalars
+        (scalar, "numpy._core.multiarray.scalar"),  # numpy 2.x
+        np.dtype,
+        type(np.dtype(np.float64)),
+    ]
+    with torch.serialization.safe_globals(numpy_scalars):
+        saved = torch.load(checkpoint, map_location="cpu", mmap=True, weights_only=True)
+    # Same key clean-up as laion_clap's factory.load_state_dict.
+    state = {key.removeprefix("module."): value for key, value in saved["state_dict"].items()}
+    state.pop("text_branch.embeddings.position_ids", None)
+    module.model.load_state_dict(state)
+
 
 class FastHeavyModel:
     """CLAP audio-embedding backed config selection.
@@ -990,7 +1047,11 @@ class FastHeavyModel:
             ) from exc
 
         model = laion_clap.CLAP_Module(enable_fusion=False)
-        model.load_ckpt()
+        checkpoint = Path(laion_clap.__file__).parent / _CLAP_CHECKPOINT
+        if checkpoint.exists():
+            _load_clap_weights(model, checkpoint)
+        else:
+            model.load_ckpt()  # first run: laion_clap downloads the checkpoint
         # NOTE: we considered casting to fp16 to save ~317 MB steady-state RAM,
         # but the CLAP library itself only casts on CUDA (`factory.py` gates the
         # cast to `device.type != "cpu"`). On CPU, the text-encoder Roberta
@@ -1015,9 +1076,12 @@ class FastHeavyModel:
         )
 
     def _embed_and_select(self, vibe: str) -> GenerateResult:
+        import torch
+
         clap = self._load_clap()
         example_matrix = self._example_matrix()
-        query = clap.get_text_embedding([vibe])
+        with torch.inference_mode():  # laion_clap runs with autograd on, which keeps activations
+            query = clap.get_text_embedding([vibe])
         query_vec = np.asarray(query, dtype=np.float32)[0]
         norm = np.linalg.norm(query_vec)
         if norm > 0:
@@ -1042,7 +1106,7 @@ class FastHeavyModel:
             return (), None
 
         examples: list[ExampleConfig] = []
-        embeddings: list[list[float]] = []
+        embeddings: list[NDArray[np.float32]] = []
         try:
             with map_path.open("r", encoding="utf-8") as handle:
                 for line in handle:
@@ -1078,7 +1142,7 @@ class FastHeavyModel:
                     )
                     embed: object = row.get("clap_audio_embedding")
                     if isinstance(embed, list):
-                        embeddings.append([float(v) for v in cast(list[Any], embed)])
+                        embeddings.append(_embedding_row(cast(list[Any], embed)))
         except OSError as exc:  # pragma: no cover - filesystem edge case
             _LOGGER.warning("Failed reading CLAP embedding map: %s", exc, exc_info=True)
             return (), None
@@ -1088,7 +1152,7 @@ class FastHeavyModel:
 
         matrix: NDArray[np.float32] | None = None
         if len(embeddings) == len(examples):
-            mat = np.asarray(embeddings, dtype=np.float32)
+            mat = np.stack(embeddings)
             norms = np.linalg.norm(mat, axis=1, keepdims=True)
             norms[norms == 0] = 1.0
             matrix = mat / norms

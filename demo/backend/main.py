@@ -3,16 +3,19 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import os
 import random
 import struct
 import tempfile
 import uuid
 import logging
 from concurrent.futures import ProcessPoolExecutor
-from typing import Any, Callable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable
 
+import huggingface_hub.constants
 import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -32,10 +35,15 @@ from latentscore.config import (
 from latentscore.synth import assemble
 from pydantic import ValidationError as _ValidationError
 
-import laion_clap
+if TYPE_CHECKING:
+    import laion_clap
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("latentscore-api")
+
+# CLAP powers the fast_heavy model and best-of-N scoring. LATENTSCORE_DEMO_HEAVY=0
+# turns both off: laion_clap is never imported and no CLAP weights load (~1 GB less RAM).
+HEAVY_ENABLED = os.environ.get("LATENTSCORE_DEMO_HEAVY", "1") != "0"
 
 # ─── Label→numeric converters for LLM-generated configs ─────────────────────
 _LABEL_CONVERTERS: dict[str, Callable[[str], float | int]] = {
@@ -146,7 +154,7 @@ class EnrichedFastModel(FastEmbeddingModel):
             return fallback, None
 
         examples: list[ExampleConfig] = []
-        embeddings: list[list[float]] = []
+        embeddings: list[np.ndarray] = []
         titles: list[str | None] = []
         palettes: list[list[dict[str, Any]] | None] = []
 
@@ -175,10 +183,13 @@ class EnrichedFastModel(FastEmbeddingModel):
                             continue
                     examples.append(ExampleConfig(vibe=str(vibe), config=music_config))
                     titles.append(row.get("title"))
-                    palettes.append(row.get("palettes"))
+                    row_palettes = row.get("palettes")
+                    # Only the first palette is ever shown (_palette_from_embed).
+                    palettes.append(row_palettes[:1] if isinstance(row_palettes, list) else None)
                     embed: object = row.get("embedding")
                     if isinstance(embed, list):
-                        embeddings.append([float(v) for v in cast(list[Any], embed)])
+                        # float32 per row: lists of Python floats cost ~130 MB at peak.
+                        embeddings.append(np.asarray(embed, dtype=np.float32))
         except OSError as exc:
             logger.warning("Failed reading embedding map: %s", exc, exc_info=True)
             fallback = _fast_track_examples()
@@ -197,7 +208,7 @@ class EnrichedFastModel(FastEmbeddingModel):
 
         matrix: np.ndarray | None = None
         if len(embeddings) == len(examples):
-            mat = np.asarray(embeddings, dtype=np.float32)
+            mat = np.stack(embeddings)
             norms = np.linalg.norm(mat, axis=1, keepdims=True)
             norms[norms == 0] = 1.0
             matrix = mat / norms
@@ -257,32 +268,74 @@ fast_heavy_model: FastHeavyModel | None = None
 clap_model: laion_clap.CLAP_Module | None = None
 
 
+def _drop_page_cache(paths: list[Path]) -> None:
+    """Evict model files from the page cache once they are loaded into RAM.
+
+    Railway bills cgroup memory.current, which counts page cache. The CLAP
+    checkpoint alone would otherwise add ~1.8 GB that is never read again.
+    """
+    if not hasattr(os, "posix_fadvise"):  # not Linux
+        return
+    for root in paths:
+        try:
+            for path in [root] if root.is_file() else root.rglob("*"):
+                if not path.is_file():
+                    continue
+                fd = os.open(path, os.O_RDONLY)
+                try:
+                    os.fdatasync(fd)  # dirty pages (fresh downloads) cannot be dropped
+                    os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+                finally:
+                    os.close(fd)
+        except OSError as exc:  # best effort: pages we cannot drop only cost memory
+            logger.warning("Could not drop %s from the page cache: %s", root, exc)
+
+
+def _model_file(resolve: Callable[[], Path | None]) -> Path | None:
+    try:
+        return resolve()
+    except OSError as exc:
+        logger.warning("Skipping a model file in the page-cache drop: %s", exc)
+        return None
+
+
 @app.on_event("startup")
 async def startup_warmup():
-    """Load the enriched embedding model, CLAP model, and pre-warm the DSP synth."""
+    """Fork the synth workers, load the models, then drop model files from the page cache."""
     global vibe_model, fast_heavy_model, clap_model
+
+    # Fork the workers before any model loads. With fork they would otherwise
+    # share every model page and copy them as Python touches objects.
+    logger.info("Warming up DSP synth...")
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(synth_pool, _render_audio_sync, MusicConfig(), 0.1)
 
     logger.info("Loading EnrichedFastModel (with title + palette metadata)...")
     vibe_model = EnrichedFastModel()
-
-    logger.info("Loading FastHeavyModel (CLAP audio-grounded matching)...")
     try:
-        fh = FastHeavyModel()
-        fh.warmup()
-        fast_heavy_model = fh
-        logger.info("FastHeavyModel ready.")
+        vibe_model.warmup()
     except Exception as exc:
-        logger.warning("FastHeavyModel unavailable, fast_heavy will fall back to fast: %s", exc)
+        logger.warning("Fast model warm-up failed, it will retry on first use: %s", exc)
 
-    logger.info("Loading CLAP model for audio-text evaluation...")
-    clap_model = laion_clap.CLAP_Module(enable_fusion=False)
-    clap_model.load_ckpt()
+    model_files = [Path(huggingface_hub.constants.HF_HUB_CACHE), _model_file(vibe_model._resolve_embed_map_path)]
+    if HEAVY_ENABLED:
+        import laion_clap
 
-    logger.info("Warming up DSP synth...")
-    config = MusicConfig()
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(synth_pool, _render_audio_sync, config, 0.1)
-    logger.info("Synth warm-up complete. Ready to serve.")
+        logger.info("Loading CLAP (shared by fast_heavy and best-of-N scoring)...")
+        heavy = FastHeavyModel()
+        clap_model = heavy._load_clap()
+        try:
+            heavy.warmup()
+            fast_heavy_model = heavy
+            logger.info("FastHeavyModel ready.")
+        except Exception as exc:
+            logger.warning("FastHeavyModel unavailable, fast_heavy will fall back to fast: %s", exc)
+        model_files += [Path(laion_clap.__file__).parent, _model_file(heavy._resolve_clap_embed_map_path)]
+    else:
+        logger.info("LATENTSCORE_DEMO_HEAVY=0: fast_heavy and best-of-N scoring are off.")
+
+    _drop_page_cache([path for path in model_files if path is not None and path.exists()])
+    logger.info("Ready to serve.")
 
 
 async def vibe_to_config(vibe: str, model: str = "fast") -> _VibeResult:
@@ -586,7 +639,7 @@ async def get_capabilities():
     models = ["fast"]
     if fast_heavy_model is not None:
         models.append("fast_heavy")
-    return {"models": models, "expressive_available": False}
+    return {"models": models, "expressive_available": False, "best_of_n": clap_model is not None}
 
 
 class GenerateRequest(BaseModel):
@@ -698,8 +751,8 @@ class SelectBestRequest(BaseModel):
 @app.post("/api/select-best-config", response_model=GenerateResponse)
 async def select_best_config(req: SelectBestRequest):
     """Render audio for each candidate config, CLAP-score against vibe, return best."""
-    if not clap_model:
-        raise ValueError("CLAP model not loaded")
+    if not clap_model:  # the UI then plays the first candidate
+        raise HTTPException(status_code=503, detail="CLAP scoring is off on this server")
     if not req.candidates:
         raise ValueError("No candidates provided")
 
@@ -725,9 +778,12 @@ async def select_best_config(req: SelectBestRequest):
             tmp.close()
             tmp_paths.append(tmp.name)
 
-        # CLAP scoring
-        text_embed = clap_model.get_text_embedding([req.vibe])
-        audio_embeds = clap_model.get_audio_embedding_from_filelist(tmp_paths)
+        # CLAP scoring. laion_clap runs with autograd on, which keeps activations.
+        import torch
+
+        with torch.inference_mode():
+            text_embed = clap_model.get_text_embedding([req.vibe])
+            audio_embeds = clap_model.get_audio_embedding_from_filelist(tmp_paths)
 
         scores = [_cosine_sim(audio_embeds[i], text_embed[0]) for i in range(len(tmp_paths))]
         best_idx = int(np.argmax(scores))
@@ -738,7 +794,6 @@ async def select_best_config(req: SelectBestRequest):
             + f" → winner: [{best_idx}]"
         )
     finally:
-        import os
         for p in tmp_paths:
             try:
                 os.unlink(p)
@@ -911,9 +966,7 @@ async def create_playlist(req: PlaylistRequest):
 # When built with the root Dockerfile, frontend assets live in ./static/.
 # In docker-compose mode, static/ doesn't exist and this block is skipped.
 
-from pathlib import Path as _Path
-
-_STATIC_DIR = _Path(__file__).parent / "static"
+_STATIC_DIR = Path(__file__).parent / "static"
 if _STATIC_DIR.is_dir():
     from starlette.responses import FileResponse as _FileResponse
 

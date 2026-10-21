@@ -366,6 +366,17 @@ async function selectBestConfig(
 const LLM_TIMEOUT_MS = 15_000;
 const LLM_N_CANDIDATES = 5;
 
+// Without CLAP scoring the server keeps only the first candidate,
+// so ask the LLM once instead of paying for five calls.
+let serverScoresCandidates: Promise<boolean> | undefined;
+function candidateCount(): Promise<number> {
+  serverScoresCandidates ??= fetchCapabilities().then(
+    (caps) => caps.best_of_n ?? true,
+    () => true,
+  );
+  return serverScoresCandidates.then((scores) => (scores ? LLM_N_CANDIDATES : 1));
+}
+
 export async function generateFromModel(
   vibe: string,
   model: string,
@@ -376,7 +387,8 @@ export async function generateFromModel(
   if (model === "custom" && customModelId && customApiKey) {
     onPhase?.("llm");
     // Launch N parallel LLM calls with individual timeouts
-    const promises = Array.from({ length: LLM_N_CANDIDATES }, () =>
+    const nCandidates = await candidateCount();
+    const promises = Array.from({ length: nCandidates }, () =>
       Promise.race([
         callLLM(customModelId, customApiKey, vibe),
         new Promise<never>((_, reject) =>
@@ -391,7 +403,7 @@ export async function generateFromModel(
 
     const failed = results.filter((r) => r.status === "rejected").length;
     if (failed > 0 && succeeded.length > 0) {
-      console.warn(`${failed}/${LLM_N_CANDIDATES} LLM calls failed, continuing with ${succeeded.length}`);
+      console.warn(`${failed}/${nCandidates} LLM calls failed, continuing with ${succeeded.length}`);
     }
 
     if (succeeded.length === 0) {

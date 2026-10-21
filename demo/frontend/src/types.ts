@@ -28,6 +28,7 @@ export type ModelChoice = "fast" | "fast_heavy" | "expressive" | "custom";
 export const CapabilitiesSchema = z.object({
   models: z.array(z.string()),
   expressive_available: z.boolean(),
+  best_of_n: z.boolean().optional(),
 });
 
 export type Capabilities = z.infer<typeof CapabilitiesSchema>;
