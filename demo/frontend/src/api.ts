@@ -366,7 +366,7 @@ async function selectBestConfig(
 const LLM_TIMEOUT_MS = 15_000;
 const LLM_N_CANDIDATES = 5;
 
-// Without CLAP scoring the server keeps only the first candidate,
+// Without CLAP scoring only the first candidate gets played,
 // so ask the LLM once instead of paying for five calls.
 let serverScoresCandidates: Promise<boolean> | undefined;
 function candidateCount(): Promise<number> {

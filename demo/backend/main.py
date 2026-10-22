@@ -319,18 +319,21 @@ async def startup_warmup():
 
     model_files = [Path(huggingface_hub.constants.HF_HUB_CACHE), _model_file(vibe_model._resolve_embed_map_path)]
     if HEAVY_ENABLED:
-        import laion_clap
-
         logger.info("Loading CLAP (shared by fast_heavy and best-of-N scoring)...")
         heavy = FastHeavyModel()
-        clap_model = heavy._load_clap()
+        # A CLAP failure turns off the CLAP features, not the fast model. Even the
+        # import can fail: laion_clap fetches tokenizers at import time.
         try:
+            import laion_clap
+
+            model_files.append(Path(laion_clap.__file__).parent)
+            clap_model = heavy._load_clap()
             heavy.warmup()
             fast_heavy_model = heavy
             logger.info("FastHeavyModel ready.")
         except Exception as exc:
-            logger.warning("FastHeavyModel unavailable, fast_heavy will fall back to fast: %s", exc)
-        model_files += [Path(laion_clap.__file__).parent, _model_file(heavy._resolve_clap_embed_map_path)]
+            logger.warning("CLAP features unavailable, fast_heavy falls back to fast: %s", exc)
+        model_files.append(_model_file(heavy._resolve_clap_embed_map_path))
     else:
         logger.info("LATENTSCORE_DEMO_HEAVY=0: fast_heavy and best-of-N scoring are off.")
 
