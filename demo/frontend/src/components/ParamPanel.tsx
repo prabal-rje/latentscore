@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchParamOptions, updateParams } from "../api";
 import { useStore } from "../store";
 
@@ -60,10 +60,8 @@ export default function ParamPanel() {
   const {
     activeSessionId,
     activeConfig,
+    activeVibe,
     showParamPanel,
-    updateConfig,
-    updatePalette,
-    updateTitle,
   } = useStore();
   const [openCategory, setOpenCategory] = useState<string>("Core");
   const [pendingConfig, setPendingConfig] = useState<Record<string, unknown>>({});
@@ -81,40 +79,58 @@ export default function ParamPanel() {
 
   const handleChange = useCallback(
     (param: string, value: string) => {
-      setPendingConfig((prev) => ({
-        ...prev,
-        [param]: param === "density" ? Number(value) : value,
-      }));
+      setPendingConfig((prev) => {
+        const next: Record<string, unknown> = {
+          ...prev,
+          [param]: param === "density" ? Number(value) : value,
+        };
+        if (param === "melody") {
+          next.melody_engine = value === "procedural" ? "procedural" : "pattern";
+        }
+        return next;
+      });
     },
     []
   );
 
   // Compute which params have been changed
-  const changedParams: Record<string, unknown> = {};
-  for (const key of Object.keys(pendingConfig)) {
-    if (String(pendingConfig[key]) !== String(activeConfig[key])) {
-      changedParams[key] = pendingConfig[key];
+  const changedParams = useMemo(() => {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(pendingConfig)) {
+      if (String(pendingConfig[key]) !== String(activeConfig[key])) {
+        out[key] = pendingConfig[key];
+      }
     }
-  }
+    return out;
+  }, [pendingConfig, activeConfig]);
   const hasChanges = Object.keys(changedParams).length > 0;
 
   const handleApply = useCallback(async () => {
     if (!activeSessionId || !hasChanges) return;
+    const targetSessionId = activeSessionId;
     setApplying(true);
     try {
-      const result = await updateParams(activeSessionId, changedParams);
-      updateConfig(result.config);
-      updatePalette(result.palette);
-      updateTitle(result.title);
-      // Restart the audio stream so the new config takes effect immediately
-      useStore.getState().triggerRestream();
+      const result = await updateParams(targetSessionId, changedParams, activeConfig, activeVibe);
+      // Guard against stale async completion after switching to another track.
+      if (useStore.getState().activeSessionId !== targetSessionId) return;
+      // Atomically commit to active session and its matching playlist entry.
+      useStore.getState().commitSessionParams(targetSessionId, {
+        config: result.config,
+        palette: result.palette,
+        title: result.title,
+      });
+      // Crossfade cleanly to the updated mix only if playback is currently active.
+      if (useStore.getState().isPlaying) {
+        useStore.getState().triggerRestream();
+      }
     } catch {
-      // Revert pending to active on failure
-      setPendingConfig(activeConfig);
+      if (useStore.getState().activeSessionId === targetSessionId) {
+        setPendingConfig(activeConfig);
+      }
     } finally {
       setApplying(false);
     }
-  }, [activeSessionId, hasChanges, changedParams, activeConfig, updateConfig, updatePalette, updateTitle]);
+  }, [activeSessionId, activeVibe, hasChanges, changedParams, activeConfig]);
 
   const handleReset = useCallback(() => {
     setPendingConfig(activeConfig);

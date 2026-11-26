@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LatentScore: Type to Morph</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, sans-serif;
+        max-width: 640px;
+        margin: 48px auto;
+        padding: 0 20px;
+        background: #faf8f4;
+        color: #1f1e1c;
+        line-height: 1.5;
+      }
+      textarea {
+        width: 100%;
+        min-height: 140px;
+        padding: 14px;
+        font-size: 1rem;
+        border: 1px solid #d6d1c7;
+        border-radius: 10px;
+        background: #fff;
+        box-sizing: border-box;
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+        margin: 14px 0;
+      }
+      button {
+        padding: 10px 18px;
+        border-radius: 999px;
+        border: 1px solid #1f1e1c;
+        background: #1f1e1c;
+        color: #fff;
+        font-size: 0.95rem;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: transparent;
+        color: #1f1e1c;
+      }
+      pre {
+        background: #f1ede4;
+        padding: 12px;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        overflow-x: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Type to Morph</h1>
+    <p>
+      Click <strong>Start Audio</strong>, then type anything below. The music gently glides toward
+      the mood of your words, 100% locally in your browser.
+    </p>
+
+    <div class="row">
+      <button id="toggle">Start Audio</button>
+      <button id="drift" class="secondary">Auto Drift</button>
+    </div>
+
+    <textarea id="editor" placeholder="Try: quiet morning desk... then: rainy midnight coffee shop... then: vast deep space nebula with stars"></textarea>
+    <pre id="status">Idle</pre>
+
+    <script type="module">
+      import { createBrowserScore } from "../dist/esm/browser.js";
+
+      const music = createBrowserScore("quiet morning desk", { glideSeconds: 3.0 });
+      const toggleBtn = document.getElementById("toggle");
+      const driftBtn = document.getElementById("drift");
+      const editor = document.getElementById("editor");
+      const status = document.getElementById("status");
+      let driftHandle = null;
+
+      function syncDriftButton() {
+        driftBtn.textContent = driftHandle?.active ? "Stop Drift" : "Auto Drift";
+      }
+
+      function updateStatus(note = "") {
+        const cfg = music.targetConfig;
+        status.textContent = `${note ? note + "\n" : ""}key=${cfg.root.toUpperCase()} ${cfg.mode} | tempo=${cfg.tempo} | space=${cfg.space} | texture=${cfg.texture}`;
+        syncDriftButton();
+      }
+
+      toggleBtn.addEventListener("click", async () => {
+        if (!music.isPlaying) {
+          await music.play();
+          toggleBtn.textContent = "Stop Audio";
+          updateStatus("Playing");
+        } else {
+          driftHandle?.stop();
+          music.stop(0.5);
+          toggleBtn.textContent = "Start Audio";
+          updateStatus("Stopped");
+        }
+      });
+
+      driftBtn.addEventListener("click", () => {
+        if (driftHandle?.active) {
+          driftHandle.stop();
+          updateStatus("Auto drift stopped");
+        } else {
+          driftHandle = music.startAutoDrift({
+            intervalMs: 10000,
+            onMood: () => updateStatus("Drifting smoothly..."),
+            onStop: () => syncDriftButton(),
+          });
+          updateStatus("Auto drift active");
+        }
+      });
+
+      editor.addEventListener("input", () => {
+        music.steerOnType(editor.value || "quiet morning desk", {
+          onApplied: () => updateStatus("Gliding toward your words"),
+        });
+      });
+
+      window.__latentscoreDemo = { music };
+    </script>
+  </body>
+</html>

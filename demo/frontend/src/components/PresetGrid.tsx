@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { fetchPresets, generateFromModel, detectProvider } from "../api";
 import { useStore } from "../store";
 import type { Preset } from "../types";
@@ -7,7 +7,8 @@ import type { Preset } from "../types";
 const ICON_MAP: Record<string, string> = {
   // Familiar presets
   ocean: "\u{1F30A}", sunrise: "\u{1F305}", city: "\u{1F303}", zen: "\u{1F9D8}",
-  space: "\u{1F680}", fire: "\u{1F525}",
+  space: "\u{1F680}", fire: "\u{1F525}", frost: "\u2744\uFE0F", rain: "\u{1F327}\uFE0F",
+  healing: "\u{1F33F}",
   // Diversity-sampled high-CLAP presets
   mystery: "\u{1F52E}", tension: "\u{1F48E}", bittersweet: "\u{1F342}",
   stars: "\u2728", thanks: "\u{1F31F}", doubt: "\u{1F3AD}",
@@ -28,23 +29,38 @@ export default function PresetGrid() {
   const setWarning = useStore((s) => s.setWarning);
   const setPhase = useStore((s) => s.setGeneratingPhase);
   const [page, setPage] = useState(0);
-  const [fading, setFading] = useState(false);
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [focusPaused, setFocusPaused] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const { data: presets = [], isLoading } = useQuery({
     queryKey: ["presets"],
     queryFn: fetchPresets,
   });
 
-  const totalPages = Math.max(1, Math.ceil(presets.length / VISIBLE_COUNT));
+  const pages = useMemo(() => {
+    const chunks: Preset[][] = [];
+    for (let i = 0; i < presets.length; i += VISIBLE_COUNT) {
+      chunks.push(presets.slice(i, i + VISIBLE_COUNT));
+    }
+    return chunks.length > 0 ? chunks : [[]];
+  }, [presets]);
 
-  const cycleTo = useCallback((nextPage: number) => {
-    setFading(true);
-    setTimeout(() => {
-      setPage(nextPage % totalPages);
-      setFading(false);
-    }, 300);
-  }, [totalPages]);
+  const totalPages = pages.length;
+
+  const cycleTo = useCallback(
+    (nextPage: number) => {
+      setPage(((nextPage % totalPages) + totalPages) % totalPages);
+    },
+    [totalPages]
+  );
 
   const apiKey = providerApiKeys[detectProvider(customModelId).provider] || "";
 
@@ -65,21 +81,24 @@ export default function PresetGrid() {
       setLoadingId(null);
       setPhase(null);
     },
-    onError: (err: Error) => { setLoadingId(null); setPhase(null); setError(err.message || "Generation failed"); },
+    onError: (err: Error) => {
+      setLoadingId(null);
+      setPhase(null);
+      setError(err.message || "Generation failed");
+    },
   });
 
-  // Only play blocks the UI
   const isPlayPending = playMutation.isPending;
 
-  // Pause carousel during play generation
+  // Pause carousel during play generation or keyboard focus inside the strip.
   useEffect(() => {
     if (presets.length <= VISIBLE_COUNT) return;
-    if (isPlayPending) return;
+    if (isPlayPending || focusPaused) return;
     const timer = setInterval(() => {
-      cycleTo(page + 1);
+      setPage((prev) => (prev + 1) % totalPages);
     }, CYCLE_INTERVAL);
     return () => clearInterval(timer);
-  }, [page, presets.length, cycleTo, isPlayPending]);
+  }, [presets.length, totalPages, isPlayPending, focusPaused]);
 
   const handlePlay = (preset: Preset) => {
     if (isPlayPending) return;
@@ -109,16 +128,22 @@ export default function PresetGrid() {
     return <div className="preset-strip-loading">Loading presets...</div>;
   }
 
-  const start = page * VISIBLE_COUNT;
-  const visible = presets.slice(start, start + VISIBLE_COUNT);
-
   return (
-    <div className="preset-carousel">
+    <div
+      className="preset-carousel"
+      onFocusCapture={() => setFocusPaused(true)}
+      onBlurCapture={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          setFocusPaused(false);
+        }
+      }}
+    >
       {totalPages > 1 && (
         <div className="preset-dots">
-          {Array.from({ length: totalPages }).map((_, i) => (
+          {pages.map((_, i) => (
             <button
               key={i}
+              type="button"
               className={`preset-dot ${i === page ? "active" : ""}`}
               onClick={() => cycleTo(i)}
               aria-label={`Page ${i + 1}`}
@@ -126,31 +151,55 @@ export default function PresetGrid() {
           ))}
         </div>
       )}
-      <div className={`preset-carousel-items ${fading ? "fading" : ""}`}>
-        {visible.map((preset: Preset) => {
-          const isThisLoading = loadingId?.startsWith(preset.id) && isPlayPending;
+      <div className="preset-carousel-stack">
+        {pages.map((pagePresets, pageIdx) => {
+          const isActive = pageIdx === page;
           return (
             <div
-              key={preset.id}
-              className={`preset-chip ${isThisLoading ? "loading" : ""} ${isPlayPending && !isThisLoading ? "disabled" : ""}`}
-              onClick={() => handlePlay(preset)}
-              role="button"
-              tabIndex={0}
+              key={pageIdx}
+              className={`preset-carousel-items ${isActive ? "is-active" : "is-hidden"}`}
+              aria-hidden={!isActive}
             >
-              <span className="preset-chip-icon">
-                {ICON_MAP[preset.icon] ?? "\u{1F3B5}"}
-              </span>
-              <span className="preset-chip-name">{preset.name}</span>
-              <span
-                className="preset-chip-enqueue"
-                onClick={(e) => handleEnqueue(e, preset)}
-                title="Add to playlist"
-                role="button"
-                tabIndex={0}
-                style={isThisLoading ? { opacity: 0.3, pointerEvents: "none" } : undefined}
-              >
-                +
-              </span>
+              {pagePresets.map((preset: Preset) => {
+                const isThisLoading = loadingId?.startsWith(preset.id) && isPlayPending;
+                return (
+                  <div
+                    key={preset.id}
+                    className={`preset-chip ${isThisLoading ? "loading" : ""} ${isPlayPending && !isThisLoading ? "disabled" : ""}`}
+                    onClick={() => handlePlay(preset)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handlePlay(preset);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={isActive ? 0 : -1}
+                  >
+                    <span className="preset-chip-icon">
+                      {ICON_MAP[preset.icon] ?? "\u{1F3B5}"}
+                    </span>
+                    <span className="preset-chip-name">{preset.name}</span>
+                    <span
+                      className="preset-chip-enqueue"
+                      onClick={(e) => handleEnqueue(e, preset)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleEnqueue(e as unknown as React.MouseEvent, preset);
+                        }
+                      }}
+                      title="Add to playlist"
+                      role="button"
+                      tabIndex={isActive ? 0 : -1}
+                      style={isThisLoading ? { opacity: 0.3, pointerEvents: "none" } : undefined}
+                    >
+                      +
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           );
         })}

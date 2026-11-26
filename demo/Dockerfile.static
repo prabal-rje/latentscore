@@ -1,0 +1,26 @@
+# Zero-dollar static browser-native deploy of the LatentScore demo.
+# Build context is the repo root:
+#   docker build -f demo/Dockerfile.static -t latentscore-demo-static .
+#
+# Runs 100% in the visitor's browser (Transformers.js + Pyodide DSP) behind a
+# tiny ~15 MB Nginx container with zero Python/PyTorch server runtime.
+
+# ── Stage 1: Build static 100% browser-native frontend ───────────────────────
+FROM node:22-alpine AS frontend
+WORKDIR /app
+COPY demo/frontend/package.json demo/frontend/package-lock.json* ./
+RUN npm ci
+COPY demo/frontend/ .
+ARG VITE_ANONYMOUS=false
+ARG VITE_DEMO_MODE=browser
+ENV VITE_ANONYMOUS=${VITE_ANONYMOUS} \
+    VITE_DEMO_MODE=${VITE_DEMO_MODE}
+RUN npm run build
+
+# ── Stage 2: Tiny static Nginx server (~15 MB RAM, zero Python/PyTorch) ──────
+FROM nginx:1.27-alpine
+ENV PORT=8080 \
+    NGINX_ENVSUBST_FILTER=^PORT$
+COPY demo/nginx.static.conf.template /etc/nginx/templates/default.conf.template
+COPY --from=frontend /app/dist /usr/share/nginx/html
+EXPOSE 8080

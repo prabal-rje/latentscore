@@ -10,8 +10,37 @@ import {
   type Capabilities,
   type ModelChoice,
 } from "./types";
+import {
+  browserCreateFromConfig,
+  browserFetchCapabilities,
+  browserFetchParamOptions,
+  browserFetchPresets,
+  browserGenerateFromVibe,
+  browserUpdateParams,
+} from "./browser/engine";
 
-const API_BASE = "/api";
+const RAW_API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.trim() ?? "";
+
+/** "browser" runs 100% client-side at $0/mo; "server" talks to FastAPI/Modal/HF Spaces. */
+export const DEMO_MODE: "browser" | "server" =
+  import.meta.env.VITE_DEMO_MODE === "server" || RAW_API_BASE.length > 0
+    ? "server"
+    : "browser";
+
+const API_BASE = RAW_API_BASE
+  ? RAW_API_BASE.replace(/\/+$/, "")
+  : "/api";
+
+export function getWsStreamUrl(sessionId: string): string {
+  if (RAW_API_BASE) {
+    const parsed = new URL(RAW_API_BASE, window.location.origin);
+    const wsProtocol = parsed.protocol === "https:" ? "wss:" : "ws:";
+    const basePath = parsed.pathname.replace(/\/api\/?$/, "").replace(/\/+$/, "");
+    return `${wsProtocol}//${parsed.host}${basePath}/ws/stream/${sessionId}`;
+  }
+  const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${wsProtocol}//${window.location.host}/ws/stream/${sessionId}`;
+}
 
 async function fetchJSON<T>(url: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${url}`, init);
@@ -21,6 +50,7 @@ async function fetchJSON<T>(url: string, schema: z.ZodType<T>, init?: RequestIni
 }
 
 export async function fetchPresets(): Promise<Preset[]> {
+  if (DEMO_MODE === "browser") return browserFetchPresets();
   const data = await fetchJSON(
     "/presets",
     z.object({ presets: z.array(PresetSchema) })
@@ -29,6 +59,7 @@ export async function fetchPresets(): Promise<Preset[]> {
 }
 
 export async function fetchParamOptions(): Promise<ParamOptions> {
+  if (DEMO_MODE === "browser") return browserFetchParamOptions();
   const data = await fetchJSON(
     "/param-options",
     z.object({ options: ParamOptionsSchema })
@@ -37,10 +68,12 @@ export async function fetchParamOptions(): Promise<ParamOptions> {
 }
 
 export async function fetchCapabilities(): Promise<Capabilities> {
+  if (DEMO_MODE === "browser") return browserFetchCapabilities();
   return fetchJSON("/capabilities", CapabilitiesSchema);
 }
 
 export async function generateFromVibe(vibe: string, model: ModelChoice = "fast"): Promise<GenerateResponse> {
+  if (DEMO_MODE === "browser") return browserGenerateFromVibe(vibe);
   return fetchJSON("/generate", GenerateResponseSchema, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -216,6 +249,18 @@ interface LLMProvider {
   extract: (data: unknown) => string;
 }
 
+interface OpenAIResponse {
+  choices?: Array<{ message?: { content?: string } }>;
+}
+
+interface AnthropicResponse {
+  content?: Array<{ type?: string; text?: string }>;
+}
+
+interface GeminiResponse {
+  candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+}
+
 const PROVIDERS: Record<string, LLMProvider> = {
   openai: {
     url: "https://api.openai.com/v1/chat/completions",
@@ -225,7 +270,7 @@ const PROVIDERS: Record<string, LLMProvider> = {
       messages,
       response_format: { type: "json_object" },
     }),
-    extract: (d: any) => d.choices[0].message.content,
+    extract: (d: unknown) => (d as OpenAIResponse).choices?.[0]?.message?.content ?? "",
   },
   anthropic: {
     url: "https://api.anthropic.com/v1/messages",
@@ -245,8 +290,8 @@ const PROVIDERS: Record<string, LLMProvider> = {
         { role: "assistant", content: "{" }, // prefill to force JSON
       ],
     }),
-    extract: (d: any) => {
-      const block = d.content?.find((b: any) => b.type === "text");
+    extract: (d: unknown) => {
+      const block = (d as AnthropicResponse).content?.find((b) => b.type === "text");
       return "{" + (block?.text ?? ""); // prepend the prefilled brace
     },
   },
@@ -265,7 +310,7 @@ const PROVIDERS: Record<string, LLMProvider> = {
         temperature: 0.8,
       },
     }),
-    extract: (d: any) => d.candidates?.[0]?.content?.parts?.[0]?.text ?? "",
+    extract: (d: unknown) => (d as GeminiResponse).candidates?.[0]?.content?.parts?.[0]?.text ?? "",
   },
 };
 
@@ -342,6 +387,9 @@ async function createFromConfig(
   title?: string,
   palette?: string[]
 ): Promise<GenerateResponse> {
+  if (DEMO_MODE === "browser") {
+    return browserCreateFromConfig(vibe, config, justification, title, palette);
+  }
   return fetchJSON("/create-from-config", GenerateResponseSchema, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -437,21 +485,42 @@ export async function generateFromModel(
 
 export async function renderAudio(
   sessionId: string,
-  duration: number = 60
+  duration: number = 60,
+  config?: Record<string, unknown>,
+  signal?: AbortSignal
 ): Promise<ArrayBuffer> {
-  const res = await fetch(`${API_BASE}/render/${sessionId}?duration=${duration}`);
+  // Prefer stateless POST /api/render when config is available so scale-to-zero
+  // serverless backends (Modal / Cloud Run) never depend on in-memory sessions.
+  if (config && Object.keys(config).length > 0) {
+    const res = await fetch(`${API_BASE}/render`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config, duration }),
+      signal,
+    });
+    if (res.ok) return res.arrayBuffer();
+    if (res.status !== 404 && res.status !== 405) {
+      throw new Error(`Render error: ${res.status}`);
+    }
+  }
+  const res = await fetch(`${API_BASE}/render/${sessionId}?duration=${duration}`, { signal });
   if (!res.ok) throw new Error(`Render error: ${res.status}`);
   return res.arrayBuffer();
 }
 
 export async function updateParams(
   sessionId: string,
-  updates: Record<string, unknown>
+  updates: Record<string, unknown>,
+  config?: Record<string, unknown>,
+  vibe?: string
 ): Promise<{ config: Record<string, unknown>; palette: string[]; title: string }> {
+  if (DEMO_MODE === "browser") {
+    return browserUpdateParams(sessionId, updates, config, vibe);
+  }
   const res = await fetch(`${API_BASE}/update-params`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, updates }),
+    body: JSON.stringify({ session_id: sessionId, updates, config, vibe }),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -472,6 +541,22 @@ export async function createPlaylist(
     duration: number;
   }>;
 }> {
+  if (DEMO_MODE === "browser") {
+    const resolved = [];
+    for (const track of tracks) {
+      const resp = await browserGenerateFromVibe(track.vibe);
+      resolved.push({
+        session_id: resp.session_id,
+        vibe: track.vibe,
+        title: resp.title,
+        palette: resp.palette,
+        justification: resp.justification,
+        config: resp.config,
+        duration: track.duration ?? 30,
+      });
+    }
+    return { name, tracks: resolved };
+  }
   const res = await fetch(`${API_BASE}/playlist/create`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

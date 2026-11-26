@@ -25,6 +25,7 @@ from .config import (
     RhythmStyle,
     RootNote,
     SpaceLabel,
+    Step,
     StereoLabel,
     TempoLabel,
     TextureStyle,
@@ -56,6 +57,7 @@ from .main import (
 )
 from .models import ExternalModelSpec, ModelForGeneratingMusicConfig, ModelSpec
 from .prefetch import prefetch
+from .score import Score, compute_bar_aligned_duration, fade_into_nothingness, mood_from_text
 
 __all__ = [
     "SAMPLE_RATE",
@@ -82,7 +84,9 @@ __all__ = [
     "RhythmStyle",
     "RootNote",
     "SpaceLabel",
+    "Step",
     "StereoLabel",
+    "Score",
     "StreamEvent",
     "StreamHooks",
     "Streamable",
@@ -98,7 +102,10 @@ __all__ = [
     "Playlist",
     "Track",
     "arender",
+    "compute_bar_aligned_duration",
+    "fade_into_nothingness",
     "live",
+    "mood_from_text",
     "astream",
     "astream_raw",
     "prefetch",

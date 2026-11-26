@@ -1,0 +1,14 @@
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/data/manifest.json
+  Cache-Control: public, max-age=0, must-revalidate
+
+/data/presets.json
+  Cache-Control: public, max-age=0, must-revalidate
+
+/data/*
+  Cache-Control: public, max-age=604800
+
+/py/*
+  Cache-Control: public, max-age=0, must-revalidate

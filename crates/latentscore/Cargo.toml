@@ -1,0 +1,39 @@
+[package]
+name = "latentscore"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "Apache-2.0"
+description = "Local procedural ambient music synthesizer and reactive mood engine in pure Rust. Zero GPU, zero external runtime assets."
+repository = "https://github.com/prabal-rje/latentscore"
+homepage = "https://github.com/prabal-rje/latentscore"
+readme = "README.md"
+keywords = ["audio", "music", "ambient", "synthesizer", "dsp"]
+categories = ["multimedia::audio"]
+include = [
+    "src/**",
+    "spec/**",
+    "examples/**",
+    "tests/**",
+    "README.md",
+    "LICENSE",
+    "Cargo.toml",
+]
+
+[features]
+default = []
+playback = ["dep:cpal"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+cpal = { version = "0.15", optional = true }
+
+[[example]]
+name = "render_wav"
+path = "examples/render_wav.rs"
+
+[[example]]
+name = "type_to_morph"
+path = "examples/type_to_morph.rs"
+required-features = ["playback"]

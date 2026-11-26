@@ -1,0 +1,45 @@
+name: Publish JS/TS SDK to npm
+
+on:
+  push:
+    tags:
+      - "js-v*"
+  # Manual dispatch runs build and test verification only (never publishes without a js-v* tag).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.14"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Verify tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/js-v')
+        working-directory: packages/latentscore
+        run: |
+          TAG_VER="${GITHUB_REF_NAME#js-v}"
+          PKG_VER="$(node -p "require('./package.json').version")"
+          test "$TAG_VER" = "$PKG_VER" || (echo "Tag $TAG_VER != package.json $PKG_VER" && exit 1)
+
+      - name: Build and test package
+        working-directory: packages/latentscore
+        run: |
+          npm ci
+          npm test
+
+      - name: Publish to npm with OIDC provenance
+        if: startsWith(github.ref, 'refs/tags/js-v')
+        working-directory: packages/latentscore
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

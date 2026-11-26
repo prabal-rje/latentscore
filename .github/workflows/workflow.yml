@@ -6,6 +6,9 @@ on:
 
 jobs:
   publish:
+    if: >-
+      startsWith(github.event.release.tag_name, 'v') ||
+      startsWith(github.event.release.tag_name, 'py-v')
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -19,11 +22,25 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Verify release tag matches pyproject.toml version
+        run: |
+          python3 - <<'PY'
+          import os, tomllib
+          tag = os.environ["TAG_NAME"]
+          tag_ver = tag[4:] if tag.startswith("py-v") else tag[1:]
+          pkg_ver = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
+          assert tag_ver == pkg_ver, f"Release tag {tag} ({tag_ver}) != pyproject.toml ({pkg_ver})"
+          PY
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
+
       - name: Install build tools
         run: pip install build
 
-      - name: Build package
-        run: python -m build
+      - name: Build package and verify bundled lexicon
+        run: |
+          python -m build
+          python -c "import glob, zipfile; whl = glob.glob('dist/*.whl')[0]; z = zipfile.ZipFile(whl); assert 'latentscore/_mood_lexicon.json' in z.namelist(), 'Missing _mood_lexicon.json in wheel'"
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

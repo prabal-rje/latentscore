@@ -1,18 +1,14 @@
 import { create } from "zustand";
 import type { PlaylistTrack, ModelChoice } from "./types";
 
-// Smooth color interpolation for palette transitions
-function lerpColor(a: string, b: string, t: number): string {
-  const parse = (hex: string) => {
-    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [0, 0, 0];
-  };
-  const [ar, ag, ab] = parse(a);
-  const [br, bg, bb] = parse(b);
-  const r = Math.round(ar + (br - ar) * t);
-  const g = Math.round(ag + (bg - ag) * t);
-  const b2 = Math.round(ab + (bb - ab) * t);
-  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b2.toString(16).padStart(2, "0")}`;
+function normalizeHex(hex: string): string {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex.trim());
+  if (!m) return "#000000";
+  return `#${m[1].toLowerCase()}${m[2].toLowerCase()}${m[3].toLowerCase()}`;
+}
+
+function normalizePalette(palette: string[]): string[] {
+  return palette.map(normalizeHex);
 }
 
 interface AppState {
@@ -26,6 +22,8 @@ interface AppState {
   isPlaying: boolean;
   streamMode: boolean;
   loopMode: boolean;
+  autoMode: boolean;
+  autoMatchScore: number | null;
 
   vibeText: string;
   selectedModel: ModelChoice;
@@ -54,6 +52,8 @@ interface AppState {
   setPlaying: (playing: boolean) => void;
   setStreamMode: (mode: boolean) => void;
   setLoopMode: (loop: boolean) => void;
+  setAutoMode: (auto: boolean) => void;
+  setAutoMatchScore: (score: number | null) => void;
   setVibeText: (text: string) => void;
   setSelectedModel: (model: ModelChoice) => void;
   setCustomModelId: (id: string) => void;
@@ -61,6 +61,10 @@ interface AppState {
   updateConfig: (config: Record<string, unknown>) => void;
   updatePalette: (palette: string[]) => void;
   updateTitle: (title: string) => void;
+  commitSessionParams: (
+    sessionId: string,
+    data: { config: Record<string, unknown>; palette: string[]; title: string }
+  ) => void;
   addToPlaylist: (track: PlaylistTrack) => void;
   addPendingTrack: (vibe: string) => string;
   resolvePlaylistTrack: (id: string, data: Omit<PlaylistTrack, "id" | "vibe" | "status" | "duration">) => void;
@@ -78,34 +82,6 @@ interface AppState {
 
 const DEFAULT_PALETTE = ["#d4a574", "#8b6e55", "#c49670", "#0e0d0b", "#e8c9a0"];
 
-// Palette animation controller
-let animationFrame: number | null = null;
-function animatePalette() {
-  if (animationFrame) cancelAnimationFrame(animationFrame);
-
-  const step = () => {
-    const state = useStore.getState();
-    const current = state.activePalette;
-    const target = state.targetPalette;
-    let done = true;
-
-    const next = current.map((c, i) => {
-      const t = target[i] ?? c;
-      if (c === t) return c;
-      done = false;
-      return lerpColor(c, t, 0.06); // smooth ~60 frame transition
-    });
-
-    if (!done) {
-      useStore.setState({ activePalette: next });
-      animationFrame = requestAnimationFrame(step);
-    } else {
-      animationFrame = null;
-    }
-  };
-  animationFrame = requestAnimationFrame(step);
-}
-
 export const useStore = create<AppState>((set) => ({
   activeSessionId: null,
   activeTitle: "",
@@ -117,10 +93,12 @@ export const useStore = create<AppState>((set) => ({
   isPlaying: false,
   streamMode: localStorage.getItem("ls-stream-mode") === "true",
   loopMode: localStorage.getItem("ls-loop-mode") === "true",
+  autoMode: false,
+  autoMatchScore: null,
 
   vibeText: "",
   selectedModel: (localStorage.getItem("ls-model") as ModelChoice) || "fast",
-  customModelId: localStorage.getItem("ls-custom-model-id") || "gpt-5-nano-2025-08-07",
+  customModelId: localStorage.getItem("ls-custom-model-id") || "gpt-6-luna",
   providerApiKeys: {
     openai: localStorage.getItem("ls-api-key-openai") || "",
     anthropic: localStorage.getItem("ls-api-key-anthropic") || "",
@@ -139,15 +117,16 @@ export const useStore = create<AppState>((set) => ({
   generatingPhase: null,
 
   setActiveSession: (data) => {
+    const norm = normalizePalette(data.palette);
     set({
       activeSessionId: data.sessionId,
       activeTitle: data.title,
       activeJustification: data.justification,
-      targetPalette: data.palette,
+      activePalette: norm,
+      targetPalette: norm,
       activeConfig: data.config,
       activeVibe: data.vibe,
     });
-    animatePalette();
   },
 
   setPlaying: (playing) => set({ isPlaying: playing }),
@@ -157,8 +136,21 @@ export const useStore = create<AppState>((set) => ({
   },
   setLoopMode: (loop) => {
     localStorage.setItem("ls-loop-mode", String(loop));
-    set({ loopMode: loop });
+    set((state) => ({
+      loopMode: loop,
+      autoMode: loop ? false : state.autoMode,
+      autoMatchScore: loop ? null : state.autoMatchScore,
+    }));
   },
+  setAutoMode: (auto) => {
+    if (auto) localStorage.setItem("ls-loop-mode", "false");
+    set((state) => ({
+      autoMode: auto,
+      loopMode: auto ? false : state.loopMode,
+      autoMatchScore: auto ? state.autoMatchScore : null,
+    }));
+  },
+  setAutoMatchScore: (score) => set({ autoMatchScore: score }),
   setVibeText: (text) => set({ vibeText: text }),
   setSelectedModel: (model) => {
     localStorage.setItem("ls-model", model);
@@ -176,18 +168,41 @@ export const useStore = create<AppState>((set) => ({
   },
   updateConfig: (config) => set({ activeConfig: config }),
   updatePalette: (palette) => {
-    set({ targetPalette: palette });
-    animatePalette();
+    const norm = normalizePalette(palette);
+    set({ activePalette: norm, targetPalette: norm });
   },
   updateTitle: (title) => set({ activeTitle: title }),
+  commitSessionParams: (sessionId, data) => {
+    const norm = normalizePalette(data.palette);
+    set((state) => ({
+      activeConfig:
+        state.activeSessionId === sessionId ? data.config : state.activeConfig,
+      activePalette:
+        state.activeSessionId === sessionId ? norm : state.activePalette,
+      targetPalette:
+        state.activeSessionId === sessionId ? norm : state.targetPalette,
+      activeTitle:
+        state.activeSessionId === sessionId ? data.title : state.activeTitle,
+      playlist: state.playlist.map((track) =>
+        track.sessionId === sessionId
+          ? {
+              ...track,
+              config: data.config,
+              palette: norm,
+              title: data.title,
+            }
+          : track
+      ),
+    }));
+  },
 
   addToPlaylist: (track) =>
-    set((state) => ({ playlist: [track, ...state.playlist] })),
+    set((state) => ({ playlist: [...state.playlist, track] })),
 
   addPendingTrack: (vibe) => {
     const id = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     set((state) => ({
-      playlist: [{
+      playlist: [...state.playlist, {
         id,
         sessionId: "",
         vibe,
@@ -197,7 +212,7 @@ export const useStore = create<AppState>((set) => ({
         config: {},
         duration: 30,
         status: "pending" as const,
-      }, ...state.playlist],
+      }],
     }));
     return id;
   },

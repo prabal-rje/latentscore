@@ -1,0 +1,10 @@
+{
+  "dims": 384,
+  "embeddings": "embeddings.int8.bin",
+  "embeddings_sha256": "35910c94b47dd2fe",
+  "metadata": "metadata.json",
+  "model": "Xenova/all-MiniLM-L6-v2",
+  "rows": 14035,
+  "scales": "scales.f32.bin",
+  "version": 1
+}

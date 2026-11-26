@@ -1,0 +1,68 @@
+server {
+    listen ${PORT};
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    gzip on;
+    gzip_vary on;
+    gzip_comp_level 6;
+    gzip_min_length 256;
+    gzip_types
+        text/plain
+        text/css
+        text/javascript
+        text/x-python
+        application/javascript
+        application/json
+        application/octet-stream
+        application/wasm
+        image/svg+xml;
+
+    # Keep Railway healthchecks green if /api/health is configured.
+    location = /api/health {
+        default_type application/json;
+        add_header Cache-Control "no-store";
+        return 200 '{"status":"ok","mode":"browser"}';
+    }
+
+    # Content-hashed Vite bundles: long-lived immutable cache, never SPA fallback.
+    location ^~ /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+
+    # Pixel art and grain sprites.
+    location ^~ /art/ {
+        add_header Cache-Control "public, max-age=604800";
+        try_files $uri =404;
+    }
+
+    # Mutable browser-engine manifests and Pyodide synth script: always revalidate.
+    location = /data/manifest.json {
+        add_header Cache-Control "public, max-age=0, must-revalidate";
+        try_files $uri =404;
+    }
+
+    location = /data/presets.json {
+        add_header Cache-Control "public, max-age=0, must-revalidate";
+        try_files $uri =404;
+    }
+
+    location ^~ /py/ {
+        add_header Cache-Control "public, max-age=0, must-revalidate";
+        try_files $uri =404;
+    }
+
+    # Versioned binary embedding index and metadata.
+    location ^~ /data/ {
+        add_header Cache-Control "public, max-age=604800";
+        try_files $uri =404;
+    }
+
+    # SPA routes (/ and /demo).
+    location / {
+        add_header Cache-Control "public, max-age=0, must-revalidate";
+        try_files $uri $uri/ /index.html;
+    }
+}

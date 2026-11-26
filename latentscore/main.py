@@ -625,6 +625,29 @@ class _ChunkCache:
         return chunk
 
 
+def _fold_loop_seam(buffer: NDArray[Any], base_samples: int) -> NDArray[Any]:
+    """Fold rendered tail onto buffer head for seamless loop wrap without entry jump."""
+    if buffer.size <= base_samples or base_samples <= 0:
+        return buffer
+    tail_n = min(buffer.size - base_samples, base_samples // 2)
+    if tail_n < 8:
+        return buffer[:base_samples]
+    out: NDArray[np.float64] = np.array(buffer[:base_samples], dtype=np.float64, copy=True)
+    tail: NDArray[np.float64] = np.asarray(
+        buffer[base_samples : base_samples + tail_n], dtype=np.float64
+    )
+    u = np.linspace(0.0, np.pi, tail_n, dtype=np.float64)
+    fade_in = 0.5 * (1.0 - np.cos(u))
+    # Taper tail's initial 8 ms to zero so the very first sample remains click-free.
+    edge_n = min(tail_n // 4, max(2, int(round(0.008 * SAMPLE_RATE))))
+    if edge_n >= 2:
+        taper = 0.5 * (1.0 - np.cos(np.linspace(0.0, np.pi, edge_n, dtype=np.float64)))
+        tail = tail.copy()
+        tail[:edge_n] *= taper
+    out[:tail_n] = out[:tail_n] * fade_in + tail * (1.0 - fade_in)
+    return np.asarray(out, dtype=buffer.dtype)
+
+
 async def _build_chunk_cache(
     config_item: _MusicConfigInternal,
     *,
@@ -635,9 +658,13 @@ async def _build_chunk_cache(
     synth = _to_synth_config(config_item)
     pattern = pattern_seconds or _default_pattern_seconds(synth, chunk_seconds)
     pattern = max(pattern, chunk_seconds)
-    buffer: NDArray[Any] = await asyncio.to_thread(
-        lambda: assemble(synth, pattern, normalize=False, t_offset=t_offset)
+    base_samples = max(1, int(round(pattern * SAMPLE_RATE)))
+    tail_seconds = min(0.8, pattern * 0.12)
+    render_seconds = pattern + tail_seconds if tail_seconds >= 0.02 else pattern
+    raw_buffer: NDArray[Any] = await asyncio.to_thread(
+        lambda: assemble(synth, render_seconds, normalize=False, t_offset=t_offset)
     )
+    buffer = _fold_loop_seam(raw_buffer, base_samples)
     chunk_samples = max(1, int(round(chunk_seconds * SAMPLE_RATE)))
     return _ChunkCache(buffer=buffer, chunk_samples=chunk_samples)
 
@@ -1073,15 +1100,16 @@ async def _render_chunk(
     chunk_seconds: float,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    return await asyncio.to_thread(
-        lambda: ensure_audio_contract(
-            assemble(
-                _to_synth_config(config_item), chunk_seconds, normalize=False, t_offset=t_offset
-            ),
-            sample_rate=SAMPLE_RATE,
-            check_peak=False,
+    def _build() -> FloatArray:
+        raw = assemble(
+            _to_synth_config(config_item),
+            chunk_seconds,
+            normalize=False,
+            t_offset=t_offset,
         )
-    )
+        return ensure_audio_contract(raw, sample_rate=SAMPLE_RATE, check_peak=False)
+
+    return await asyncio.to_thread(_build)
 
 
 @dataclass(slots=True)

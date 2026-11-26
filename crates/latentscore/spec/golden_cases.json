@@ -1,0 +1,88 @@
+{
+  "spec_version": 1,
+  "sample_rate": 44100,
+  "tolerances": {
+    "max_sample_jump": 0.15,
+    "max_abs_dc": 0.005,
+    "max_peak": 1.0,
+    "min_audible_peak": 0.05,
+    "humanize_hf_ratio_above_4khz": 1e-5,
+    "hall_reverb_max_tone_peak": 0.55,
+    "seam_max_diff": 0.12
+  },
+  "adsr_cases": [
+    { "name": "short_note_exceeding_budget", "samples": 4410, "attack": 0.5, "decay": 0.4, "sustain": 0.8, "release": 1.2 },
+    { "name": "standard_pad", "samples": 44100, "attack": 0.2, "decay": 0.2, "sustain": 0.7, "release": 0.4 }
+  ],
+  "render_cases": [
+    {
+      "name": "deep_ocean",
+      "seed": 42,
+      "duration": 4.0,
+      "config": {
+        "tempo": "very_slow",
+        "root": "d",
+        "mode": "dorian",
+        "brightness": "dark",
+        "space": "vast",
+        "density": 5,
+        "bass": "drone",
+        "pad": "warm_slow",
+        "melody": "minimal",
+        "rhythm": "none",
+        "texture": "breath",
+        "accent": "bells",
+        "motion": "slow",
+        "attack": "soft",
+        "stereo": "wide",
+        "depth": true,
+        "echo": "heavy",
+        "human": "natural",
+        "grain": "warm"
+      }
+    },
+    {
+      "name": "neon_city",
+      "seed": 7,
+      "duration": 4.0,
+      "config": {
+        "tempo": "fast",
+        "root": "a",
+        "mode": "minor",
+        "brightness": "bright",
+        "space": "medium",
+        "density": 6,
+        "bass": "pulsing",
+        "pad": "cinematic",
+        "melody": "arp_melody",
+        "rhythm": "electronic",
+        "texture": "shimmer",
+        "accent": "pluck",
+        "motion": "fast",
+        "attack": "sharp",
+        "stereo": "wide",
+        "depth": true,
+        "echo": "medium",
+        "human": "tight",
+        "grain": "gritty"
+      }
+    },
+    {
+      "name": "procedural_continuity",
+      "seed": 123,
+      "duration": 6.0,
+      "t_offset_second": 6.0,
+      "config": {
+        "tempo": "medium",
+        "root": "c",
+        "mode": "minor",
+        "brightness": "medium",
+        "space": "large",
+        "density": 6,
+        "melody_engine": "procedural",
+        "chord_change_bars": 1,
+        "texture": "shimmer"
+      }
+    }
+  ]
+}

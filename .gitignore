@@ -115,3 +115,11 @@ gemma-3-270m-it/
 
 # --- Local install-from-scratch test harness (Docker + conda) ---
 .install-test/
+
+# --- Multi-language SDK build artifacts ---
+packages/latentscore/node_modules/
+packages/latentscore/dist/
+crates/latentscore/target/
+crates/latentscore/Cargo.lock
+demo/frontend/node_modules/
+demo/frontend/dist/

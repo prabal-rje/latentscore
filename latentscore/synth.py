@@ -13,11 +13,12 @@ Architecture:
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType
-from typing import Any, Callable, TypeAlias, cast
+from typing import Any, Callable, Literal, TypeAlias
 
 import numpy as np
 import soundfile as sf  # type: ignore[import]
@@ -137,6 +138,68 @@ def freq_from_note(root: RootNote, semitones: int = 0, octave: int = 4) -> float
     return base_freq * (2**octave_shift) * (2 ** (semitones / 12))
 
 
+_REVERB_TAPS_SEC: tuple[tuple[float, float], ...] = (
+    (0.0233, 0.24),
+    (0.0317, -0.22),
+    (0.0431, 0.20),
+    (0.0571, -0.18),
+    (0.0733, 0.16),
+    (0.0947, -0.14),
+    (0.1181, 0.12),
+    (0.1489, -0.10),
+    (0.1847, 0.085),
+    (0.2269, -0.07),
+    (0.2741, 0.055),
+    (0.3313, -0.04),
+)
+
+_DIFFUSION_TAPS_SEC: tuple[tuple[float, float], ...] = (
+    (0.0073, 0.35),
+    (0.0131, -0.28),
+    (0.0197, 0.22),
+)
+
+
+def _sample_count(duration: float, sr: int) -> int:
+    """Compute exact non-negative sample count for duration at sample rate."""
+    return max(0, int(sr * duration))
+
+
+def _time_axis(num_samples: int, sr: int, t_offset: float = 0.0) -> FloatArray:
+    """Build exact integer-indexed sample timestamps without endpoint stretch."""
+    if num_samples <= 0:
+        return np.empty(0, dtype=np.float64)
+    return t_offset + (np.arange(num_samples, dtype=np.float64) / float(sr))
+
+
+def _match_length(signal: FloatArray, target_len: int) -> FloatArray:
+    """Trim or zero-pad a 1-D signal to exact target length."""
+    if len(signal) > target_len:
+        return signal[:target_len]
+    if len(signal) < target_len:
+        return np.pad(signal, (0, target_len - len(signal)))
+    return signal
+
+
+def _poly_blep_2pt(phase: FloatArray, dt: float) -> FloatArray:
+    """Evaluate verified 2-point PolyBLEP residual on wrapped phase in [0, 1)."""
+    corr = np.zeros_like(phase, dtype=np.float64)
+    if dt <= 0.0 or dt >= 0.5:
+        return corr
+
+    m1 = phase < dt
+    if np.any(m1):
+        u1 = phase[m1] / dt
+        corr[m1] = u1 + u1 - u1 * u1 - 1.0
+
+    m2 = phase > (1.0 - dt)
+    if np.any(m2):
+        u2 = (phase[m2] - 1.0) / dt
+        corr[m2] = u2 * u2 + u2 + u2 + 1.0
+
+    return corr
+
+
 def generate_sine(
     freq: float,
     duration: float,
@@ -144,9 +207,12 @@ def generate_sine(
     amp: float = 0.3,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Generate sine wave with optional time offset for phase continuity."""
-    t = np.linspace(t_offset, t_offset + duration, int(sr * duration), False)
-    return amp * np.sin(2 * np.pi * freq * t)
+    """Generate phase-accurate sine wave on an integer sample clock."""
+    n = _sample_count(duration, sr)
+    if n == 0:
+        return np.empty(0, dtype=np.float64)
+    t = _time_axis(n, sr, t_offset)
+    return np.asarray(amp * np.sin(2.0 * math.pi * freq * t), dtype=np.float64)
 
 
 def generate_triangle(
@@ -156,9 +222,24 @@ def generate_triangle(
     amp: float = 0.3,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Generate triangle wave with optional time offset for phase continuity."""
-    t = np.linspace(t_offset, t_offset + duration, int(sr * duration), False)
-    return amp * 2 * np.abs(2 * (t * freq - np.floor(t * freq + 0.5))) - amp
+    """Generate band-limited triangle wave via odd harmonics below Nyquist."""
+    n = _sample_count(duration, sr)
+    if n == 0 or freq <= 0.0:
+        return np.zeros(n, dtype=np.float64)
+
+    max_harmonic = min(15, int((sr * 0.45) // freq))
+    if max_harmonic < 1:
+        return np.zeros(n, dtype=np.float64)
+
+    t = _time_axis(n, sr, t_offset)
+    out = np.zeros(n, dtype=np.float64)
+    two_pi_f_t = 2.0 * math.pi * freq * t
+    scale = (8.0 / (math.pi * math.pi)) * amp
+    sign = 1.0
+    for h in range(1, max_harmonic + 1, 2):
+        out += (sign / float(h * h)) * np.sin(h * two_pi_f_t)
+        sign = -sign
+    return np.asarray(out * scale, dtype=np.float64)
 
 
 def generate_sawtooth(
@@ -169,63 +250,26 @@ def generate_sawtooth(
     oversample: int = 2,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Generate anti-aliased sawtooth using 4-point PolyBLEP + oversampling.
+    """Generate anti-aliased sawtooth via verified 2-point PolyBLEP + FIR decimate."""
+    n = _sample_count(duration, sr)
+    if n == 0 or freq <= 0.0:
+        return np.zeros(n, dtype=np.float64)
 
-    Note on streaming/chunk boundaries: The zero-phase decimation filter causes
-    small transients at chunk boundaries when chunks are rendered independently.
-    These artifacts are typically inaudible for ambient music due to:
-    - Layering with other instruments
-    - Reverb and delay effects
-    - The nature of slowly-evolving ambient textures
+    os_factor = max(1, int(oversample))
+    sr_high = sr * os_factor
+    dt = freq / float(sr_high)
+    if dt >= 0.45:
+        return generate_sine(freq, duration, sr, amp, t_offset)
 
-    For perfect phase continuity, consider using sine/triangle oscillators
-    which don't require decimation.
-    """
-
-    num_samples = int(sr * duration)
-    sr_high = sr * oversample
-    num_samples_high = num_samples * oversample  # <- exact multiple
-    dt = freq / sr_high
-
-    # Phase accumulator: start from t_offset, go for duration
-    t = np.linspace(t_offset * freq, (t_offset + duration) * freq, num_samples_high, endpoint=False)
-    t = t % 1.0
-    naive = 2.0 * t - 1.0
-    correction = np.zeros(num_samples_high)
-
-    # 4-point PolyBLEP correction
-    # Region 1: 0 <= t < dt
-    m1 = t < dt
-    t1 = t[m1] / dt
-    correction[m1] = t1 * t1 * (2 * t1 - 3) + 1
-
-    # Region 2: dt <= t < 2*dt
-    m2 = (t >= dt) & (t < 2 * dt)
-    t2 = t[m2] / dt - 1
-    correction[m2] = t2 * t2 * (2 * t2 - 3)
-
-    # Region 3: 1-2*dt < t <= 1-dt
-    m3 = (t > 1 - 2 * dt) & (t <= 1 - dt)
-    t3 = (t[m3] - 1) / dt + 1
-    correction[m3] = t3 * t3 * (2 * t3 + 3)
-
-    # Region 4: 1-dt < t < 1
-    m4 = t > 1 - dt
-    t4 = (t[m4] - 1) / dt
-    correction[m4] = t4 * t4 * (2 * t4 + 3) + 1
-
-    signal_high = naive - correction
-    signal = decimate(signal_high, oversample, ftype="fir", zero_phase=True)
-
-    # Ensure exact output length
-    if len(signal) > num_samples:
-        signal = signal[:num_samples]
-    elif len(signal) < num_samples:
-        signal = np.pad(signal, (0, num_samples - len(signal)))
-
-    output = amp * signal
-    assert isinstance(output, np.ndarray)
-    return cast(FloatArray, output)
+    t_high = _time_axis(n * os_factor, sr_high, t_offset)
+    phase = np.mod(t_high * freq, 1.0)
+    signal_high = (2.0 * phase - 1.0) - _poly_blep_2pt(phase, dt)
+    signal = (
+        decimate(signal_high, os_factor, ftype="fir", zero_phase=True)
+        if os_factor > 1
+        else signal_high
+    )
+    return np.asarray(amp * _match_length(np.asarray(signal, dtype=np.float64), n), dtype=np.float64)
 
 
 def generate_square(
@@ -236,72 +280,42 @@ def generate_square(
     oversample: int = 2,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Generate anti-aliased square wave using 4-point PolyBLEP + oversampling.
+    """Generate anti-aliased square wave via verified 2-point PolyBLEP + FIR decimate."""
+    n = _sample_count(duration, sr)
+    if n == 0 or freq <= 0.0:
+        return np.zeros(n, dtype=np.float64)
 
-    Note: Same streaming caveat as generate_sawtooth - see docstring there.
-    """
+    os_factor = max(1, int(oversample))
+    sr_high = sr * os_factor
+    dt = freq / float(sr_high)
+    if dt >= 0.45:
+        return generate_sine(freq, duration, sr, amp, t_offset)
 
-    num_samples = int(sr * duration)
-    sr_high = sr * oversample
-    num_samples_high = num_samples * oversample  # <- exact multiple
-    dt = freq / sr_high
-
-    # Phase accumulator: start from t_offset, go for duration
-    t = np.linspace(t_offset * freq, (t_offset + duration) * freq, num_samples_high, endpoint=False)
-    t = t % 1.0
-    naive = np.where(t < 0.5, 1.0, -1.0)
-    correction = np.zeros(num_samples_high)
-
-    def apply_4pt_blep(phase: FloatArray, corr: FloatArray, sign: float) -> None:
-        """Apply 4-point PolyBLEP correction at discontinuity."""
-        # Region 1: 0 <= phase < dt
-        m1 = phase < dt
-        t1 = phase[m1] / dt
-        corr[m1] += sign * (t1 * t1 * (2 * t1 - 3) + 1)
-
-        # Region 2: dt <= phase < 2*dt
-        m2 = (phase >= dt) & (phase < 2 * dt)
-        t2 = phase[m2] / dt - 1
-        corr[m2] += sign * (t2 * t2 * (2 * t2 - 3))
-
-        # Region 3: 1-2*dt < phase <= 1-dt
-        m3 = (phase > 1 - 2 * dt) & (phase <= 1 - dt)
-        t3 = (phase[m3] - 1) / dt + 1
-        corr[m3] += sign * (t3 * t3 * (2 * t3 + 3))
-
-        # Region 4: 1-dt < phase < 1
-        m4 = phase > 1 - dt
-        t4 = (phase[m4] - 1) / dt
-        corr[m4] += sign * (t4 * t4 * (2 * t4 + 3) + 1)
-
-    # Rising edge at phase = 0
-    assert isinstance(t, np.ndarray)
-    t_array = cast(FloatArray, t)
-    apply_4pt_blep(t_array, correction, 1.0)
-
-    # Falling edge at phase = 0.5
-    t_shifted = (t + 0.5) % 1.0
-    assert isinstance(t_shifted, np.ndarray)
-    t_shifted_array = cast(FloatArray, t_shifted)
-    apply_4pt_blep(t_shifted_array, correction, -1.0)
-
-    signal_high = naive + correction
-    signal = decimate(signal_high, oversample, ftype="fir", zero_phase=True)
-
-    # Ensure exact output length
-    if len(signal) > num_samples:
-        signal = signal[:num_samples]
-    elif len(signal) < num_samples:
-        signal = np.pad(signal, (0, num_samples - len(signal)))
-
-    output = amp * signal
-    assert isinstance(output, np.ndarray)
-    return cast(FloatArray, output)
+    t_high = _time_axis(n * os_factor, sr_high, t_offset)
+    phase = np.mod(t_high * freq, 1.0)
+    naive = np.where(phase < 0.5, 1.0, -1.0)
+    corr = _poly_blep_2pt(phase, dt) - _poly_blep_2pt(np.mod(phase + 0.5, 1.0), dt)
+    signal_high = naive + corr
+    signal = (
+        decimate(signal_high, os_factor, ftype="fir", zero_phase=True)
+        if os_factor > 1
+        else signal_high
+    )
+    return np.asarray(amp * _match_length(np.asarray(signal, dtype=np.float64), n), dtype=np.float64)
 
 
-def generate_noise(duration: float, sr: int = SAMPLE_RATE, amp: float = 0.1) -> FloatArray:
-    """Generate white noise."""
-    return amp * np.random.randn(int(sr * duration))
+def generate_noise(
+    duration: float,
+    sr: int = SAMPLE_RATE,
+    amp: float = 0.1,
+    rng: np.random.Generator | None = None,
+) -> FloatArray:
+    """Generate white noise using explicit RNG when supplied."""
+    n = _sample_count(duration, sr)
+    if n == 0:
+        return np.empty(0, dtype=np.float64)
+    samples = rng.standard_normal(n) if rng is not None else np.random.randn(n)
+    return np.asarray(amp * samples, dtype=np.float64)
 
 
 # NOTE: sawtooth/square have an extra 'oversample' parameter, so types don't
@@ -316,6 +330,45 @@ OSC_FUNCTIONS: Mapping[str, OscFn] = MappingProxyType(  # type: ignore[assignmen
 )
 
 
+def _raised_cosine_ramp(length: int, start: float, end: float) -> FloatArray:
+    """Build a C1-smooth raised-cosine ramp from start to end."""
+    if length <= 0:
+        return np.empty(0, dtype=np.float64)
+    if length == 1:
+        return np.array([end], dtype=np.float64)
+    u = np.linspace(0.0, math.pi, length, dtype=np.float64)
+    curve = 0.5 * (1.0 - np.cos(u))
+    return np.asarray(start + (end - start) * curve, dtype=np.float64)
+
+
+def _budget_adsr_samples(
+    total: int,
+    attack: float,
+    decay: float,
+    release: float,
+    sr: int,
+) -> tuple[int, int, int, int]:
+    """Fit attack, decay, sustain, and release inside total without release truncation."""
+    min_a = min(max(1, int(round(0.005 * sr))), max(1, total // 4))
+    min_r = min(max(1, int(round(0.018 * sr))), max(1, total // 3))
+
+    a_req = max(min_a, int(round(max(attack, 0.005) * sr)))
+    d_req = max(0, int(round(max(decay, 0.0) * sr)))
+    r_req = max(min_r, int(round(max(release, 0.018) * sr)))
+
+    stage_sum = a_req + d_req + r_req
+    if stage_sum <= total:
+        return a_req, d_req, total - stage_sum, r_req
+
+    scale = float(total) / float(stage_sum)
+    r_len = min(max(min_r, int(round(r_req * scale))), max(1, total - min_a))
+    rem = total - r_len
+    ad_sum = max(1, a_req + d_req)
+    a_len = min(max(min_a, int(round(rem * (a_req / float(ad_sum))))), rem)
+    d_len = max(0, rem - a_len)
+    return a_len, d_len, 0, r_len
+
+
 def apply_adsr(
     signal: FloatArray,
     attack: float,
@@ -324,44 +377,102 @@ def apply_adsr(
     release: float,
     sr: int = SAMPLE_RATE,
 ) -> FloatArray:
-    """Apply ADSR envelope to signal."""
-    # Minimum times to prevent clicks (5ms attack, 10ms release)
-    attack = max(attack, 0.005)
-    release = max(release, 0.01)
-
+    """Apply click-free raised-cosine ADSR guaranteed to start and end at zero."""
     total = len(signal)
-    a_samples = int(attack * sr)
-    d_samples = int(decay * sr)
-    r_samples = int(release * sr)
-    s_samples = max(0, total - a_samples - d_samples - r_samples)
+    if total == 0:
+        return np.empty(0, dtype=np.float64)
+    if total == 1:
+        return np.zeros(1, dtype=np.float64)
 
-    envelope = np.concatenate(
-        (
-            np.linspace(0, 1, max(1, a_samples)),
-            np.linspace(1, sustain, max(1, d_samples)),
-            np.ones(max(1, s_samples)) * sustain,
-            np.linspace(sustain, 0, max(1, r_samples)),
-        )
+    sus = float(np.clip(sustain, 0.0, 1.0))
+    a_len, d_len, s_len, r_len = _budget_adsr_samples(total, attack, decay, release, sr)
+
+    parts: list[FloatArray] = [_raised_cosine_ramp(a_len, 0.0, 1.0)]
+    if d_len > 0:
+        parts.append(_raised_cosine_ramp(d_len, 1.0, sus))
+    if s_len > 0:
+        parts.append(np.full(s_len, sus, dtype=np.float64))
+
+    release_start = sus if (d_len > 0 or s_len > 0) else 1.0
+    parts.append(_raised_cosine_ramp(r_len, release_start, 0.0))
+
+    env = _match_length(np.concatenate(parts), total)
+    env[0] = 0.0
+    env[-1] = 0.0
+    return np.asarray(signal * env, dtype=np.float64)
+
+
+def soft_limit(signal: FloatArray, ceiling: float = 0.92) -> FloatArray:
+    """Apply transparent soft-knee tanh ceiling so sums never hard-clip."""
+    if signal.size == 0 or ceiling <= 0.0:
+        return signal
+    knee = ceiling * 0.78
+    abs_x = np.abs(signal)
+    if float(np.max(abs_x)) <= knee:
+        return signal
+    excess = np.maximum(0.0, abs_x - knee)
+    span = max(1e-6, ceiling - knee)
+    compressed = knee + span * np.tanh(excess / span)
+    return np.asarray(
+        np.sign(signal) * np.where(abs_x > knee, compressed, abs_x),
+        dtype=np.float64,
     )
 
-    # Match length
-    if len(envelope) < total:
-        envelope = np.pad(envelope, (0, total - len(envelope)))
-    else:
-        envelope = envelope[:total]
 
-    return signal * envelope
+def soft_fade_edges(
+    signal: FloatArray,
+    fade_in_sec: float = 0.0,
+    fade_out_sec: float = 0.0,
+    sr: int = SAMPLE_RATE,
+) -> FloatArray:
+    """Apply raised-cosine fade-in and fade-out at buffer boundaries."""
+    n = len(signal)
+    if n < 2:
+        return signal.copy()
+    out = signal.copy()
+    in_n = min(n // 2, max(0, int(round(fade_in_sec * sr))))
+    out_n = min(n - in_n, max(0, int(round(fade_out_sec * sr))))
+    if in_n >= 2:
+        out[:in_n] *= _raised_cosine_ramp(in_n, 0.0, 1.0)
+    if out_n >= 2:
+        out[-out_n:] *= _raised_cosine_ramp(out_n, 1.0, 0.0)
+    return out
 
 
-def _quantize(value: float, step: float = 0.001) -> float:
-    return round(value / step) * step
+def fade_into_nothingness(
+    signal: FloatArray,
+    fade_sec: float = 0.35,
+    sr: int = SAMPLE_RATE,
+) -> FloatArray:
+    """Apply a smooth cubic fade-out (1 - u)^3 ending at exact zero."""
+    n = len(signal)
+    if n < 2 or fade_sec <= 0.0:
+        return signal.copy()
+    out = signal.copy()
+    fade_n = min(n, max(2, int(round(fade_sec * sr))))
+    u = np.linspace(0.0, 1.0, fade_n, dtype=np.float64)
+    curve = (1.0 - u) ** 3
+    curve[-1] = 0.0
+    out[-fade_n:] *= curve
+    return out
+
+
+def compute_bar_aligned_duration(tempo: float, target_seconds: float = 16.0) -> float:
+    """Snap target_seconds to the nearest 4-bar phrase boundary for tempo in [0, 1]."""
+    clamped = max(0.0, min(1.0, float(tempo)))
+    bpm = 55.0 + 110.0 * clamped
+    bar_sec = 4.0 * (60.0 / bpm)
+    phrase_sec = 4.0 * bar_sec
+    phrases = max(1, int(round(max(bar_sec, target_seconds) / phrase_sec)))
+    return phrases * phrase_sec
 
 
 @lru_cache(maxsize=512)
 def _butter_cached(
     kind: str, normalized_cutoff: float
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    coeffs = butter(2, normalized_cutoff, btype=kind, output="ba")
+    btype: Literal["low", "high"] = "low" if kind == "low" else "high"
+    coeffs = butter(2, normalized_cutoff, btype=btype, output="ba")
     assert isinstance(coeffs, tuple)
     assert len(coeffs) == 2
     b_raw, a_raw = coeffs
@@ -373,19 +484,23 @@ def _butter_cached(
 
 
 def apply_lowpass(signal: FloatArray, cutoff: float, sr: int = SAMPLE_RATE) -> FloatArray:
-    """Apply lowpass filter (causal, analog-style)."""
-    nyquist = sr / 2
-    normalized = min(max(cutoff / nyquist, 0.001), 0.99)
-    b, a = _butter_cached("low", _quantize(normalized))
+    """Apply 2nd-order Butterworth lowpass filter with fine cutoff precision."""
+    if signal.size == 0:
+        return np.empty(0, dtype=np.float64)
+    nyquist = sr * 0.5
+    normalized = min(max(cutoff / nyquist, 0.0005), 0.99)
+    b, a = _butter_cached("low", round(normalized, 5))
     filtered = lfilter(b, a, signal)
     return np.asarray(filtered, dtype=np.float64)
 
 
 def apply_highpass(signal: FloatArray, cutoff: float, sr: int = SAMPLE_RATE) -> FloatArray:
-    """Apply highpass filter (causal, analog-style)."""
-    nyquist = sr / 2
-    normalized = min(max(cutoff / nyquist, 0.001), 0.99)
-    b, a = _butter_cached("high", _quantize(normalized))
+    """Apply 2nd-order Butterworth highpass filter with fine cutoff precision."""
+    if signal.size == 0:
+        return np.empty(0, dtype=np.float64)
+    nyquist = sr * 0.5
+    normalized = min(max(cutoff / nyquist, 0.0005), 0.99)
+    b, a = _butter_cached("high", round(normalized, 5))
     filtered = lfilter(b, a, signal)
     return np.asarray(filtered, dtype=np.float64)
 
@@ -393,93 +508,133 @@ def apply_highpass(signal: FloatArray, cutoff: float, sr: int = SAMPLE_RATE) -> 
 def apply_delay(
     signal: FloatArray, delay_time: float, feedback: float, wet: float, sr: int = SAMPLE_RATE
 ) -> FloatArray:
-    """Apply delay effect."""
-    delay_samples = int(delay_time * sr)
-    output = signal.copy()
+    """Apply stable lowpass-damped tape-style delay (feedback strictly <= 0.72)."""
+    n = len(signal)
+    if n == 0 or wet <= 0.0 or delay_time <= 0.0:
+        return signal
 
-    for i in range(1, 5):  # 5 delay taps
-        offset = delay_samples * i
-        if 0 < offset < len(signal):
-            output[offset:] += signal[:-offset] * (feedback**i) * wet
+    safe_fb = float(np.clip(feedback, 0.0, 0.72))
+    safe_wet = float(np.clip(wet, 0.0, 0.55))
+    delay_samples = int(round(delay_time * sr))
+    if delay_samples <= 0 or delay_samples >= n:
+        return signal
 
-    return output
+    wet_buf = np.zeros(n, dtype=np.float64)
+    tap_source = apply_lowpass(signal, 2800.0, sr)
+    for tap_idx in range(1, 6):
+        offset = delay_samples * tap_idx
+        if offset >= n:
+            break
+        gain = (safe_fb**tap_idx) * safe_wet
+        if gain < 0.005:
+            break
+        wet_buf[offset:] += tap_source[:-offset] * gain
+
+    return np.asarray(signal + wet_buf, dtype=np.float64)
 
 
 def apply_reverb(signal: FloatArray, room: float, size: float, sr: int = SAMPLE_RATE) -> FloatArray:
-    """Simple reverb via multiple delays."""
-    output = signal.copy()
+    """Apply diffused, lowpass-damped ambient reverb without metallic comb ringing."""
+    n = len(signal)
+    safe_room = float(np.clip(room, 0.0, 1.0))
+    safe_size = float(np.clip(size, 0.0, 1.0))
+    if n == 0 or safe_room <= 0.01 or safe_size <= 0.01:
+        return signal
 
-    # Multiple delay lines at prime-ish intervals (tuple)
-    delays = (0.029, 0.037, 0.041, 0.053, 0.067)
+    diffused = signal.copy()
+    for d_sec, d_gain in _DIFFUSION_TAPS_SEC:
+        off = int(round(d_sec * sr))
+        if 0 < off < n:
+            diffused[off:] += signal[:-off] * d_gain
 
-    for i, delay in enumerate(delays):
-        delay_samples = int(delay * size * sr)
-        if 0 < delay_samples < len(signal):
-            output[delay_samples:] += signal[:-delay_samples] * room * (0.7**i)
+    size_scale = 0.45 + 0.90 * safe_size
+    wet = np.zeros(n, dtype=np.float64)
+    for t_sec, t_gain in _REVERB_TAPS_SEC:
+        off = int(round(t_sec * size_scale * sr))
+        if 0 < off < n:
+            wet[off:] += diffused[:-off] * t_gain
 
-    return output
+    damp_hz = 4200.0 - 2000.0 * safe_size
+    wet = apply_lowpass(wet, damp_hz, sr)
+    wet_mix = safe_room * 0.48
+    dry_mix = 1.0 - safe_room * 0.16
+    return np.asarray(signal * dry_mix + wet * wet_mix, dtype=np.float64)
 
 
 def apply_stereo_width(signal: FloatArray, width: float, sr: int = SAMPLE_RATE) -> FloatArray:
-    """Apply a subtle micro-delay to simulate stereo width while staying mono."""
-    width = float(np.clip(width, 0.0, 1.0))
-    if width <= 0.0 or signal.size == 0:
+    """Apply subtle high-passed diffused micro-reflections without low-end comb filtering."""
+    safe_width = float(np.clip(width, 0.0, 1.0))
+    n = len(signal)
+    if safe_width <= 0.0 or n < 16:
         return signal
 
-    min_delay_sec = 0.001
-    max_delay_sec = 0.01
-    mix_max = 0.12
+    air = apply_highpass(signal, 320.0, sr)
+    wet = np.zeros(n, dtype=np.float64)
+    for delay_sec, gain in ((0.0097, 0.055), (0.0153, -0.042)):
+        off = int(round(delay_sec * sr))
+        if 0 < off < n:
+            wet[off:] += air[:-off] * (gain * safe_width)
+    return np.asarray(signal + wet, dtype=np.float64)
 
-    delay_time = min_delay_sec + (max_delay_sec - min_delay_sec) * width
-    delay_samples = int(delay_time * sr)
-    if delay_samples <= 0 or delay_samples >= len(signal):
+
+def generate_lfo(
+    duration: float,
+    rate: float,
+    sr: int = SAMPLE_RATE,
+    t_offset: float = 0.0,
+) -> FloatArray:
+    """Generate continuous phase-accurate LFO in [0, 1]."""
+    n = _sample_count(duration, sr)
+    if n == 0:
+        return np.empty(0, dtype=np.float64)
+    t = _time_axis(n, sr, t_offset)
+    return np.asarray(0.5 + 0.5 * np.sin(2.0 * math.pi * rate * t), dtype=np.float64)
+
+
+def apply_humanize(
+    signal: FloatArray,
+    amount: float,
+    sr: int = SAMPLE_RATE,
+    rng: np.random.Generator | None = None,
+) -> FloatArray:
+    """Apply smooth sub-2 Hz organic gain breathing with zero high-frequency hiss."""
+    n = len(signal)
+    if amount <= 0.0 or n < 4:
         return signal
 
-    mix = mix_max * width
-    delayed = np.zeros_like(signal)
-    delayed[delay_samples:] = signal[:-delay_samples]
-    output = signal * (1.0 - mix) + delayed * mix
-    return output
+    depth = float(np.clip(amount, 0.0, 1.0)) * 0.075
+    num_knots = max(3, int(round((n / float(sr)) * 1.4)) + 2)
+    knots = (
+        rng.normal(0.0, depth, size=num_knots)
+        if rng is not None
+        else np.random.randn(num_knots) * depth
+    )
+    knots = np.clip(knots, -0.09, 0.09)
 
-
-def generate_lfo(duration: float, rate: float, sr: int = SAMPLE_RATE) -> FloatArray:
-    """Generate LFO signal (0 to 1 range)."""
-    t = np.linspace(0, duration, int(sr * duration), False)
-    return 0.5 + 0.5 * np.sin(2 * np.pi * rate * t)
-
-
-def apply_humanize(signal: FloatArray, amount: float, sr: int = SAMPLE_RATE) -> FloatArray:
-    """Apply subtle timing/amplitude humanization."""
-    if amount <= 0:
-        return signal
-
-    # Subtle amplitude variation
-    amp_lfo = 1.0 + (np.random.randn(len(signal)) * amount * 0.1)
-    amp_lfo = np.clip(amp_lfo, 0.9, 1.1)
-
-    return signal * amp_lfo
+    knot_pos = np.linspace(0.0, float(num_knots - 1), n, dtype=np.float64)
+    idx0 = np.minimum(knot_pos.astype(np.int64), num_knots - 2)
+    frac = knot_pos - idx0
+    smooth = 0.5 * (1.0 - np.cos(math.pi * frac))
+    drift = knots[idx0] * (1.0 - smooth) + knots[idx0 + 1] * smooth
+    return np.asarray(signal * (1.0 + drift), dtype=np.float64)
 
 
 def add_note(signal: FloatArray, note: FloatArray, start_index: int) -> None:
-    """Safely adds a note to the signal buffer, clipping if necessary."""
-    if start_index >= len(signal):
+    """Safely adds a note to signal, applying raised-cosine fade-out if truncated."""
+    if start_index >= len(signal) or len(note) == 0:
         return
 
     end_index = start_index + len(note)
-
     if end_index <= len(signal):
         signal[start_index:end_index] += note
-    else:
-        # Clip the note to fit the remaining signal space
-        available = len(signal) - start_index
-        clipped = note[:available].copy()
+        return
 
-        # Apply quick fade-out to prevent click from abrupt cutoff
-        fade_samples = min(int(SAMPLE_RATE * 0.01), available // 4)  # 10ms max
-        if fade_samples > 1:
-            clipped[-fade_samples:] *= np.linspace(1, 0, fade_samples)
-
-        signal[start_index:] += clipped
+    available = len(signal) - start_index
+    clipped = note[:available].copy()
+    fade_samples = min(int(round(SAMPLE_RATE * 0.025)), max(2, available // 3))
+    if fade_samples >= 2 and available >= fade_samples:
+        clipped[-fade_samples:] *= _raised_cosine_ramp(fade_samples, 1.0, 0.0)
+    signal[start_index:] += clipped
 
 
 # =============================================================================
@@ -632,10 +787,6 @@ def _bpm(config: SynthConfig) -> float:
 
 def _seconds_per_beat(config: SynthConfig) -> float:
     return 60.0 / _bpm(config)
-
-
-def _beats_total(config: SynthConfig, duration: float) -> float:
-    return duration / _seconds_per_beat(config)
 
 
 def _rhythm_slot_times(
@@ -819,29 +970,28 @@ def bass_pulsing(
     _rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Rhythmic pulsing bass (chord-aware)."""
+    """Rhythmic pulsing bass aligned to the global beat grid."""
     sr = SAMPLE_RATE
     dur = duration
     attack_mult = _attack_mult(config)
-    seconds_per_beat = _seconds_per_beat(config)
-    beats_total = max(1.0, _beats_total(config, duration))
-    pulses_per_beat = 2.0
-    num_pulses = int(np.ceil(beats_total * pulses_per_beat))
-    pulse_beats = 1.0 / pulses_per_beat
-    pulse_sec = pulse_beats * seconds_per_beat
+    spb = _seconds_per_beat(config)
+    pulse_beats = 0.5
+    pulse_sec = pulse_beats * spb
 
-    signal = np.zeros(int(sr * dur))
+    signal = np.zeros(_sample_count(dur, sr), dtype=np.float64)
+    if pulse_sec <= 0.0:
+        return signal
 
-    for i in range(num_pulses):
-        start_sec = i * pulse_sec
-        if start_sec >= dur:
+    slot_idx = _first_grid_slot(t_offset, pulse_sec)
+    while True:
+        local_sec = slot_idx * pulse_sec - t_offset
+        if local_sec >= dur:
             break
 
-        beat = i * pulse_beats
-        chord_root = _chord_root_degree_at_beat(beat, harmony)
+        chord_root = _chord_root_degree_at_beat(local_sec / spb, harmony)
         freq = _scale_freq(config, chord_root, 2)
 
-        note = generate_sine(freq, pulse_sec * 0.82, sr, 0.35, t_offset=t_offset + start_sec)
+        note = generate_sine(freq, pulse_sec * 0.82, sr, 0.35, t_offset=t_offset + local_sec)
         note = apply_lowpass(note, 90 * config.brightness + 20, sr)
         note = apply_adsr(
             note,
@@ -851,7 +1001,8 @@ def bass_pulsing(
             0.25 * attack_mult,
             sr,
         )
-        add_note(signal, note, int(start_sec * sr))
+        add_note(signal, note, int(round(local_sec * sr)))
+        slot_idx += 1
 
     return signal
 
@@ -861,29 +1012,31 @@ def bass_walking(
     duration: float,
     harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
-    _rng: np.random.Generator,
+    rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Walking bass line that follows the chord root (diatonic)."""
+    """Walking bass line locked to the global beat grid."""
     sr = SAMPLE_RATE
     dur_total = duration
     attack_mult = _attack_mult(config)
-    signal = np.zeros(int(sr * dur_total))
+    signal = np.zeros(_sample_count(dur_total, sr), dtype=np.float64)
 
-    beats_total = int(np.ceil(_beats_total(config, duration)))
     note_sec = _seconds_per_beat(config)
+    if note_sec <= 0.0:
+        return signal
 
-    for i in range(beats_total):
-        start_sec = i * note_sec
-        if start_sec >= dur_total:
+    slot_idx = _first_grid_slot(t_offset, note_sec)
+    while True:
+        local_sec = slot_idx * note_sec - t_offset
+        if local_sec >= dur_total:
             break
 
-        chord_root = _chord_root_degree_at_beat(float(i), harmony)
-        rel = (0, 2, 4, 2)[i % 4]
+        chord_root = _chord_root_degree_at_beat(local_sec / note_sec, harmony)
+        rel = (0, 2, 4, 2)[slot_idx % 4]
         degree = chord_root + rel
 
         freq = _scale_freq(config, degree, 2)
-        note = generate_triangle(freq, note_sec * 0.92, sr, 0.30, t_offset=t_offset + start_sec)
+        note = generate_triangle(freq, note_sec * 0.92, sr, 0.30, t_offset=t_offset + local_sec)
         note = apply_lowpass(note, 120 * config.brightness + 40, sr)
         note = apply_adsr(
             note,
@@ -893,8 +1046,9 @@ def bass_walking(
             0.22 * attack_mult,
             sr,
         )
-        note = apply_humanize(note, config.human, sr)
-        add_note(signal, note, int(start_sec * sr))
+        note = apply_humanize(note, config.human, sr, rng=rng)
+        add_note(signal, note, int(round(local_sec * sr)))
+        slot_idx += 1
 
     signal = apply_reverb(signal, config.space * 0.3, config.space * 0.8, sr)
     return signal
@@ -942,28 +1096,27 @@ def bass_sub_pulse(
     _rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Deep sub-bass pulse (chord-aware)."""
+    """Deep sub-bass pulse aligned to the global beat grid."""
     sr = SAMPLE_RATE
     dur = duration
     attack_mult = _attack_mult(config)
-    signal = np.zeros(int(sr * dur))
+    signal = np.zeros(_sample_count(dur, sr), dtype=np.float64)
 
-    beats_total = max(1.0, _beats_total(config, duration))
-    pulses_per_bar = 2
-    beats_per_pulse = 4.0 / pulses_per_bar
-    pulse_sec = beats_per_pulse * _seconds_per_beat(config)
+    spb = _seconds_per_beat(config)
+    beats_per_pulse = 2.0
+    pulse_sec = beats_per_pulse * spb
+    if pulse_sec <= 0.0:
+        return signal
 
-    num_pulses = int(np.ceil(beats_total / beats_per_pulse))
-    for i in range(num_pulses):
-        start_sec = i * pulse_sec
-        if start_sec >= dur:
+    slot_idx = _first_grid_slot(t_offset, pulse_sec)
+    while True:
+        local_sec = slot_idx * pulse_sec - t_offset
+        if local_sec >= dur:
             break
 
-        beat = i * beats_per_pulse
-        chord_root = _chord_root_degree_at_beat(beat, harmony)
-
+        chord_root = _chord_root_degree_at_beat(local_sec / spb, harmony)
         freq = _scale_freq(config, chord_root, 1)
-        note = generate_sine(freq, pulse_sec * 0.95, sr, 0.4, t_offset=t_offset + start_sec)
+        note = generate_sine(freq, pulse_sec * 0.95, sr, 0.4, t_offset=t_offset + local_sec)
         note = apply_lowpass(note, 55, sr)
         note = apply_adsr(
             note,
@@ -973,7 +1126,8 @@ def bass_sub_pulse(
             0.7 * attack_mult,
             sr,
         )
-        add_note(signal, note, int(start_sec * sr))
+        add_note(signal, note, int(round(local_sec * sr)))
+        slot_idx += 1
 
     return signal
 
@@ -1002,17 +1156,18 @@ def pad_warm_slow(
     duration: float,
     harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
-    _rng: np.random.Generator,
+    rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Warm, slowly evolving pad (chord-aware)."""
+    """Warm evolving pad with proportional LFO motion and click-free ADSR."""
     sr = SAMPLE_RATE
     dur_total = duration
     osc = OSC_FUNCTIONS.get(_osc_type(config), generate_sine)
     attack_mult = _attack_mult(config)
     echo_mult = _echo_mult(config)
 
-    signal = np.zeros(int(sr * dur_total))
+    signal = np.zeros(_sample_count(dur_total, sr), dtype=np.float64)
+    lfo_rate = 0.06 + 0.28 * float(np.clip(config.motion, 0.0, 1.0))
 
     for start_sec, seg_dur, chord_root in _iter_chord_segments(config, duration, harmony):
         note_dur = min(seg_dur * 1.15, dur_total - start_sec)
@@ -1020,23 +1175,19 @@ def pad_warm_slow(
         for degree in _chord_tones_ascending(config.chord_extensions, chord_root)[:3]:
             freq = _scale_freq(config, degree, 3)
             tone = osc(freq, note_dur, sr, 0.15, t_offset=t_offset + start_sec)  # type: ignore[call-arg]
+            lfo = generate_lfo(note_dur, lfo_rate, sr, t_offset=t_offset + start_sec)
 
-            lfo_rate = 0.1 / (config.motion + 0.1)
-            lfo = generate_lfo(note_dur, lfo_rate, sr)
-
-            base_cutoff = 300 * config.brightness + 100
+            base_cutoff = 300.0 * config.brightness + 100.0
             tone_low = apply_lowpass(tone, base_cutoff * 0.5, sr)
             tone_high = apply_lowpass(tone, base_cutoff * 1.5, sr)
-            tone = tone_low * (1 - lfo) + tone_high * lfo
+            tone = tone_low * (1.0 - lfo) + tone_high * lfo
 
-            tone = apply_adsr(tone, 1.5 * attack_mult, 0.8, 0.85, 2.5 * attack_mult, sr)
-            add_note(signal, tone, int(start_sec * sr))
+            tone = apply_adsr(tone, 1.2 * attack_mult, 0.6, 0.85, 1.6 * attack_mult, sr)
+            add_note(signal, tone, int(round(start_sec * sr)))
 
     signal = apply_reverb(signal, config.space * 0.7, config.space * 0.9, sr)
-    signal = apply_delay(signal, 0.35, 0.3 * echo_mult, 0.25 * echo_mult, sr)
-    signal = apply_humanize(signal, config.human, sr)
-
-    return signal
+    signal = apply_delay(signal, 0.35, 0.30 * echo_mult, 0.25 * echo_mult, sr)
+    return apply_humanize(signal, config.human, sr, rng=rng)
 
 
 def pad_dark_sustained(
@@ -1327,226 +1478,73 @@ def _choose_anchor_pitch(
     return _weighted_choice(rng, items, weights)
 
 
-def _generate_procedural_melody_events(
-    config: SynthConfig,
-    duration: float,
-    harmony: HarmonyPlan | None,
-    melody_policy: MelodyPolicy | None,
+def _first_grid_slot(t_offset: float, slot_sec: float) -> int:
+    """Return the first beat-grid slot index at or after t_offset."""
+    slot = int(math.floor(t_offset / slot_sec))
+    return slot + 1 if slot * slot_sec < t_offset - 1e-9 else slot
+
+
+def _render_procedural_event_slice(
+    signal: FloatArray,
+    event: NoteEvent,
+    osc: OscFn,
+    cutoff: float,
+    attack_mult: float,
+    human: float,
     rng: np.random.Generator,
-    t_offset: float = 0.0,
-) -> list[NoteEvent]:
-    """Generate phrase-aware, chord-aware melody events."""
-    policy = _resolve_melody_policy(melody_policy, config)
+    t_offset: float,
+    duration: float,
+) -> None:
+    """Render one procedural NoteEvent sliced cleanly into [0, duration)."""
+    sr = SAMPLE_RATE
+    if event.start_sec >= t_offset + duration or event.start_sec + event.dur_sec <= t_offset:
+        return
 
-    beats_per_bar = 4
-    spb = _seconds_per_beat(config)
-    total_beats = max(1.0, _beats_total(config, duration))
-    total_bars = int(np.ceil(total_beats / beats_per_bar))
+    note = osc(event.freq, event.dur_sec, sr, event.amp, t_offset=event.start_sec)  # type: ignore[call-arg]
+    note = apply_lowpass(note, cutoff, sr)
+    atk = (0.05 if event.is_anchor else 0.03) * attack_mult
+    rel = (0.22 if event.is_anchor else 0.16) * attack_mult
+    note = apply_adsr(note, atk, 0.12, 0.55, rel, sr)
+    note = apply_humanize(note, human * 0.6, sr, rng=rng)
 
-    base_oct = policy.register_min_oct
-    oct_span = max(0, policy.register_max_oct - policy.register_min_oct)
-    min_pitch = 0
-    max_pitch = oct_span * 7 + 6
+    local_start = int(round((event.start_sec - t_offset) * sr))
+    if local_start < 0:
+        skip = -local_start
+        if skip >= len(note):
+            return
+        note = note[skip:]
+        local_start = 0
+    add_note(signal, note, local_start)
 
-    anchors: list[int] = []
-    prev = int(np.clip((max_pitch - min_pitch) // 2, min_pitch, max_pitch))
 
-    for bar in range(total_bars):
-        beat0 = float(bar * beats_per_bar)
-        chord_root = _chord_root_degree_at_beat(beat0, harmony)
-
-        phrase_len = policy.phrase_len_bars
-        pos_in_phrase = bar % phrase_len
-        denom = max(1, phrase_len - 1)
-        x = pos_in_phrase / denom
-        tension = _tension_value(policy.tension_curve, x)
-
-        is_cadence_bar = (pos_in_phrase == phrase_len - 1) and (phrase_len > 1)
-        if is_cadence_bar:
-            tension = 0.0
-
-        anchor = _choose_anchor_pitch(
-            rng=rng,
-            prev_pitch=prev,
-            chord_root_degree=chord_root,
-            min_pitch=min_pitch,
-            max_pitch=max_pitch,
-            tension=tension,
-            cadence_strength=policy.cadence_strength if is_cadence_bar else 0.10,
-            chord_extensions=config.chord_extensions,
-        )
-        anchors.append(anchor)
-        prev = anchor
-
-    events: list[NoteEvent] = []
-
-    step_beats = _grid_step_beats(policy.density)
-    steps_per_bar = int(round(beats_per_bar / step_beats))
-    steps_per_bar = max(1, min(64, steps_per_bar))
-
-    motif: list[tuple[int, int]] = []
-
-    for bar in range(total_bars):
-        beat_bar = float(bar * beats_per_bar)
-        chord_root = _chord_root_degree_at_beat(beat_bar, harmony)
-
-        phrase_len = policy.phrase_len_bars
-        pos_in_phrase = bar % phrase_len
-        denom = max(1, phrase_len - 1)
-        x = pos_in_phrase / denom
-        tension = _tension_value(policy.tension_curve, x)
-
-        is_phrase_start = pos_in_phrase == 0
-        is_cadence_bar = (pos_in_phrase == phrase_len - 1) and (phrase_len > 1)
-
-        anchor_pitch = anchors[bar]
-        next_anchor = anchors[bar + 1] if bar + 1 < len(anchors) else anchor_pitch
-
-        use_motif = bool(motif) and is_phrase_start and (rng.random() < policy.motif_repeat_prob)
-
-        need_resolve = False
-        current_pitch = anchor_pitch
-
-        bar_notes_for_motif: list[tuple[int, int]] = []
-
-        for step_idx in range(steps_per_bar):
-            pos_beats = step_idx * step_beats
-            beat = beat_bar + pos_beats
-            start_sec = beat * spb
-
-            if start_sec >= duration:
-                break
-
-            if step_beats == 0.5 and (step_idx % 2 == 1):
-                start_sec += policy.swing * 0.12 * spb
-
-            if step_idx == 0:
-                play = True
-                is_anchor = True
-            elif use_motif and any(step == step_idx for step, _ in motif):
-                play = True
-                is_anchor = False
-            else:
-                is_offbeat = abs(pos_beats - round(pos_beats)) > 1e-6
-
-                prob = 0.10 + 0.80 * policy.density
-                prob += 0.20 * tension
-                prob += (0.25 * policy.syncopation) if is_offbeat else (-0.15 * policy.syncopation)
-
-                if is_cadence_bar and pos_beats >= 2.0:
-                    prob *= 0.35 + 0.40 * (1.0 - policy.cadence_strength)
-
-                if events and (events[-1].start_sec > (start_sec - 0.001)):
-                    prob *= 0.6
-
-                play = rng.random() < _clamp01(prob)
-                is_anchor = False
-
-            if not play:
-                continue
-
-            if step_idx == 0:
-                pitch = anchor_pitch
-            elif use_motif:
-                offset = next((off for step, off in motif if step == step_idx), 0)
-                pitch = int(np.clip(anchor_pitch + offset, min_pitch, max_pitch))
-            else:
-                delta = next_anchor - current_pitch
-                if delta == 0:
-                    direction = int(rng.choice([-1, 1]))
-                else:
-                    direction = 1 if delta > 0 else -1
-
-                if need_resolve:
-                    pitch = _nearest_chord_tone_pitch(
-                        current_pitch,
-                        chord_root,
-                        min_pitch,
-                        max_pitch,
-                        config.chord_extensions,
-                    )
-                    need_resolve = False
-                else:
-                    leap_prob = (1.0 - policy.step_bias) * (0.25 + 0.35 * tension)
-                    step_size = 1
-
-                    if rng.random() < (0.06 + 0.10 * tension):
-                        step_size = 0
-                    elif abs(delta) >= 4 and (rng.random() < leap_prob):
-                        step_size = int(rng.choice([2, 3, 4]))
-
-                    pitch = int(
-                        np.clip(current_pitch + direction * step_size, min_pitch, max_pitch)
-                    )
-
-                chord_tones = _chord_tone_classes(chord_root, config.chord_extensions)
-                if (pitch % 7) not in chord_tones:
-                    if rng.random() < (0.55 - 0.45 * tension):
-                        pitch = _nearest_chord_tone_pitch(
-                            pitch,
-                            chord_root,
-                            min_pitch,
-                            max_pitch,
-                            config.chord_extensions,
-                        )
-                    else:
-                        need_resolve = True
-
-            dur_beats = step_beats * (0.70 + 0.25 * float(rng.random()))
-            if is_anchor:
-                dur_beats = max(dur_beats, 1.0)
-                if is_cadence_bar:
-                    dur_beats = max(dur_beats, 1.6)
-
-            dur_sec = dur_beats * spb
-            dur_sec = min(dur_sec, max(0.02, duration - start_sec))
-
-            jitter = 0.0
-            if config.human > 0 and not is_anchor:
-                jitter = float(rng.normal(0.0, config.human * 0.006 * spb))
-                jitter = float(np.clip(jitter, -0.02 * spb, 0.02 * spb))
-            start_sec_j = float(np.clip(start_sec + jitter, 0.0, max(0.0, duration - 0.01)))
-
-            amp = 0.12 + 0.05 * tension
-            if is_cadence_bar and pos_beats >= 2.0:
-                amp *= 0.85
-            if is_anchor:
-                amp *= 1.10
-
-            use_chromatic = (
-                (policy.chromatic_prob > 0)
-                and (not is_anchor)
-                and (abs((next_anchor - pitch)) <= 2)
-                and (rng.random() < (policy.chromatic_prob * (0.35 + 0.65 * tension)))
-            )
-
-            if use_chromatic:
-                target = next_anchor
-                sign = 1 if (target - pitch) >= 0 else -1
-                semitone = _semitone_from_degree(config.mode, target) - sign
-                freq = freq_from_note(config.root, semitone, base_oct)
-            else:
-                freq = _scale_freq(config, pitch, base_oct)
-
-            events.append(
-                NoteEvent(
-                    start_sec=start_sec_j,
-                    dur_sec=dur_sec,
-                    freq=freq,
-                    amp=float(amp),
-                    is_anchor=is_anchor,
-                )
-            )
-
-            if is_phrase_start and not use_motif and not motif and not is_anchor:
-                bar_notes_for_motif.append((step_idx, pitch - anchor_pitch))
-
-            current_pitch = pitch
-
-        if not motif and is_phrase_start and bar_notes_for_motif:
-            motif = bar_notes_for_motif[: min(5, len(bar_notes_for_motif))]
-
-    return events
+def _bar_anchor_pitch(
+    config: SynthConfig,
+    policy: MelodyPolicy,
+    bar_idx: int,
+    base_seed: int,
+    chord_root: int,
+    min_pitch: int,
+    max_pitch: int,
+) -> int:
+    """Deterministically choose an anchor pitch for absolute bar_idx in O(1)."""
+    phrase_len = policy.phrase_len_bars
+    pos_in_phrase = bar_idx % phrase_len
+    denom = max(1, phrase_len - 1)
+    x = pos_in_phrase / denom
+    is_cadence = (pos_in_phrase == phrase_len - 1) and (phrase_len > 1)
+    tension = 0.0 if is_cadence else _tension_value(policy.tension_curve, x)
+    prev_mid = int(np.clip((max_pitch - min_pitch) // 2, min_pitch, max_pitch))
+    bar_rng = np.random.default_rng(_derive_seed(base_seed, 3001 + bar_idx * 17))
+    return _choose_anchor_pitch(
+        rng=bar_rng,
+        prev_pitch=prev_mid,
+        chord_root_degree=chord_root,
+        min_pitch=min_pitch,
+        max_pitch=max_pitch,
+        tension=tension,
+        cadence_strength=policy.cadence_strength if is_cadence else 0.10,
+        chord_extensions=config.chord_extensions,
+    )
 
 
 def melody_procedural(
@@ -1557,290 +1555,365 @@ def melody_procedural(
     rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Procedural, chord-aware melody with phrases + tension/resolution."""
+    """O(duration) bar-deterministic procedural melody continuous across blocks."""
     sr = SAMPLE_RATE
-    dur = duration
     osc = OSC_FUNCTIONS.get(_osc_type(config), generate_triangle)
     attack_mult = _attack_mult(config)
     echo_mult = _echo_mult(config)
+    cutoff = 700.0 * config.brightness + 180.0
+    signal = np.zeros(_sample_count(duration, sr), dtype=np.float64)
 
-    events = _generate_procedural_melody_events(config, duration, harmony, melody_policy, rng)
+    policy = _resolve_melody_policy(melody_policy, config)
+    spb = _seconds_per_beat(config)
+    bar_sec = 4.0 * spb
+    if bar_sec <= 0.0:
+        return signal
 
-    signal = np.zeros(int(sr * dur))
+    base_seed = int(rng.integers(1, 0x7FFFFFFF))
+    base_oct = policy.register_min_oct
+    min_pitch = 0
+    max_pitch = max(0, policy.register_max_oct - policy.register_min_oct) * 7 + 6
 
-    cutoff = 700 * config.brightness + 180
-    for event in events:
-        start_idx = int(event.start_sec * sr)
-        if start_idx >= len(signal):
-            continue
+    step_beats = _grid_step_beats(policy.density)
+    steps_per_bar = max(1, min(64, int(round(4.0 / step_beats))))
 
-        note = osc(event.freq, event.dur_sec, sr, event.amp, t_offset=t_offset + event.start_sec)  # type: ignore[call-arg]
-        note = apply_lowpass(note, cutoff, sr)
+    first_bar = max(0, int(math.floor(max(0.0, t_offset - 2.0 * spb) / bar_sec)))
+    last_bar = max(first_bar + 1, int(math.ceil((t_offset + duration) / bar_sec)))
 
-        atk = (0.05 if event.is_anchor else 0.03) * attack_mult
-        rel = (0.22 if event.is_anchor else 0.16) * attack_mult
-        note = apply_adsr(note, atk, 0.12, 0.55, rel, sr)
-        note = apply_humanize(note, config.human * 0.6, sr)
+    for bar_idx in range(first_bar, last_bar):
+        bar_start_sec = bar_idx * bar_sec
+        local_bar_beat = (bar_start_sec - t_offset) / spb
+        chord_root = _chord_root_degree_at_beat(max(0.0, local_bar_beat), harmony)
+        next_chord_root = _chord_root_degree_at_beat(max(0.0, local_bar_beat + 4.0), harmony)
 
-        add_note(signal, note, start_idx)
+        phrase_len = policy.phrase_len_bars
+        pos_in_phrase = bar_idx % phrase_len
+        x = pos_in_phrase / max(1, phrase_len - 1)
+        tension = _tension_value(policy.tension_curve, x)
+        is_cadence_bar = (pos_in_phrase == phrase_len - 1) and (phrase_len > 1)
+
+        anchor_pitch = _bar_anchor_pitch(
+            config, policy, bar_idx, base_seed, chord_root, min_pitch, max_pitch
+        )
+        next_anchor = _bar_anchor_pitch(
+            config, policy, bar_idx + 1, base_seed, next_chord_root, min_pitch, max_pitch
+        )
+
+        bar_rng = np.random.default_rng(_derive_seed(base_seed, 7001 + bar_idx * 29))
+        hum_rng = np.random.default_rng(_derive_seed(base_seed, 9001 + bar_idx * 37))
+        need_resolve = False
+        current_pitch = anchor_pitch
+
+        for step_idx in range(steps_per_bar):
+            pos_beats = step_idx * step_beats
+            ev_start = bar_start_sec + pos_beats * spb
+            if step_beats == 0.5 and (step_idx % 2 == 1):
+                ev_start += policy.swing * 0.12 * spb
+
+            if step_idx == 0:
+                play = True
+                is_anchor = True
+            else:
+                is_offbeat = abs(pos_beats - round(pos_beats)) > 1e-6
+                prob = 0.10 + 0.80 * policy.density + 0.20 * tension
+                prob += (0.25 * policy.syncopation) if is_offbeat else (-0.15 * policy.syncopation)
+                if is_cadence_bar and pos_beats >= 2.0:
+                    prob *= 0.35 + 0.40 * (1.0 - policy.cadence_strength)
+                play = bool(bar_rng.random() < _clamp01(prob))
+                is_anchor = False
+
+            if not play:
+                continue
+
+            if step_idx == 0:
+                pitch = anchor_pitch
+            else:
+                delta = next_anchor - current_pitch
+                direction = int(bar_rng.choice([-1, 1])) if delta == 0 else (1 if delta > 0 else -1)
+                if need_resolve:
+                    pitch = _nearest_chord_tone_pitch(
+                        current_pitch, chord_root, min_pitch, max_pitch, config.chord_extensions
+                    )
+                    need_resolve = False
+                else:
+                    leap_prob = (1.0 - policy.step_bias) * (0.25 + 0.35 * tension)
+                    step_size = 1
+                    if bar_rng.random() < (0.06 + 0.10 * tension):
+                        step_size = 0
+                    elif abs(delta) >= 4 and (bar_rng.random() < leap_prob):
+                        step_size = int(bar_rng.choice([2, 3, 4]))
+                    pitch = int(np.clip(current_pitch + direction * step_size, min_pitch, max_pitch))
+
+                chord_tones = _chord_tone_classes(chord_root, config.chord_extensions)
+                if (pitch % 7) not in chord_tones:
+                    if bar_rng.random() < (0.55 - 0.45 * tension):
+                        pitch = _nearest_chord_tone_pitch(
+                            pitch, chord_root, min_pitch, max_pitch, config.chord_extensions
+                        )
+                    else:
+                        need_resolve = True
+
+            dur_beats = step_beats * (0.70 + 0.25 * float(bar_rng.random()))
+            if is_anchor:
+                dur_beats = max(dur_beats, 1.6 if is_cadence_bar else 1.0)
+            dur_sec = max(0.02, dur_beats * spb)
+
+            jitter = 0.0
+            if config.human > 0 and not is_anchor:
+                jitter = float(
+                    np.clip(bar_rng.normal(0.0, config.human * 0.006 * spb), -0.02 * spb, 0.02 * spb)
+                )
+            ev_start_j = max(0.0, ev_start + jitter)
+
+            amp = 0.12 + 0.05 * tension
+            if is_cadence_bar and pos_beats >= 2.0:
+                amp *= 0.85
+            if is_anchor:
+                amp *= 1.10
+
+            use_chromatic = (
+                (policy.chromatic_prob > 0)
+                and (not is_anchor)
+                and (abs(next_anchor - pitch) <= 2)
+                and (bar_rng.random() < (policy.chromatic_prob * (0.35 + 0.65 * tension)))
+            )
+            if use_chromatic:
+                sign = 1 if (next_anchor - pitch) >= 0 else -1
+                semitone = _semitone_from_degree(config.mode, next_anchor) - sign
+                freq = freq_from_note(config.root, semitone, base_oct)
+            else:
+                freq = _scale_freq(config, pitch, base_oct)
+
+            ev = NoteEvent(
+                start_sec=ev_start_j,
+                dur_sec=dur_sec,
+                freq=freq,
+                amp=float(amp),
+                is_anchor=is_anchor,
+            )
+            _render_procedural_event_slice(
+                signal, ev, osc, cutoff, attack_mult, config.human, hum_rng, t_offset, duration
+            )
+            current_pitch = pitch
 
     signal = apply_delay(signal, 0.33, 0.35 * echo_mult, 0.28 * echo_mult, sr)
-    signal = apply_reverb(signal, config.space * 0.55, config.space * 0.75, sr)
+    return apply_reverb(signal, config.space * 0.55, config.space * 0.75, sr)
 
-    return signal
+
+def _render_bpm_pattern_melody(
+    config: SynthConfig,
+    duration: float,
+    harmony: HarmonyPlan | None,
+    pattern: tuple[int, ...],
+    step_beats: float,
+    octave: int,
+    amp: float,
+    dur_mult: float,
+    cutoff: float,
+    adsr: tuple[float, float, float, float],
+    delay_cfg: tuple[float, float, float],
+    reverb_scale: tuple[float, float],
+    rng: np.random.Generator,
+    t_offset: float = 0.0,
+) -> FloatArray:
+    """Schedule a pattern melody on BPM beats locked to active chord harmony."""
+    sr = SAMPLE_RATE
+    signal = np.zeros(_sample_count(duration, sr), dtype=np.float64)
+    osc = OSC_FUNCTIONS.get(_osc_type(config), generate_triangle)
+    attack_mult = _attack_mult(config)
+    echo_mult = _echo_mult(config)
+    spb = _seconds_per_beat(config)
+    slot_sec = step_beats * spb
+    if slot_sec <= 0.0 or not pattern:
+        return signal
+
+    slot_idx = _first_grid_slot(t_offset, slot_sec)
+    while True:
+        local_sec = slot_idx * slot_sec - t_offset
+        if local_sec >= duration:
+            break
+        rel_deg = pattern[slot_idx % len(pattern)]
+        if rel_deg >= 0:
+            chord_root = _chord_root_degree_at_beat(local_sec / spb, harmony)
+            freq = _scale_freq(config, chord_root + rel_deg, octave)
+            note_dur = min(slot_sec * dur_mult, max(0.06, duration - local_sec))
+            note = osc(freq, note_dur, sr, amp, t_offset=t_offset + local_sec)  # type: ignore[call-arg]
+            note = apply_lowpass(note, cutoff, sr)
+            note = apply_adsr(
+                note, adsr[0] * attack_mult, adsr[1], adsr[2], adsr[3] * attack_mult, sr
+            )
+            note = apply_humanize(note, config.human, sr, rng=rng)
+            add_note(signal, note, int(round(local_sec * sr)))
+        slot_idx += 1
+
+    signal = apply_delay(
+        signal, delay_cfg[0], delay_cfg[1] * echo_mult, delay_cfg[2] * echo_mult, sr
+    )
+    return apply_reverb(
+        signal, config.space * reverb_scale[0], config.space * reverb_scale[1], sr
+    )
 
 
 def melody_contemplative(
     config: SynthConfig,
     duration: float,
-    _harmony: HarmonyPlan | None,
+    harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
-    _rng: np.random.Generator,
+    rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Slow, contemplative melody."""
-    sr = SAMPLE_RATE
-    dur = duration
-    osc = OSC_FUNCTIONS.get(_osc_type(config), generate_triangle)
-    attack_mult = _attack_mult(config)
-    echo_mult = _echo_mult(config)
-
-    # Sparse melody pattern (tuple), -1 = rest
-    pattern = (0, -1, 2, -1, 4, -1, 2, -1, 0, -1, -1, -1, 2, -1, -1, -1)
-    note_dur = dur / len(pattern)
-    signal = np.zeros(int(sr * dur))
-
-    for i, degree in enumerate(pattern):
-        if degree < 0:
-            continue
-
-        freq = _scale_freq(config, degree, 5)
-        start_sec = i * note_dur
-        start = int(start_sec * sr)
-
-        note = osc(freq, note_dur * 1.5, sr, 0.18, t_offset=t_offset + start_sec)  # type: ignore[call-arg]
-        note = apply_lowpass(note, 800 * config.brightness + 200, sr)
-        note = apply_adsr(note, 0.1 * attack_mult, 0.3, 0.6, 0.8 * attack_mult, sr)
-        note = apply_humanize(note, config.human, sr)
-
-        add_note(signal, note, start)
-
-    signal = apply_delay(signal, 0.35, 0.4 * echo_mult, 0.3 * echo_mult, sr)
-    signal = apply_reverb(signal, config.space * 0.6, config.space * 0.8, sr)
-
-    return signal
+    """Slow, contemplative BPM-locked harmony-aware melody."""
+    return _render_bpm_pattern_melody(
+        config,
+        duration,
+        harmony,
+        (0, -1, 2, -1, 4, -1, 2, -1, 0, -1, -1, -1, 2, -1, -1, -1),
+        1.0,
+        5,
+        0.17,
+        1.5,
+        800.0 * config.brightness + 220.0,
+        (0.08, 0.25, 0.6, 0.65),
+        (0.35, 0.38, 0.28),
+        (0.6, 0.8),
+        rng,
+        t_offset,
+    )
 
 
 def melody_rising(
     config: SynthConfig,
     duration: float,
-    _harmony: HarmonyPlan | None,
+    harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
-    _rng: np.random.Generator,
+    rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Ascending melodic line."""
-    sr = SAMPLE_RATE
-    dur = duration
-    osc = OSC_FUNCTIONS.get(_osc_type(config), generate_triangle)
-    attack_mult = _attack_mult(config)
-    echo_mult = _echo_mult(config)
-
-    # Rising pattern (tuple)
-    pattern = (0, -1, 2, -1, 4, -1, -1, 5, -1, -1, 6, -1, -1, -1, -1, -1)
-    note_dur = dur / len(pattern)
-    signal = np.zeros(int(sr * dur))
-
-    for i, degree in enumerate(pattern):
-        if degree < 0:
-            continue
-
-        freq = _scale_freq(config, degree, 5)
-        start_sec = i * note_dur
-        start = int(start_sec * sr)
-
-        note = osc(freq, note_dur * 1.8, sr, 0.16, t_offset=t_offset + start_sec)  # type: ignore[call-arg]
-        note = apply_lowpass(note, 900 * config.brightness + 250, sr)
-        note = apply_adsr(note, 0.08 * attack_mult, 0.25, 0.55, 0.9 * attack_mult, sr)
-        note = apply_humanize(note, config.human, sr)
-
-        add_note(signal, note, start)
-
-    signal = apply_delay(signal, 0.33, 0.35 * echo_mult, 0.28 * echo_mult, sr)
-    signal = apply_reverb(signal, config.space * 0.55, config.space * 0.75, sr)
-
-    return signal
+    """Ascending melodic line locked to BPM and active chord."""
+    return _render_bpm_pattern_melody(
+        config,
+        duration,
+        harmony,
+        (0, -1, 2, -1, 4, -1, -1, 5, -1, -1, 6, -1, 7, -1, -1, -1),
+        1.0,
+        5,
+        0.16,
+        1.7,
+        900.0 * config.brightness + 250.0,
+        (0.07, 0.22, 0.55, 0.75),
+        (0.33, 0.34, 0.26),
+        (0.55, 0.75),
+        rng,
+        t_offset,
+    )
 
 
 def melody_falling(
     config: SynthConfig,
     duration: float,
-    _harmony: HarmonyPlan | None,
+    harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
-    _rng: np.random.Generator,
+    rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Descending melodic line."""
-    sr = SAMPLE_RATE
-    dur = duration
-    osc = OSC_FUNCTIONS.get(_osc_type(config), generate_triangle)
-    attack_mult = _attack_mult(config)
-    echo_mult = _echo_mult(config)
-
-    # Falling pattern (tuple)
-    pattern = (6, -1, -1, 5, -1, -1, 4, -1, 2, -1, -1, 0, -1, -1, -1, -1)
-    note_dur = dur / len(pattern)
-    signal = np.zeros(int(sr * dur))
-
-    for i, degree in enumerate(pattern):
-        if degree < 0:
-            continue
-
-        freq = _scale_freq(config, degree, 5)
-        start_sec = i * note_dur
-        start = int(start_sec * sr)
-
-        note = osc(freq, note_dur * 1.6, sr, 0.17, t_offset=t_offset + start_sec)  # type: ignore[call-arg]
-        note = apply_lowpass(note, 850 * config.brightness + 220, sr)
-        note = apply_adsr(note, 0.1 * attack_mult, 0.28, 0.52, 0.85 * attack_mult, sr)
-        note = apply_humanize(note, config.human, sr)
-
-        add_note(signal, note, start)
-
-    signal = apply_delay(signal, 0.38, 0.38 * echo_mult, 0.3 * echo_mult, sr)
-    signal = apply_reverb(signal, config.space * 0.58, config.space * 0.78, sr)
-
-    return signal
+    """Descending melodic line locked to BPM and active chord."""
+    return _render_bpm_pattern_melody(
+        config,
+        duration,
+        harmony,
+        (6, -1, -1, 5, -1, -1, 4, -1, 2, -1, -1, 0, -1, -1, -1, -1),
+        1.0,
+        5,
+        0.16,
+        1.6,
+        850.0 * config.brightness + 220.0,
+        (0.08, 0.25, 0.52, 0.75),
+        (0.38, 0.36, 0.28),
+        (0.58, 0.78),
+        rng,
+        t_offset,
+    )
 
 
 def melody_minimal(
     config: SynthConfig,
     duration: float,
-    _harmony: HarmonyPlan | None,
+    harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
-    _rng: np.random.Generator,
+    rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Very sparse, minimal melody."""
-    sr = SAMPLE_RATE
-    dur = duration
-    osc = OSC_FUNCTIONS.get(_osc_type(config), generate_sine)
-    attack_mult = _attack_mult(config)
-    echo_mult = _echo_mult(config)
-
-    # Extremely sparse (tuple)
-    pattern = (4, -1, -1, -1, -1, -1, -1, -1, 2, -1, -1, -1, -1, -1, -1, -1)
-    note_dur = dur / len(pattern)
-    signal = np.zeros(int(sr * dur))
-
-    for i, degree in enumerate(pattern):
-        if degree < 0:
-            continue
-
-        freq = _scale_freq(config, degree, 5)
-        start_sec = i * note_dur
-        start = int(start_sec * sr)
-
-        note = osc(freq, note_dur * 2.5, sr, 0.20, t_offset=t_offset + start_sec)  # type: ignore[call-arg]
-        note = apply_lowpass(note, 600 * config.brightness + 150, sr)
-        note = apply_adsr(note, 0.15 * attack_mult, 0.4, 0.5, 1.2 * attack_mult, sr)
-        note = apply_humanize(note, config.human, sr)
-
-        add_note(signal, note, start)
-
-    signal = apply_delay(signal, 0.5, 0.45 * echo_mult, 0.4 * echo_mult, sr)
-    signal = apply_reverb(signal, config.space * 0.7, config.space * 0.9, sr)
-
-    return signal
+    """Very sparse, minimal melody locked to BPM and active chord."""
+    return _render_bpm_pattern_melody(
+        config,
+        duration,
+        harmony,
+        (4, -1, -1, -1, -1, -1, -1, -1, 2, -1, -1, -1, -1, -1, -1, -1),
+        1.0,
+        5,
+        0.19,
+        2.4,
+        620.0 * config.brightness + 160.0,
+        (0.12, 0.35, 0.5, 1.0),
+        (0.50, 0.42, 0.35),
+        (0.7, 0.9),
+        rng,
+        t_offset,
+    )
 
 
 def melody_ornamental(
     config: SynthConfig,
     duration: float,
-    _harmony: HarmonyPlan | None,
+    harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
-    _rng: np.random.Generator,
+    rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Ornamental melody with grace notes."""
-    sr = SAMPLE_RATE
-    dur = duration
-    osc = OSC_FUNCTIONS.get(_osc_type(config), generate_triangle)
-    attack_mult = _attack_mult(config)
-    echo_mult = _echo_mult(config)
-
-    # Pattern with ornaments (tuples)
-    main_notes = (0, 4, 2, 0)
-    grace_offsets = (2, 5, 3, 2)
-    note_dur = dur / (len(main_notes) * 2)
-    signal = np.zeros(int(sr * dur))
-
-    for i, (main, grace) in enumerate(zip(main_notes, grace_offsets)):
-        start_sec = i * 2 * note_dur
-        start = int(start_sec * sr)
-
-        # Grace note (quick)
-        grace_freq = _scale_freq(config, grace, 5)
-        grace_note = osc(grace_freq, note_dur * 0.15, sr, 0.10, t_offset=t_offset + start_sec)  # type: ignore[call-arg]
-        grace_note = apply_lowpass(grace_note, 1000 * config.brightness, sr)
-        grace_note = apply_adsr(grace_note, 0.01, 0.05, 0.3, 0.1, sr)
-
-        # Main note
-        main_freq = _scale_freq(config, main, 5)
-        main_start_sec = start_sec + note_dur * 0.15
-        main_note = osc(main_freq, note_dur * 1.5, sr, 0.18, t_offset=t_offset + main_start_sec)  # type: ignore[call-arg]
-        main_note = apply_lowpass(main_note, 900 * config.brightness + 200, sr)
-        main_note = apply_adsr(main_note, 0.08 * attack_mult, 0.3, 0.55, 0.8 * attack_mult, sr)
-        main_note = apply_humanize(main_note, config.human, sr)
-
-        grace_start = start
-        main_start = start + int(note_dur * 0.15 * sr)
-
-        add_note(signal, grace_note, grace_start)
-        add_note(signal, main_note, main_start)
-
-    signal = apply_delay(signal, 0.3, 0.35 * echo_mult, 0.25 * echo_mult, sr)
-    signal = apply_reverb(signal, config.space * 0.5, config.space * 0.7, sr)
-
-    return signal
+    """Ornamental melody locked to BPM and active chord."""
+    return _render_bpm_pattern_melody(
+        config,
+        duration,
+        harmony,
+        (2, 0, -1, -1, 5, 4, -1, -1, 3, 2, -1, -1, 2, 0, -1, -1),
+        0.5,
+        5,
+        0.16,
+        1.6,
+        900.0 * config.brightness + 220.0,
+        (0.04, 0.22, 0.52, 0.60),
+        (0.30, 0.34, 0.25),
+        (0.5, 0.7),
+        rng,
+        t_offset,
+    )
 
 
 def melody_arp(
     config: SynthConfig,
     duration: float,
-    _harmony: HarmonyPlan | None,
+    harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
-    _rng: np.random.Generator,
+    rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Arpeggiated melody."""
-    sr = SAMPLE_RATE
-    dur = duration
-    osc = OSC_FUNCTIONS.get(_osc_type(config), generate_triangle)
-    attack_mult = _attack_mult(config)
-    echo_mult = _echo_mult(config)
-
-    # Fast arpeggio pattern (tuple * 8)
-    base_pattern = (0, 2, 4, 2)
-    pattern = base_pattern * 8
-    note_dur = dur / len(pattern)
-    signal = np.zeros(int(sr * dur))
-
-    for i, degree in enumerate(pattern):
-        freq = _scale_freq(config, degree, 4)
-        start_sec = i * note_dur
-        start = int(start_sec * sr)
-
-        note = osc(freq, note_dur * 0.8, sr, 0.14, t_offset=t_offset + start_sec)  # type: ignore[call-arg]
-        note = apply_lowpass(note, 1200 * config.brightness + 300, sr)
-        note = apply_adsr(note, 0.02 * attack_mult, 0.1, 0.4, 0.15 * attack_mult, sr)
-
-        add_note(signal, note, start)
-
-    signal = apply_delay(signal, 0.25, 0.3 * echo_mult, 0.25 * echo_mult, sr)
-    signal = apply_reverb(signal, config.space * 0.4, config.space * 0.6, sr)
-
-    return signal
+    """Arpeggiated melody locked to BPM and active chord."""
+    return _render_bpm_pattern_melody(
+        config,
+        duration,
+        harmony,
+        (0, 2, 4, 2),
+        0.5,
+        4,
+        0.14,
+        0.85,
+        1150.0 * config.brightness + 280.0,
+        (0.015, 0.08, 0.4, 0.14),
+        (0.25, 0.30, 0.24),
+        (0.45, 0.65),
+        rng,
+        t_offset,
+    )
 
 
 MELODY_PATTERNS: Mapping[str, PatternFn] = MappingProxyType(
@@ -1876,55 +1949,84 @@ def rhythm_none(
     return np.zeros(int(SAMPLE_RATE * duration))
 
 
+def _render_soft_kick(
+    base_freq: float,
+    kick_dur: float,
+    amp: float,
+    decay_rate: float,
+    lowpass_hz: float,
+    sr: int = SAMPLE_RATE,
+) -> FloatArray:
+    """Render a click-free phase-zero pitch-swept ambient kick drum."""
+    n = _sample_count(kick_dur, sr)
+    if n < 4:
+        return np.zeros(n, dtype=np.float64)
+    t = _time_axis(n, sr, 0.0)
+    freq_inst = base_freq * (1.0 + 0.75 * np.exp(-t * 32.0))
+    phase = 2.0 * math.pi * np.cumsum(freq_inst) / float(sr)
+    env_decay = np.exp(-np.linspace(0.0, decay_rate, n, dtype=np.float64))
+    kick = amp * np.sin(phase) * env_decay
+    atk = min(n // 4, max(2, int(round(0.004 * sr))))
+    rel = min(n // 3, max(2, int(round(0.015 * sr))))
+    kick[:atk] *= _raised_cosine_ramp(atk, 0.0, 1.0)
+    kick[-rel:] *= _raised_cosine_ramp(rel, 1.0, 0.0)
+    kick = apply_lowpass(kick, lowpass_hz, sr)
+    kick[0] = 0.0
+    kick[-1] = 0.0
+    return kick
+
+
+def _rhythm_kick_grid(
+    config: SynthConfig,
+    duration: float,
+    slots_per_beat: int,
+    pattern: tuple[int, ...],
+    base_freq: float,
+    kick_dur: float,
+    amp: float,
+    decay_rate: float,
+    lowpass_hz: float,
+    rng: np.random.Generator,
+    t_offset: float,
+) -> FloatArray:
+    """Render soft phase-zero kicks aligned to the global tempo grid."""
+    sr = SAMPLE_RATE
+    signal = np.zeros(_sample_count(duration, sr), dtype=np.float64)
+    slot_times, slot_offset = _rhythm_slot_times(
+        config, duration, slots_per_beat=slots_per_beat, t_offset=t_offset
+    )
+    for i, t_sec in enumerate(slot_times):
+        if not pattern[(slot_offset + i) % len(pattern)]:
+            continue
+        vel = 1.0 + float(rng.uniform(-0.07, 0.07)) * config.human
+        kick = _render_soft_kick(base_freq, kick_dur, amp * vel, decay_rate, lowpass_hz, sr)
+        add_note(signal, kick, int(round(t_sec * sr)))
+    return signal
+
+
 def rhythm_minimal(
     config: SynthConfig,
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
-    _rng: np.random.Generator,
+    rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Minimal rhythm - just occasional hits."""
-    sr = SAMPLE_RATE
-    dur = duration
-    signal = np.zeros(int(sr * dur))
-
-    # Sparse kicks: hit on beat 0 of each bar (8 slots per bar at 2 slots/beat in 4/4)
-    pattern = (1, 0, 0, 0, 0, 0, 0, 0)
-
-    if TEMPO_AWARE_RHYTHM:
-        slot_times, slot_offset = _rhythm_slot_times(
-            config, dur, slots_per_beat=2, t_offset=t_offset
-        )
-        for i, t in enumerate(slot_times):
-            if not pattern[(slot_offset + i) % len(pattern)]:
-                continue
-            start = int(t * sr)
-            kick_dur = 0.15
-            kick = generate_sine(60, kick_dur, sr, 0.35, t_offset + t)
-            pitch_env = np.exp(-np.linspace(0, 8, len(kick)))
-            kick = kick * pitch_env
-            kick = apply_lowpass(kick, 150, sr)
-            kick = apply_humanize(kick, config.human, sr)
-            add_note(signal, kick, start)
-    else:
-        # Legacy: divide chunk into fixed slots
-        pattern_full = pattern * 2
-        hit_dur = dur / len(pattern_full)
-        for i, hit in enumerate(pattern_full):
-            if not hit:
-                continue
-            start = int(i * hit_dur * sr)
-            kick_dur = 0.15
-            kick = generate_sine(60, kick_dur, sr, 0.35, t_offset)
-            pitch_env = np.exp(-np.linspace(0, 8, len(kick)))
-            kick = kick * pitch_env
-            kick = apply_lowpass(kick, 150, sr)
-            kick = apply_humanize(kick, config.human, sr)
-            add_note(signal, kick, start)
-
-    signal = apply_reverb(signal, config.space * 0.3, config.space * 0.5, sr)
-    return signal
+    """Minimal rhythm with soft phase-zero ambient kicks."""
+    sig = _rhythm_kick_grid(
+        config,
+        duration,
+        2,
+        (1, 0, 0, 0, 0, 0, 0, 0),
+        58.0,
+        0.17,
+        0.32,
+        7.5,
+        140.0,
+        rng,
+        t_offset,
+    )
+    return apply_reverb(sig, config.space * 0.25, config.space * 0.45, SAMPLE_RATE)
 
 
 def rhythm_heartbeat(
@@ -1932,47 +2034,23 @@ def rhythm_heartbeat(
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
-    _rng: np.random.Generator,
+    rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Heartbeat-like rhythm."""
-    sr = SAMPLE_RATE
-    dur = duration
-    signal = np.zeros(int(sr * dur))
-
-    # Double-hit pattern: two quick hits then rest (heartbeat feel)
-    pattern = (1, 1, 0, 0, 0, 0, 0, 0)
-
-    if TEMPO_AWARE_RHYTHM:
-        slot_times, slot_offset = _rhythm_slot_times(
-            config, dur, slots_per_beat=2, t_offset=t_offset
-        )
-        for i, t in enumerate(slot_times):
-            if not pattern[(slot_offset + i) % len(pattern)]:
-                continue
-            start = int(t * sr)
-            kick_dur = 0.12
-            kick = generate_sine(55, kick_dur, sr, 0.32, t_offset + t)
-            pitch_env = np.exp(-np.linspace(0, 10, len(kick)))
-            kick = kick * pitch_env
-            kick = apply_lowpass(kick, 120, sr)
-            add_note(signal, kick, start)
-    else:
-        # Legacy: divide chunk into fixed slots
-        pattern_full = pattern * 2
-        hit_dur = dur / len(pattern_full)
-        for i, hit in enumerate(pattern_full):
-            if not hit:
-                continue
-            start = int(i * hit_dur * sr)
-            kick_dur = 0.12
-            kick = generate_sine(55, kick_dur, sr, 0.32, t_offset)
-            pitch_env = np.exp(-np.linspace(0, 10, len(kick)))
-            kick = kick * pitch_env
-            kick = apply_lowpass(kick, 120, sr)
-            add_note(signal, kick, start)
-
-    return signal
+    """Heartbeat-like double-hit ambient pulse."""
+    return _rhythm_kick_grid(
+        config,
+        duration,
+        2,
+        (1, 1, 0, 0, 0, 0, 0, 0),
+        54.0,
+        0.14,
+        0.30,
+        9.0,
+        120.0,
+        rng,
+        t_offset,
+    )
 
 
 def rhythm_soft_four(
@@ -1980,45 +2058,24 @@ def rhythm_soft_four(
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
-    _rng: np.random.Generator,
+    rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Soft four-on-the-floor."""
-    sr = SAMPLE_RATE
-    dur = duration
-    signal = np.zeros(int(sr * dur))
-
-    # Kick on every beat (4-on-the-floor)
-    if TEMPO_AWARE_RHYTHM:
-        # slots_per_beat=1 means one slot per beat = quarter notes
-        slot_times, _slot_offset = _rhythm_slot_times(
-            config, dur, slots_per_beat=1, t_offset=t_offset
-        )
-        for t in slot_times:
-            start = int(t * sr)
-            kick_dur = 0.18
-            kick = generate_sine(50, kick_dur, sr, 0.28, t_offset + t)
-            pitch_env = np.exp(-np.linspace(0, 6, len(kick)))
-            kick = kick * pitch_env
-            kick = apply_lowpass(kick, 100, sr)
-            kick = apply_humanize(kick, config.human, sr)
-            add_note(signal, kick, start)
-    else:
-        # Legacy: divide chunk into 8 fixed beats
-        num_beats = 8
-        beat_dur = dur / num_beats
-        for i in range(num_beats):
-            start = int(i * beat_dur * sr)
-            kick_dur = 0.18
-            kick = generate_sine(50, kick_dur, sr, 0.28, t_offset)
-            pitch_env = np.exp(-np.linspace(0, 6, len(kick)))
-            kick = kick * pitch_env
-            kick = apply_lowpass(kick, 100, sr)
-            kick = apply_humanize(kick, config.human, sr)
-            add_note(signal, kick, start)
-
-    signal = apply_reverb(signal, config.space * 0.25, config.space * 0.4, sr)
-    return signal
+    """Soft four-on-the-floor ambient kick pulse."""
+    sig = _rhythm_kick_grid(
+        config,
+        duration,
+        1,
+        (1,),
+        50.0,
+        0.19,
+        0.26,
+        6.0,
+        110.0,
+        rng,
+        t_offset,
+    )
+    return apply_reverb(sig, config.space * 0.22, config.space * 0.40, SAMPLE_RATE)
 
 
 def rhythm_hats_only(
@@ -2026,40 +2083,20 @@ def rhythm_hats_only(
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
-    _rng: np.random.Generator,
+    rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Just hi-hats."""
+    """Soft brushed ambient hi-hats without harsh white-noise spikes."""
     sr = SAMPLE_RATE
-    dur = duration
-    signal = np.zeros(int(sr * dur))
-
-    # 16th note hats (4 subdivisions per beat)
-    if TEMPO_AWARE_RHYTHM:
-        slot_times, _slot_offset = _rhythm_slot_times(
-            config, dur, slots_per_beat=4, t_offset=t_offset
-        )
-        for t in slot_times:
-            start = int(t * sr)
-            hat_dur = 0.05
-            hat = generate_noise(hat_dur, sr, 0.08)
-            hat = apply_highpass(hat, 6000, sr)
-            hat = apply_adsr(hat, 0.001, 0.02, 0.1, 0.03, sr)
-            hat = apply_humanize(hat, config.human, sr)
-            add_note(signal, hat, start)
-    else:
-        # Legacy: divide chunk into 32 fixed slots
-        num_hits = 32
-        hit_dur = dur / num_hits
-        for i in range(num_hits):
-            start = int(i * hit_dur * sr)
-            hat_dur = 0.05
-            hat = generate_noise(hat_dur, sr, 0.08)
-            hat = apply_highpass(hat, 6000, sr)
-            hat = apply_adsr(hat, 0.001, 0.02, 0.1, 0.03, sr)
-            hat = apply_humanize(hat, config.human, sr)
-            add_note(signal, hat, start)
-
+    signal = np.zeros(_sample_count(duration, sr), dtype=np.float64)
+    slot_times, _ = _rhythm_slot_times(config, duration, slots_per_beat=4, t_offset=t_offset)
+    hat_n = _sample_count(0.045, sr)
+    for t_sec in slot_times:
+        vel = 1.0 + float(rng.uniform(-0.12, 0.12)) * config.human
+        hat = rng.standard_normal(hat_n) * (0.026 * vel)
+        hat = apply_lowpass(apply_highpass(hat, 5800.0, sr), 11500.0, sr)
+        hat = apply_adsr(hat, 0.005, 0.015, 0.06, 0.025, sr)
+        add_note(signal, hat, int(round(t_sec * sr)))
     return signal
 
 
@@ -2068,58 +2105,28 @@ def rhythm_electronic(
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
-    _rng: np.random.Generator,
+    rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Electronic beat."""
+    """Electronic beat with soft phase-zero kicks and brushed off-beat hats."""
     sr = SAMPLE_RATE
-    dur = duration
-    signal = np.zeros(int(sr * dur))
-
-    # 16-slot pattern over 4 beats (16th note grid)
-    # Kick on beats 1,2,3,4 (slots 0,4,8,12), hats on off-beats (slots 2,6,10,14)
-    kick_pattern = (1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
-    hat_pattern = (0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0)
-
-    if TEMPO_AWARE_RHYTHM:
-        slot_times, slot_offset = _rhythm_slot_times(
-            config, dur, slots_per_beat=4, t_offset=t_offset
-        )
-        for i, t in enumerate(slot_times):
-            idx = (slot_offset + i) % len(kick_pattern)
-            start = int(t * sr)
-
-            if kick_pattern[idx]:
-                kick = generate_sine(45, 0.2, sr, 0.35, t_offset + t)
-                pitch_env = np.exp(-np.linspace(0, 8, len(kick)))
-                kick = kick * pitch_env
-                kick = apply_lowpass(kick, 100, sr)
-                add_note(signal, kick, start)
-
-            if hat_pattern[idx]:
-                hat = generate_noise(0.06, sr, 0.06)
-                hat = apply_highpass(hat, 7000, sr)
-                hat = apply_adsr(hat, 0.001, 0.02, 0.1, 0.04, sr)
-                add_note(signal, hat, start)
-    else:
-        # Legacy: divide chunk into 16 fixed slots
-        beat_dur = dur / 16
-        for i in range(16):
-            start = int(i * beat_dur * sr)
-
-            if kick_pattern[i]:
-                kick = generate_sine(45, 0.2, sr, 0.35, t_offset)
-                pitch_env = np.exp(-np.linspace(0, 8, len(kick)))
-                kick = kick * pitch_env
-                kick = apply_lowpass(kick, 100, sr)
-                add_note(signal, kick, start)
-
-            if hat_pattern[i]:
-                hat = generate_noise(0.06, sr, 0.06)
-                hat = apply_highpass(hat, 7000, sr)
-                hat = apply_adsr(hat, 0.001, 0.02, 0.1, 0.04, sr)
-                add_note(signal, hat, start)
-
+    signal = np.zeros(_sample_count(duration, sr), dtype=np.float64)
+    kicks = (1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+    hats = (0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0)
+    slot_times, slot_offset = _rhythm_slot_times(
+        config, duration, slots_per_beat=4, t_offset=t_offset
+    )
+    hat_n = _sample_count(0.05, sr)
+    for i, t_sec in enumerate(slot_times):
+        idx = (slot_offset + i) % len(kicks)
+        pos = int(round(t_sec * sr))
+        if kicks[idx]:
+            add_note(signal, _render_soft_kick(46.0, 0.20, 0.30, 7.5, 110.0, sr), pos)
+        if hats[idx]:
+            hat = rng.standard_normal(hat_n) * 0.028
+            hat = apply_lowpass(apply_highpass(hat, 6200.0, sr), 11500.0, sr)
+            hat = apply_adsr(hat, 0.005, 0.014, 0.06, 0.028, sr)
+            add_note(signal, hat, pos)
     return signal
 
 
@@ -2158,6 +2165,36 @@ def texture_none(
     return np.zeros(int(SAMPLE_RATE * duration))
 
 
+def _texture_shimmer_core(
+    config: SynthConfig,
+    duration: float,
+    degrees: tuple[int, ...],
+    amp: float,
+    base_rate: float,
+    rate_span: float,
+    delay_sec: float,
+    fb_scale: float,
+    wet_scale: float,
+    reverb_room_scale: float,
+    t_offset: float,
+) -> FloatArray:
+    sr = SAMPLE_RATE
+    attack_mult = _attack_mult(config)
+    echo_mult = _echo_mult(config)
+    signal = np.zeros(_sample_count(duration, sr), dtype=np.float64)
+    lfo_rate = base_rate + rate_span * float(np.clip(config.motion, 0.0, 1.0))
+    atk_sec = 0.025 if t_offset > 1e-6 else 0.35 * attack_mult
+    rel_sec = 0.05
+    for idx, deg in enumerate(degrees):
+        freq = _scale_freq(config, deg, 6)
+        tone = generate_sine(freq, duration, sr, amp, t_offset=t_offset)
+        lfo = generate_lfo(duration, lfo_rate * (1.0 + 0.13 * idx), sr, t_offset=t_offset)
+        tone = apply_adsr(tone * (0.45 + 0.55 * lfo), atk_sec, 0.0, 1.0, rel_sec, sr)
+        signal += tone
+    signal = apply_delay(signal, delay_sec, fb_scale * echo_mult, wet_scale * echo_mult, sr)
+    return apply_reverb(signal, config.space * reverb_room_scale, config.space, sr)
+
+
 def texture_shimmer(
     config: SynthConfig,
     duration: float,
@@ -2166,31 +2203,10 @@ def texture_shimmer(
     _rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """High, shimmering texture."""
-    sr = SAMPLE_RATE
-    dur = duration
-    attack_mult = _attack_mult(config)
-    echo_mult = _echo_mult(config)
-
-    signal = np.zeros(int(sr * dur))
-
-    # High sine clusters with amplitude modulation (tuple)
-    for degree in (0, 2, 4):
-        freq = _scale_freq(config, degree, 6)
-        tone = generate_sine(freq, dur, sr, 0.04, t_offset=t_offset)
-
-        # Amplitude modulation for shimmer
-        lfo_rate = 2.0 / (config.motion + 0.2)
-        lfo = generate_lfo(dur, lfo_rate, sr)
-        tone = tone * (0.5 + 0.5 * lfo)
-
-        tone = apply_adsr(tone, 0.5 * attack_mult, 0.3, 0.8, 1.5 * attack_mult, sr)
-        signal += tone
-
-    signal = apply_delay(signal, 0.4, 0.5 * echo_mult, 0.4 * echo_mult, sr)
-    signal = apply_reverb(signal, config.space * 0.8, config.space, sr)
-
-    return signal
+    """High, shimmering texture with proportional motion and seamless t_offset."""
+    return _texture_shimmer_core(
+        config, duration, (0, 2, 4), 0.030, 0.35, 1.6, 0.4, 0.45, 0.30, 0.75, t_offset
+    )
 
 
 def texture_shimmer_slow(
@@ -2201,30 +2217,10 @@ def texture_shimmer_slow(
     _rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Slow, gentle shimmer."""
-    sr = SAMPLE_RATE
-    dur = duration
-    attack_mult = _attack_mult(config)
-    echo_mult = _echo_mult(config)
-
-    signal = np.zeros(int(sr * dur))
-
-    for degree in (0, 4):
-        freq = _scale_freq(config, degree, 6)
-        tone = generate_sine(freq, dur, sr, 0.035, t_offset=t_offset)
-
-        # Very slow amplitude modulation
-        lfo_rate = 0.5 / (config.motion + 0.2)
-        lfo = generate_lfo(dur, lfo_rate, sr)
-        tone = tone * (0.4 + 0.6 * lfo)
-
-        tone = apply_adsr(tone, 1.0 * attack_mult, 0.5, 0.85, 2.0 * attack_mult, sr)
-        signal += tone
-
-    signal = apply_delay(signal, 0.5, 0.55 * echo_mult, 0.45 * echo_mult, sr)
-    signal = apply_reverb(signal, config.space * 0.85, config.space, sr)
-
-    return signal
+    """Slow, gentle shimmer with proportional motion and seamless t_offset."""
+    return _texture_shimmer_core(
+        config, duration, (0, 4), 0.026, 0.12, 0.50, 0.5, 0.48, 0.34, 0.80, t_offset
+    )
 
 
 def texture_vinyl_crackle(
@@ -2235,30 +2231,23 @@ def texture_vinyl_crackle(
     rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Vinyl crackle texture."""
-    del t_offset  # unused - noise-based, no oscillators
+    """Gentle Hann-windowed vinyl dust without harsh unwindowed clicks."""
     sr = SAMPLE_RATE
-    dur = duration
-
-    # Sparse noise impulses
-    signal = np.zeros(int(sr * dur))
-
-    num_crackles = int(dur * 20)  # ~20 crackles per second
-
-    for _ in range(num_crackles):
-        pos = int(rng.integers(0, max(1, len(signal) - 100)))
-        crackle = generate_noise(0.002, sr, float(rng.uniform(0.01, 0.04)))
-        crackle = apply_highpass(crackle, 2000, sr)
-
-        add_note(signal, crackle, pos)
-
-    # Soft background hiss
-    hiss = generate_noise(dur, sr, 0.008)
-    hiss = apply_lowpass(hiss, 8000, sr)
-    hiss = apply_highpass(hiss, 1000, sr)
-    signal += hiss
-
-    return signal
+    n = _sample_count(duration, sr)
+    signal = np.zeros(n, dtype=np.float64)
+    grain_n = max(24, int(round(0.004 * sr)))
+    window = np.hanning(grain_n)
+    for _ in range(int(duration * 6)):
+        if n <= grain_n + 2:
+            break
+        pos = int(rng.integers(0, n - grain_n - 1))
+        grain = rng.standard_normal(grain_n) * float(rng.uniform(0.002, 0.008))
+        grain = apply_lowpass(apply_highpass(grain, 1600.0, sr), 5500.0, sr) * window
+        add_note(signal, grain, pos)
+    air = rng.standard_normal(n) * 0.0018
+    air = apply_lowpass(apply_highpass(air, 700.0, sr), 4200.0, sr)
+    atk_sec = 0.025 if t_offset > 1e-6 else 0.25
+    return apply_adsr(signal + air, atk_sec, 0.0, 1.0, 0.05, sr)
 
 
 def texture_breath(
@@ -2266,30 +2255,21 @@ def texture_breath(
     duration: float,
     _harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
-    _rng: np.random.Generator,
+    rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Breathing texture."""
-    del t_offset  # unused - noise-based, no oscillators
+    """Warm breathing air texture with proportional LFO rate."""
     sr = SAMPLE_RATE
-    dur = duration
-
-    # Filtered noise with slow envelope
-    signal = generate_noise(dur, sr, 0.06)
-
-    # Bandpass around a note frequency
+    n = _sample_count(duration, sr)
+    signal = rng.standard_normal(n) * 0.032
     freq = _scale_freq(config, 0, 3)
-    signal = apply_lowpass(signal, freq * 2, sr)
-    signal = apply_highpass(signal, freq * 0.5, sr)
-
-    # Breathing envelope (slow LFO)
-    breath_rate = 0.2 / (config.motion + 0.1)
-    lfo = generate_lfo(dur, breath_rate, sr)
-    signal = signal * lfo
-
-    signal = apply_reverb(signal, config.space * 0.6, config.space * 0.8, sr)
-
-    return signal
+    signal = apply_lowpass(signal, min(freq * 2.2, 1600.0), sr)
+    signal = apply_highpass(signal, max(freq * 0.5, 90.0), sr)
+    breath_rate = 0.08 + 0.24 * float(np.clip(config.motion, 0.0, 1.0))
+    lfo = generate_lfo(duration, breath_rate, sr, t_offset=t_offset)
+    atk_sec = 0.025 if t_offset > 1e-6 else 0.35
+    signal = apply_adsr(signal * lfo, atk_sec, 0.0, 1.0, 0.05, sr)
+    return apply_reverb(signal, config.space * 0.6, config.space * 0.8, sr)
 
 
 def texture_stars(
@@ -2370,81 +2350,71 @@ def accent_none(
 def accent_bells(
     config: SynthConfig,
     duration: float,
-    _harmony: HarmonyPlan | None,
+    harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
-    _rng: np.random.Generator,
+    rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Bell-like accents."""
+    """BPM-locked harmony-aware bell accents."""
     sr = SAMPLE_RATE
-    dur = duration
     attack_mult = _attack_mult(config)
-
-    signal = np.zeros(int(sr * dur))
-
-    # Sparse bell hits (tuple)
+    spb = _seconds_per_beat(config)
+    signal = np.zeros(_sample_count(duration, sr), dtype=np.float64)
     pattern = (0, -1, -1, -1, 4, -1, -1, -1, 2, -1, -1, -1, -1, -1, -1, -1)
-    hit_dur = dur / len(pattern)
-
-    for i, degree in enumerate(pattern):
-        if degree < 0:
-            continue
-
-        start = int(i * hit_dur * sr)
-        start_sec = start / sr
-        freq = _scale_freq(config, degree, 5)
-
-        # Bell: mix of harmonics with fast decay
-        bell_dur = 0.8
-        bell = generate_sine(freq, bell_dur, sr, 0.12, t_offset=t_offset + start_sec)
-        bell += generate_sine(freq * 2.0, bell_dur, sr, 0.06, t_offset=t_offset + start_sec)
-        bell += generate_sine(freq * 3.0, bell_dur, sr, 0.03, t_offset=t_offset + start_sec)
-        bell = apply_adsr(bell, 0.005 * attack_mult, 0.2, 0.1, 0.6 * attack_mult, sr)
-        bell = apply_humanize(bell, config.human, sr)
-
-        add_note(signal, bell, start)
-
-    signal = apply_reverb(signal, config.space * 0.6, config.space * 0.8, sr)
-    return signal
+    slot_idx = _first_grid_slot(t_offset, spb)
+    while True:
+        local_sec = slot_idx * spb - t_offset
+        if local_sec >= duration:
+            break
+        rel_deg = pattern[slot_idx % len(pattern)]
+        if rel_deg >= 0:
+            chord_root = _chord_root_degree_at_beat(local_sec / spb, harmony)
+            freq = _scale_freq(config, chord_root + rel_deg, 5)
+            bell_dur = min(1.1, max(0.12, duration - local_sec))
+            bell = (
+                generate_sine(freq, bell_dur, sr, 0.11, 0.0)
+                + generate_sine(freq * 2.0, bell_dur, sr, 0.042, 0.0)
+                + generate_sine(freq * 3.0, bell_dur, sr, 0.018, 0.0)
+            )
+            bell = apply_adsr(bell, 0.008 * attack_mult, 0.18, 0.08, 0.65 * attack_mult, sr)
+            bell = apply_humanize(bell, config.human, sr, rng=rng)
+            add_note(signal, bell, int(round(local_sec * sr)))
+        slot_idx += 1
+    return apply_reverb(signal, config.space * 0.6, config.space * 0.8, sr)
 
 
 def accent_pluck(
     config: SynthConfig,
     duration: float,
-    _harmony: HarmonyPlan | None,
+    harmony: HarmonyPlan | None,
     _melody_policy: MelodyPolicy | None,
-    _rng: np.random.Generator,
+    rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """Plucked string accents."""
+    """BPM-locked harmony-aware plucked string accents."""
     sr = SAMPLE_RATE
-    dur = duration
     attack_mult = _attack_mult(config)
-
-    signal = np.zeros(int(sr * dur))
-
-    # Pattern (tuple)
+    spb = _seconds_per_beat(config)
+    slot_sec = spb * 0.5
+    signal = np.zeros(_sample_count(duration, sr), dtype=np.float64)
     pattern = (0, -1, -1, 4, -1, -1, 2, -1, -1, -1, 0, -1, -1, -1, -1, -1)
-    hit_dur = dur / len(pattern)
-
-    for i, degree in enumerate(pattern):
-        if degree < 0:
-            continue
-
-        start = int(i * hit_dur * sr)
-        start_sec = start / sr
-        freq = _scale_freq(config, degree, 4)
-
-        # Pluck: sharp attack, quick decay
-        pluck = generate_triangle(freq, 0.5, sr, 0.15, t_offset=t_offset + start_sec)
-        pluck = apply_lowpass(pluck, 1500 * config.brightness + 400, sr)
-        pluck = apply_adsr(pluck, 0.003 * attack_mult, 0.15, 0.05, 0.4 * attack_mult, sr)
-        pluck = apply_humanize(pluck, config.human, sr)
-
-        add_note(signal, pluck, start)
-
-    signal = apply_reverb(signal, config.space * 0.5, config.space * 0.7, sr)
-    return signal
+    slot_idx = _first_grid_slot(t_offset, slot_sec)
+    while True:
+        local_sec = slot_idx * slot_sec - t_offset
+        if local_sec >= duration:
+            break
+        rel_deg = pattern[slot_idx % len(pattern)]
+        if rel_deg >= 0:
+            chord_root = _chord_root_degree_at_beat(local_sec / spb, harmony)
+            freq = _scale_freq(config, chord_root + rel_deg, 4)
+            pluck_dur = min(0.55, max(0.08, duration - local_sec))
+            pluck = generate_triangle(freq, pluck_dur, sr, 0.14, 0.0)
+            pluck = apply_lowpass(pluck, 1500.0 * config.brightness + 400.0, sr)
+            pluck = apply_adsr(pluck, 0.006 * attack_mult, 0.14, 0.04, 0.36 * attack_mult, sr)
+            pluck = apply_humanize(pluck, config.human, sr, rng=rng)
+            add_note(signal, pluck, int(round(local_sec * sr)))
+        slot_idx += 1
+    return apply_reverb(signal, config.space * 0.5, config.space * 0.7, sr)
 
 
 def accent_chime(
@@ -2528,96 +2498,200 @@ def build_melody_policy(config: SynthConfig) -> MelodyPolicy:
     )
 
 
+_HARMONY_TEMPLATES: Mapping[str, tuple[tuple[int, ...], ...]] = MappingProxyType(
+    {
+        "pop_major": ((0, 5, 3, 4), (0, 3, 4, 0), (0, 4, 5, 3)),
+        "pop_minor": ((0, 5, 3, 6), (0, 3, 6, 4), (0, 6, 3, 5), (0, 4, 5, 3)),
+        "jazz_major": ((1, 4, 0, 0), (1, 4, 0, 5), (5, 1, 4, 0)),
+        "jazz_minor": ((1, 4, 0, 0), (5, 1, 4, 0)),
+        "cinematic_minor": ((0, 6, 5, 3), (0, 5, 6, 4), (0, 6, 3, 4)),
+        "ambient": ((0, 5, 0, 3), (0, 4, 0, 6), (0, 3, 0, 5)),
+    }
+)
+
+
+def _derive_seed(base_seed: int, salt: int) -> int:
+    """Mix a 31-bit deterministic sub-seed from base_seed and salt."""
+    x = ((base_seed & 0xFFFFFFFF) ^ ((salt * 0x9E3779B1) & 0xFFFFFFFF)) & 0xFFFFFFFF
+    x = ((x ^ (x >> 16)) * 0x85EBCA6B) & 0xFFFFFFFF
+    x = ((x ^ (x >> 13)) * 0xC2B2AE35) & 0xFFFFFFFF
+    return (x ^ (x >> 16)) & 0x7FFFFFFF
+
+
+def _select_harmony_template(
+    config: SynthConfig, rng: np.random.Generator
+) -> tuple[int, ...]:
+    """Deterministically select a 4-chord diatonic progression template."""
+    style = (config.harmony_style or "auto").lower()
+    if style == "auto":
+        if config.rhythm == "none" and config.space >= 0.7:
+            style = "ambient"
+        elif config.pad == "cinematic" or config.bass in ("drone", "sub_pulse"):
+            style = "cinematic"
+        elif config.texture == "vinyl_crackle" or config.melody == "ornamental":
+            style = "jazz"
+        else:
+            style = "pop"
+    majorish = (config.mode or "minor").lower() in ("major", "mixolydian")
+    if style == "ambient":
+        key = "ambient"
+    elif style == "jazz":
+        key = "jazz_major" if majorish else "jazz_minor"
+    elif style == "cinematic":
+        key = "pop_major" if majorish else "cinematic_minor"
+    else:
+        key = "pop_major" if majorish else "pop_minor"
+    choices = _HARMONY_TEMPLATES[key]
+    return choices[int(rng.integers(0, len(choices)))]
+
+
 def build_harmony_plan(
     config: SynthConfig,
     duration: float,
     rng: np.random.Generator,
     t_offset: float = 0.0,
 ) -> HarmonyPlan:
-    """
-    Generate a simple diatonic chord timeline in scale-degrees.
-
-    This is intentionally compute-light: a handful of templates + repetition.
-    """
+    """Build a continuous diatonic chord timeline aligned to global t_offset."""
     beats_per_bar = 4
-    beats_total = _beats_total(config, duration)
-    bars_total = int(np.ceil(beats_total / beats_per_bar))
-    bars_total = max(1, bars_total)
+    spb = _seconds_per_beat(config)
+    chord_beats = float(max(1, int(config.chord_change_bars)) * beats_per_bar)
+    template = _select_harmony_template(config, rng)
 
-    chord_change_bars = int(max(1, config.chord_change_bars))
-    n_chords = int(np.ceil(bars_total / chord_change_bars))
-    n_chords = max(1, n_chords)
-
-    style = (config.harmony_style or "auto").lower()
-    if style == "auto":
-        if config.rhythm == "none" and config.space >= 0.7:
-            style = "ambient"
-        elif config.pad in ("cinematic",) or config.bass in ("drone", "sub_pulse"):
-            style = "cinematic"
-        elif config.texture in ("vinyl_crackle",) or config.melody in ("ornamental",):
-            style = "jazz"
-        else:
-            style = "pop"
-
-    mode = (config.mode or "minor").lower()
-    majorish = mode in ("major", "mixolydian")
-
-    pop_major = (
-        (0, 5, 3, 4),
-        (0, 3, 4, 0),
-        (0, 4, 5, 3),
-    )
-    pop_minor = (
-        (0, 5, 3, 6),
-        (0, 3, 6, 4),
-        (0, 6, 3, 5),
-        (0, 4, 5, 3),
-    )
-    jazz_major = (
-        (1, 4, 0, 0),
-        (1, 4, 0, 5),
-        (5, 1, 4, 0),
-    )
-    jazz_minor = (
-        (1, 4, 0, 0),
-        (5, 1, 4, 0),
-    )
-    cinematic_minor = (
-        (0, 6, 5, 3),
-        (0, 5, 6, 4),
-        (0, 6, 3, 4),
-    )
-    ambient_any = (
-        (0, 5, 0, 3),
-        (0, 4, 0, 6),
-        (0, 3, 0, 5),
-    )
-
-    if style == "jazz":
-        template = rng.choice(jazz_major if majorish else jazz_minor)
-    elif style == "cinematic":
-        template = rng.choice(cinematic_minor if not majorish else pop_major)
-    elif style == "ambient":
-        template = rng.choice(ambient_any)
-    else:
-        template = rng.choice(pop_major if majorish else pop_minor)
-
-    roots: list[int] = []
-    while len(roots) < n_chords:
-        roots.extend(int(value) for value in template)
-    roots = roots[:n_chords]
-
-    chord_beats = float(chord_change_bars * beats_per_bar)
+    start_beat_g = max(0.0, t_offset / spb)
+    end_beat_g = max(start_beat_g + 1e-4, (t_offset + duration) / spb)
+    first_idx = int(math.floor(start_beat_g / chord_beats))
+    last_idx = max(first_idx + 1, int(math.ceil(end_beat_g / chord_beats)))
 
     chords: list[ChordEvent] = []
-    for i, degree in enumerate(roots):
+    for idx in range(first_idx, last_idx):
+        seg_start_g = max(start_beat_g, idx * chord_beats)
+        seg_end_g = min(end_beat_g, (idx + 1) * chord_beats)
+        seg_dur = seg_end_g - seg_start_g
+        if seg_dur <= 1e-6:
+            continue
         chords.append(
             ChordEvent(
-                start_beat=i * chord_beats, duration_beats=chord_beats, root_degree=int(degree) % 7
+                start_beat=seg_start_g - start_beat_g,
+                duration_beats=seg_dur,
+                root_degree=int(template[idx % len(template)]) % 7,
             )
         )
 
     return HarmonyPlan(chords=tuple(chords), beats_per_bar=beats_per_bar)
+
+
+@lru_cache(maxsize=12)
+def _master_reverb_ir(size_bucket: int, sr: int = SAMPLE_RATE) -> FloatArray:
+    """Build frequency-peak-calibrated ambient hall IR (<= 1.50 s)."""
+    size = float(size_bucket) / 10.0
+    rt60 = 0.9 + 1.8 * size
+    ir_len = int(sr * min(1.50, rt60 * 0.70))
+    rng = np.random.default_rng(20261125 + size_bucket)
+    t = np.arange(ir_len, dtype=np.float64) / float(sr)
+    decay = np.power(10.0, -3.0 * t / rt60)
+    raw = rng.standard_normal(ir_len) * decay
+
+    predelay = int(0.022 * sr)
+    onset = int(0.030 * sr)
+    ir = np.zeros(ir_len, dtype=np.float64)
+    if predelay < ir_len:
+        body = raw[: ir_len - predelay].copy()
+        rise = min(len(body), onset)
+        if rise >= 2:
+            body[:rise] *= _raised_cosine_ramp(rise, 0.0, 1.0)
+        ir[predelay:] = body
+
+    tail_n = min(ir_len // 4, int(0.18 * sr))
+    if tail_n >= 2:
+        ir[-tail_n:] *= _raised_cosine_ramp(tail_n, 1.0, 0.0)
+
+    ir = apply_highpass(ir, 180.0, sr)
+    ir = apply_lowpass(ir, 3600.0 - 1500.0 * size, sr)
+
+    fft_len = 1 << int(math.ceil(math.log2(max(256, ir_len * 2))))
+    spec = np.abs(np.fft.rfft(ir, n=fft_len))
+    rms_resp = float(np.sqrt(np.mean(spec * spec)))
+    peak_resp = float(np.max(spec))
+    norm = max(rms_resp, peak_resp * 0.55) + 1e-12
+    return np.asarray(ir / norm, dtype=np.float64)
+
+
+def _apply_master_hall_reverb(
+    signal: FloatArray,
+    space: float,
+    sr: int = SAMPLE_RATE,
+) -> FloatArray:
+    """Convolve master mix with a calibrated warm ambient hall IR via NumPy FFT."""
+    safe_space = float(np.clip(space, 0.0, 1.0))
+    n = len(signal)
+    if n < 64 or safe_space <= 0.12:
+        return signal
+
+    bucket = max(1, min(10, int(round(safe_space * 10.0))))
+    ir = _master_reverb_ir(bucket, sr)
+    fft_n = 1 << int(math.ceil(math.log2(n + len(ir) - 1)))
+    wet_full = np.fft.irfft(
+        np.fft.rfft(signal, fft_n) * np.fft.rfft(ir, fft_n),
+        fft_n,
+    )
+    wet = wet_full[:n]
+    wet_gain = 0.08 + 0.22 * safe_space
+    dry_gain = 1.0 - 0.14 * safe_space
+    return np.asarray(signal * dry_gain + wet * wet_gain, dtype=np.float64)
+
+
+def _render_layer_group(
+    config: SynthConfig,
+    duration: float,
+    harmony: HarmonyPlan,
+    melody_policy: MelodyPolicy,
+    session_seed: int,
+    t_offset: float,
+) -> FloatArray:
+    """Sum all active instrument layers with continuous harmony and stable seeds."""
+    active_layers = DENSITY_LAYERS[config.density]
+    block_salt = int(round(t_offset * 10.0)) * 31
+    out = np.zeros(_sample_count(duration, SAMPLE_RATE), dtype=np.float64)
+
+    if config.depth:
+        sub_rng = np.random.default_rng(_derive_seed(session_seed, 17 + block_salt))
+        out += bass_sub_pulse(config, duration, harmony, melody_policy, sub_rng, t_offset) * 0.6
+
+    if "bass" in active_layers:
+        bass_fn = BASS_PATTERNS.get(config.bass, bass_drone)
+        bass_rng = np.random.default_rng(_derive_seed(session_seed, 11 + block_salt))
+        out += bass_fn(config, duration, harmony, melody_policy, bass_rng, t_offset)
+
+    if "pad" in active_layers:
+        pad_fn = PAD_PATTERNS.get(config.pad, pad_warm_slow)
+        pad_rng = np.random.default_rng(_derive_seed(session_seed, 23 + block_salt))
+        out += pad_fn(config, duration, harmony, melody_policy, pad_rng, t_offset)
+
+    if "melody" in active_layers:
+        if config.melody_engine == "procedural":
+            mel_rng = np.random.default_rng(_derive_seed(session_seed, 101))
+            out += melody_procedural(config, duration, harmony, melody_policy, mel_rng, t_offset)
+        else:
+            mel_fn = MELODY_PATTERNS.get(config.melody, melody_contemplative)
+            mel_rng = np.random.default_rng(_derive_seed(session_seed, 41 + block_salt))
+            out += mel_fn(config, duration, harmony, melody_policy, mel_rng, t_offset)
+
+    if "rhythm" in active_layers and config.rhythm != "none":
+        rhythm_fn = RHYTHM_PATTERNS.get(config.rhythm, rhythm_none)
+        rhythm_rng = np.random.default_rng(_derive_seed(session_seed, 53 + block_salt))
+        out += rhythm_fn(config, duration, harmony, melody_policy, rhythm_rng, t_offset)
+
+    if "texture" in active_layers and config.texture != "none":
+        texture_fn = TEXTURE_PATTERNS.get(config.texture, texture_none)
+        texture_rng = np.random.default_rng(_derive_seed(session_seed, 67 + block_salt))
+        out += texture_fn(config, duration, harmony, melody_policy, texture_rng, t_offset)
+
+    if "accent" in active_layers and config.accent != "none":
+        accent_fn = ACCENT_PATTERNS.get(config.accent, accent_none)
+        accent_rng = np.random.default_rng(_derive_seed(session_seed, 79 + block_salt))
+        out += accent_fn(config, duration, harmony, melody_policy, accent_rng, t_offset)
+
+    return out
 
 
 # =============================================================================
@@ -2632,75 +2706,36 @@ def assemble(
     rng: np.random.Generator | None = None,
     t_offset: float = 0.0,
 ) -> FloatArray:
-    """
-    Assemble all layers into final audio.
-
-    This is the core function that converts a config into audio.
+    """Assemble all active layers into headroom-safe, click-free mono audio.
 
     Args:
-        config: SynthConfig object
-        duration: Duration in seconds
-        normalize: If True, maximizes volume. Set False for automation chunks
-                   to preserve relative dynamics.
+        config: Numeric SynthConfig.
+        duration: Output duration in seconds.
+        normalize: If True, peak-normalizes to 0.78; set False for streaming
+            chunks so dynamics remain consistent across blocks.
         rng: Optional RNG for deterministic generation.
-        t_offset: Time offset in seconds for phase continuity across chunks.
+        t_offset: Time offset in seconds for phase, harmony, and melody continuity.
     """
     sr = SAMPLE_RATE
-    local_rng = rng or np.random.default_rng()
-    harmony = build_harmony_plan(config, duration, local_rng)
+    local_rng = rng if rng is not None else np.random.default_rng()
+    session_seed = int(local_rng.integers(0, 0x7FFFFFFF))
+    harmony_rng = np.random.default_rng(_derive_seed(session_seed, 101))
+    harmony = build_harmony_plan(config, duration, harmony_rng, t_offset)
     melody_policy = build_melody_policy(config)
 
-    # Determine active layers based on density
-    active_layers = DENSITY_LAYERS[config.density]
-
-    # Initialize output
-    output = np.zeros(int(sr * duration))
-
-    # Generate each layer with t_offset for phase continuity
-    if "bass" in active_layers:
-        bass_fn = BASS_PATTERNS.get(config.bass, bass_drone)
-        output += bass_fn(config, duration, harmony, melody_policy, local_rng, t_offset)
-
-    if config.depth:
-        # Add sub-bass layer
-        output += (
-            bass_sub_pulse(config, duration, harmony, melody_policy, local_rng, t_offset) * 0.6
-        )
-
-    if "pad" in active_layers:
-        pad_fn = PAD_PATTERNS.get(config.pad, pad_warm_slow)
-        output += pad_fn(config, duration, harmony, melody_policy, local_rng, t_offset)
-
-    if "melody" in active_layers:
-        if config.melody_engine == "procedural":
-            output += melody_procedural(
-                config, duration, harmony, melody_policy, local_rng, t_offset
-            )
-        else:
-            melody_fn = MELODY_PATTERNS.get(config.melody, melody_contemplative)
-            output += melody_fn(config, duration, harmony, melody_policy, local_rng, t_offset)
-
-    if "rhythm" in active_layers and config.rhythm != "none":
-        rhythm_fn = RHYTHM_PATTERNS.get(config.rhythm, rhythm_none)
-        output += rhythm_fn(config, duration, harmony, melody_policy, local_rng, t_offset)
-
-    if "texture" in active_layers and config.texture != "none":
-        texture_fn = TEXTURE_PATTERNS.get(config.texture, texture_none)
-        output += texture_fn(config, duration, harmony, melody_policy, local_rng, t_offset)
-
-    if "accent" in active_layers and config.accent != "none":
-        accent_fn = ACCENT_PATTERNS.get(config.accent, accent_none)
-        output += accent_fn(config, duration, harmony, melody_policy, local_rng, t_offset)
-
+    output = _render_layer_group(config, duration, harmony, melody_policy, session_seed, t_offset)
     output = apply_stereo_width(output, config.stereo, sr)
+    output = _apply_master_hall_reverb(output, config.space, sr)
+    output = apply_highpass(output, 20.0, sr)
+    output = soft_limit(output, ceiling=0.92)
 
-    # Normalize only if requested
-    if normalize:
-        max_val = np.max(np.abs(output))
-        if max_val > 0:
-            output = output / max_val * 0.85
+    if normalize and output.size > 0:
+        max_val = float(np.max(np.abs(output)))
+        if max_val > 1e-6:
+            output = output * (0.78 / max_val)
 
-    return output
+    fade_sec = 0.008 if t_offset > 1e-6 else 0.055
+    return soft_fade_edges(output, fade_in_sec=fade_sec, fade_out_sec=fade_sec, sr=sr)
 
 
 def config_to_audio(config: SynthConfig, output_path: str, duration: float = 16.0) -> str:
@@ -2900,7 +2935,7 @@ def morph_audio(
     for i in range(segments):
         t = i / (segments - 1) if segments > 1 else 0.0
         interpolated = interpolate_configs(config_a, config_b, t)
-        # Don't normalize individual segments — preserve relative dynamics
+        # Don't normalize individual segments; preserve relative dynamics
         segment = assemble(interpolated, segment_duration, normalize=False)
         output.append(segment)
 
@@ -2915,13 +2950,16 @@ def morph_audio(
 
 
 def crossfade(audio_a: FloatArray, audio_b: FloatArray, crossfade_samples: int) -> FloatArray:
-    """Crossfade between two audio arrays at the midpoint."""
+    """Raised-cosine crossfade between two audio arrays at the midpoint."""
     min_len = min(len(audio_a), len(audio_b))
     mid = min_len // 2
-    half_cf = crossfade_samples // 2
+    half_cf = min(crossfade_samples // 2, mid)
+    cf_len = half_cf * 2
+    if cf_len < 2:
+        return np.concatenate((audio_a[:mid], audio_b[mid:min_len]))
 
-    fade_out = np.linspace(1.0, 0.0, crossfade_samples)
-    fade_in = np.linspace(0.0, 1.0, crossfade_samples)
+    fade_in = _raised_cosine_ramp(cf_len, 0.0, 1.0)
+    fade_out = 1.0 - fade_in
 
     result = np.concatenate(
         (
@@ -2937,7 +2975,7 @@ def crossfade(audio_a: FloatArray, audio_b: FloatArray, crossfade_samples: int) 
 
 def transition(config_a: SynthConfig, config_b: SynthConfig, duration: float = 60.0) -> FloatArray:
     """Generate with crossfade transition."""
-    # Don't normalize individual tracks — normalize after crossfade
+    # Don't normalize individual tracks; normalize after crossfade
     audio_a = assemble(config_a, duration, normalize=False)
     audio_b = assemble(config_b, duration, normalize=False)
 

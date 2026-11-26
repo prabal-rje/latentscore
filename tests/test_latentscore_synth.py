@@ -73,47 +73,38 @@ class TestOscillatorPhaseContinuity:
         assert np.allclose(continuous, concatenated, atol=1e-10)
 
     def test_sawtooth_t_offset_changes_phase(self) -> None:
-        """Sawtooth with different t_offset produces phase-shifted output.
-
-        Note: Perfect phase continuity across chunks is NOT guaranteed for
-        sawtooth/square due to:
-        1. PolyBLEP floating point edge cases at region boundaries
-        2. Decimation filter transients at chunk boundaries
-
-        These are known limitations. For ambient music, these artifacts are
-        typically inaudible due to layering and the nature of the content.
-        """
+        """Sawtooth preserves exact periodicity at integer cycles and shifts on fractional cycles."""
         freq = 440.0
         duration = 0.1
         sr = 44100
 
         no_offset = generate_sawtooth(freq, duration, sr=sr, amp=1.0, t_offset=0.0)
-        with_offset = generate_sawtooth(freq, duration, sr=sr, amp=1.0, t_offset=0.25)
+        # 440 Hz * 0.25 s = 110.0 exact cycles -> identical waveform on integer sample clock.
+        exact_cycle = generate_sawtooth(freq, duration, sr=sr, amp=1.0, t_offset=0.25)
+        assert np.allclose(no_offset, exact_cycle, atol=1e-9)
 
-        # Different offsets should produce different waveforms
+        # 440 Hz * 0.001 s = 0.44 cycles -> clear phase shift.
+        with_offset = generate_sawtooth(freq, duration, sr=sr, amp=1.0, t_offset=0.001)
         assert not np.allclose(no_offset, with_offset)
 
-        # Same offset should produce same waveform
+        # Same offset produces identical waveform.
         same1 = generate_sawtooth(freq, duration, sr=sr, amp=1.0, t_offset=0.5)
         same2 = generate_sawtooth(freq, duration, sr=sr, amp=1.0, t_offset=0.5)
         assert np.allclose(same1, same2)
 
     def test_square_t_offset_changes_phase(self) -> None:
-        """Square with different t_offset produces phase-shifted output.
-
-        Same limitations as sawtooth regarding perfect continuity.
-        """
+        """Square preserves exact periodicity at integer cycles and shifts on fractional cycles."""
         freq = 440.0
         duration = 0.1
         sr = 44100
 
         no_offset = generate_square(freq, duration, sr=sr, amp=1.0, t_offset=0.0)
-        with_offset = generate_square(freq, duration, sr=sr, amp=1.0, t_offset=0.25)
+        exact_cycle = generate_square(freq, duration, sr=sr, amp=1.0, t_offset=0.25)
+        assert np.allclose(no_offset, exact_cycle, atol=1e-9)
 
-        # Different offsets should produce different waveforms
+        with_offset = generate_square(freq, duration, sr=sr, amp=1.0, t_offset=0.001)
         assert not np.allclose(no_offset, with_offset)
 
-        # Same offset should produce same waveform
         same1 = generate_square(freq, duration, sr=sr, amp=1.0, t_offset=0.5)
         same2 = generate_square(freq, duration, sr=sr, amp=1.0, t_offset=0.5)
         assert np.allclose(same1, same2)
