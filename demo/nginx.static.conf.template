@@ -4,6 +4,9 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
     gzip on;
     gzip_vary on;
     gzip_comp_level 6;
@@ -15,6 +18,8 @@ server {
         text/x-python
         application/javascript
         application/json
+        application/manifest+json
+        application/xml
         application/octet-stream
         application/wasm
         image/svg+xml;
@@ -60,7 +65,13 @@ server {
         try_files $uri =404;
     }
 
-    # SPA routes (/ and /demo).
+    # Serve prerendered /demo SEO HTML directly at HTTP 200 (no trailing-slash redirect).
+    location = /demo {
+        add_header Cache-Control "public, max-age=0, must-revalidate";
+        try_files /demo/index.html /index.html;
+    }
+
+    # SPA routes (/ and fallback).
     location / {
         add_header Cache-Control "public, max-age=0, must-revalidate";
         try_files $uri $uri/ /index.html;

@@ -1,0 +1,89 @@
+# LatentScore
+
+> Open-source local procedural ambient music synthesizer and reactive mood engine for Python, JavaScript/TypeScript, Rust, and web browsers. Zero GPU required.
+
+LatentScore turns short text prompts (such as "quiet morning desk" or "rainy midnight coffee shop") into calm, seamless procedural ambient soundscapes locally on CPU. It pairs LLM-distilled retrieval across 14,035 curated moods with an interpretable 34-field procedural DSP synthesizer.
+
+## Links
+
+- Homepage: https://latentscore.com/
+- Live Browser Studio (zero backend, runs locally in WebAssembly): https://latentscore.com/demo
+- Source Repository (Apache-2.0): https://github.com/prabal-rje/latentscore
+- Python Package (PyPI): https://pypi.org/project/latentscore/
+- JavaScript / TypeScript Package (npm): https://www.npmjs.com/package/latentscore
+- Rust Crate (crates.io): https://crates.io/crates/latentscore
+- Google Colab Quickstart: https://colab.research.google.com/github/prabal-rje/latentscore/blob/main/notebooks/quickstart-colab.ipynb
+- Research Writeup: https://prabal.ca/posts/latentscore-research/
+
+## Quickstart by Language
+
+### Python
+
+```bash
+pip install latentscore
+```
+
+```python
+import time
+import latentscore as ls
+
+# One-shot render and playback
+ls.render("morning coffee shop").play()
+
+# Reactive live steering for local apps
+with ls.Score("quiet morning desk", glide_seconds=3.5).play() as score:
+    time.sleep(6)
+    score.steer("rainy midnight coffee shop")
+    time.sleep(6)
+    score.drift()
+    time.sleep(6)
+```
+
+### JavaScript and TypeScript (Browser, Node.js, Bun, Deno)
+
+Zero runtime dependencies. Dual ESM and CJS exports.
+
+```bash
+npm install latentscore
+```
+
+```ts
+import { createBrowserScore } from "latentscore/browser";
+
+const music = createBrowserScore("quiet morning desk", { glideSeconds: 3.5 });
+playButton.addEventListener("click", () => music.play());
+editor.addEventListener("input", () => music.steerOnType(editor.value));
+```
+
+### Rust
+
+Pure Rust synthesizer with optional lock-free `cpal` live audio playback.
+
+```toml
+[dependencies]
+latentscore = { version = "0.1", features = ["playback"] }
+```
+
+```rust
+use latentscore::Score;
+
+let handle = Score::from_text("quiet morning desk")
+    .with_glide_seconds(3.5)
+    .play()?;
+handle.steer("rainy midnight coffee shop");
+```
+
+## Research Citation
+
+Presented at SIGGRAPH Talks '26 and NIME 2026.
+
+```bibtex
+@inproceedings{gupta2026latentscore,
+  author    = {Gupta, Prabal},
+  title     = {LatentScore: Sketching Soundscapes with LLM-Distilled Retrieval for Procedural Synthesis},
+  booktitle = {SIGGRAPH Talks '26},
+  year      = {2026},
+  publisher = {ACM},
+  doi       = {10.1145/3799818.3812120}
+}
+```

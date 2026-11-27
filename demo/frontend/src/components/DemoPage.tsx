@@ -10,6 +10,7 @@ import ParamPanel from "./ParamPanel";
 import { useStore } from "../store";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { DEMO_MODE, fetchCapabilities, detectProvider, generateFromModel } from "../api";
+import { usePageSeo } from "../seo";
 import {
   browserNextAutoDrift,
   browserWarmup,
@@ -54,6 +55,12 @@ const IS_IOS =
     (navigator.userAgent.includes("Mac") && navigator.maxTouchPoints > 1));
 
 export default function DemoPage() {
+  usePageSeo({
+    title: "LatentScore Live Demo: Free Browser Ambient Music Studio from Text",
+    description:
+      "Sketch procedural ambient music from text prompts directly in your browser. Zero GPU, 14,035 moods, live 18-parameter tuning, and endless similarity-gradient Auto Drift.",
+    canonicalPath: "/demo",
+  });
   const [iosBannerDismissed, setIosBannerDismissed] = useState(false);
   const activeSessionId = useStore((s) => s.activeSessionId);
   const activePalette = useStore((s) => s.activePalette);

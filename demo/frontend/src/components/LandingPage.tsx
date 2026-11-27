@@ -4,6 +4,7 @@ import AuroraCanvas from "./AuroraCanvas";
 import BrandWordmark from "./BrandWordmark";
 import PixelCharm from "./PixelCharm";
 import ShareButton from "./ShareButton";
+import { usePageSeo } from "../seo";
 
 const BIBTEX = `@inproceedings{gupta2026latentscore,
   author    = {Gupta, Prabal},
@@ -38,8 +39,8 @@ const FEATURES = [
     desc: "Each vibe generates a cohesive color palette that tints the aurora canvas softly.",
   },
   {
-    title: "Simple Python API",
-    desc: "Install with pip and use LatentScore as a Python library, CLI tool, or Colab notebook.",
+    title: "Python, JS/TS, and Rust SDKs",
+    desc: "Install via pip, npm (zero dependencies), or Cargo to build reactive local music apps.",
   },
 ];
 
@@ -60,6 +61,16 @@ const PLATFORM_LINKS = [
     href: "https://pypi.org/project/latentscore/",
   },
   {
+    label: "npm",
+    desc: "npm install latentscore (pure TypeScript)",
+    href: "https://www.npmjs.com/package/latentscore",
+  },
+  {
+    label: "crates.io",
+    desc: "cargo add latentscore (pure Rust)",
+    href: "https://crates.io/crates/latentscore",
+  },
+  {
     label: "LinkedIn",
     desc: "Connect with Prabal Gupta",
     href: "https://www.linkedin.com/in/prabal1997",
@@ -72,6 +83,12 @@ const PLATFORM_LINKS = [
 ];
 
 export default function LandingPage() {
+  usePageSeo({
+    title: "LatentScore: Local Procedural Ambient Music from Text (Python, JS, Rust)",
+    description:
+      "Generate calm, reactive ambient music from text prompts locally with no GPU. Try the free browser studio or use the open-source Python, TypeScript, and Rust SDKs.",
+    canonicalPath: "/",
+  });
   const [copied, setCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
@@ -153,8 +170,8 @@ export default function LandingPage() {
               </h1>
 
               <p className="hero-desc">
-                LatentScore is an open-source Python library and browser studio that sketches
-                procedural ambient music from short text descriptions. No GPU required.
+                LatentScore is an open-source procedural ambient music studio and reactive SDK for
+                browsers, Python, TypeScript, and Rust. No GPU required.
               </p>
 
               <div className="hero-actions">

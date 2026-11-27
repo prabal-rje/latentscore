@@ -3,34 +3,163 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/art/charm-vinyl.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#FFFFFF" />
-    <title>LatentScore</title>
+    <meta name="author" content="Prabal Gupta" />
+    <meta
+      name="robots"
+      content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
+    />
+    <title>LatentScore: Local Procedural Ambient Music from Text (Python, JS, Rust)</title>
     <meta
       name="description"
-      content="Turn vibes into ambient sound. Sketch procedural ambient music from short text descriptions locally in your browser with no GPU required."
+      content="Generate calm, reactive ambient music from text prompts locally with no GPU. Try the free browser studio or use the open-source Python, TypeScript, and Rust SDKs."
     />
+    <link rel="canonical" href="https://latentscore.com/" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="LatentScore: Turn vibes into ambient sound" />
+    <meta property="og:site_name" content="LatentScore" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:url" content="https://latentscore.com/" />
+    <meta
+      property="og:title"
+      content="LatentScore: Turn vibes into ambient sound"
+    />
     <meta
       property="og:description"
-      content="Open-source Python library and browser studio that sketches procedural ambient music from short text descriptions. No GPU required."
+      content="Open-source procedural ambient music synthesizer for browsers, Python, TypeScript, and Rust. Generate music from text locally with zero GPU."
     />
-    <meta property="og:image" content="/og-card.png" />
-    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image" content="https://latentscore.com/og-card.jpg" />
+    <meta property="og:image:secure_url" content="https://latentscore.com/og-card.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="LatentScore browser studio turning short text vibes into ambient soundscapes"
+      content="LatentScore daylight browser studio turning short text vibes into procedural ambient soundscapes"
     />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@prabal_" />
+    <meta name="twitter:creator" content="@prabal_" />
     <meta name="twitter:title" content="LatentScore: Turn vibes into ambient sound" />
     <meta
       name="twitter:description"
-      content="Sketch procedural ambient music from short text descriptions locally in your browser. No GPU required."
+      content="Sketch procedural ambient music from short text descriptions locally in your browser, Python, TypeScript, or Rust. No GPU required."
     />
-    <meta name="twitter:image" content="/og-card.png" />
+    <meta name="twitter:image" content="https://latentscore.com/og-card.jpg" />
+    <meta
+      name="twitter:image:alt"
+      content="LatentScore daylight browser studio turning short text vibes into procedural ambient soundscapes"
+    />
+    <script id="ld-json" type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://latentscore.com/#website",
+            "url": "https://latentscore.com/",
+            "name": "LatentScore",
+            "description": "Local procedural ambient music synthesis from short text descriptions with no GPU required.",
+            "inLanguage": "en"
+          },
+          {
+            "@type": "SoftwareApplication",
+            "@id": "https://latentscore.com/#software",
+            "name": "LatentScore",
+            "url": "https://latentscore.com/",
+            "applicationCategory": "MultimediaApplication",
+            "operatingSystem": "Web, macOS, Linux",
+            "softwareVersion": "0.1.9",
+            "license": "https://www.apache.org/licenses/LICENSE-2.0",
+            "isAccessibleForFree": true,
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD"
+            },
+            "codeRepository": "https://github.com/prabal-rje/latentscore",
+            "downloadUrl": "https://pypi.org/project/latentscore/",
+            "description": "Open-source procedural ambient music synthesizer and reactive mood engine for Python, JavaScript/TypeScript, Rust, and web browsers. Runs 100% locally on CPU with zero GPU.",
+            "featureList": [
+              "Text-to-music procedural ambient synthesis with zero GPU",
+              "14,035-mood quantized embedding retrieval and similarity-gradient Auto Drift",
+              "Stateful reactive Score API in Python, TypeScript/JavaScript, and Rust",
+              "Live 18-parameter musical control with click-free overlap crossfades"
+            ],
+            "author": {
+              "@type": "Person",
+              "name": "Prabal Gupta",
+              "url": "https://prabal.ca",
+              "sameAs": [
+                "https://github.com/prabal-rje",
+                "https://www.linkedin.com/in/prabal1997",
+                "https://x.com/prabal_"
+              ]
+            }
+          },
+          {
+            "@type": "ScholarlyArticle",
+            "@id": "https://latentscore.com/#paper",
+            "headline": "LatentScore: Sketching Soundscapes with LLM-Distilled Retrieval for Procedural Synthesis",
+            "author": {
+              "@type": "Person",
+              "name": "Prabal Gupta"
+            },
+            "datePublished": "2026",
+            "publisher": {
+              "@type": "Organization",
+              "name": "ACM"
+            },
+            "isPartOf": {
+              "@type": "PublicationEvent",
+              "name": "SIGGRAPH Talks '26"
+            },
+            "sameAs": "https://doi.org/10.1145/3799818.3812120",
+            "url": "https://prabal.ca/posts/latentscore-research/"
+          },
+          {
+            "@type": "FAQPage",
+            "@id": "https://latentscore.com/#faq",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "Does LatentScore require a GPU?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "No. LatentScore runs 100% locally on ordinary CPUs and directly inside web browsers using deterministic procedural DSP synthesis."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Which programming languages does LatentScore support?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "LatentScore provides native SDKs for Python (PyPI), pure TypeScript and JavaScript (npm, zero runtime dependencies), and pure Rust (crates.io, with optional lock-free cpal playback), plus a free browser studio at latentscore.com/demo."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Can I use LatentScore for free in my browser?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes. Open latentscore.com/demo to type moods, tune 18 musical parameters live, or turn on endless Auto Drift across 14,035 curated soundscapes with no signup and no server calls."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "What license does LatentScore use?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "LatentScore is open-source software released under the Apache License 2.0."
+                }
+              }
+            ]
+          }
+        ]
+      }
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -41,7 +170,39 @@
     <link rel="preload" as="image" href="/art/grain.png" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><!--SEO_ROOT_START-->
+      <div style="max-width:740px;margin:0 auto;padding:48px 24px;font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:#111318;line-height:1.6">
+        <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:56px">
+          <a href="/" style="font-family:'Fraunces',Georgia,serif;font-size:22px;color:#111318;text-decoration:none">Latent<em>Score</em></a>
+          <nav aria-label="Primary links" style="display:flex;gap:18px;font-size:14px">
+            <a href="/demo" style="color:#111318">Live Demo</a>
+            <a href="https://github.com/prabal-rje/latentscore" style="color:#111318">GitHub</a>
+            <a href="https://pypi.org/project/latentscore/" style="color:#111318">PyPI</a>
+            <a href="https://www.npmjs.com/package/latentscore" style="color:#111318">npm</a>
+            <a href="https://crates.io/crates/latentscore" style="color:#111318">crates.io</a>
+          </nav>
+        </header>
+        <main>
+          <p style="font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#4B5563">SIGGRAPH Talks '26 · NIME '26 · Open Source</p>
+          <h1 style="font-family:'Fraunces',Georgia,serif;font-size:48px;font-weight:400;line-height:1.08;margin:12px 0 18px">Turn vibes into <em>ambient sound</em>.</h1>
+          <p style="font-size:18px;color:#2D333E;margin:0 0 24px">LatentScore is an open-source procedural ambient music synthesizer and browser studio for Python, TypeScript/JavaScript, and Rust. Describe a mood in plain words and generate reactive ambient soundscapes locally with no GPU required.</p>
+          <p style="margin:0 0 36px"><a href="/demo" style="display:inline-block;padding:10px 18px;background:#111318;color:#FFFFFF;border-radius:999px;text-decoration:none;font-weight:500">Open Live Browser Studio</a></p>
+          <section aria-label="Capabilities">
+            <h2 style="font-size:16px;margin:24px 0 6px">Text to Procedural Ambient Music</h2>
+            <p style="margin:0 0 16px;color:#4B5563">Describe any scene such as "quiet morning desk" or "rainy midnight coffee shop" and synthesize seamless ambient audio locally on CPU.</p>
+            <h2 style="font-size:16px;margin:24px 0 6px">Python, JavaScript/TypeScript, and Rust SDKs</h2>
+            <p style="margin:0 0 16px;color:#4B5563">Install via pip, npm (zero runtime dependencies), or Cargo (optional lock-free cpal playback) to add reactive local music to editors, games, focus timers, and web apps.</p>
+            <h2 style="font-size:16px;margin:24px 0 6px">Browser Studio with 14,035 Moods and Auto Drift</h2>
+            <p style="margin:0 0 16px;color:#4B5563">Run quantized embedding retrieval, live 18-parameter tuning, and endless similarity-gradient Auto Drift directly in your browser with zero server calls.</p>
+          </section>
+          <section aria-label="Citation" style="margin-top:36px">
+            <h2 style="font-size:16px;margin:0 0 8px">SIGGRAPH Talks '26 Citation</h2>
+            <p style="margin:0;color:#4B5563">Prabal Gupta (2026). LatentScore: Sketching Soundscapes with LLM-Distilled Retrieval for Procedural Synthesis. ACM SIGGRAPH Talks '26. DOI: 10.1145/3799818.3812120.</p>
+          </section>
+        </main>
+        <footer style="margin-top:48px;font-size:13px;color:#6B7280">LatentScore · Apache-2.0 License · Crafted by Prabal Gupta · <a href="/llms.txt" style="color:#6B7280">llms.txt</a></footer>
+      </div>
+    <!--SEO_ROOT_END--></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

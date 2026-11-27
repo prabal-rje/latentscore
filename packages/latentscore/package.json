@@ -1,26 +1,37 @@
 {
   "name": "latentscore",
   "version": "0.1.0",
-  "description": "Local procedural ambient music synthesizer and reactive mood engine for JavaScript and TypeScript. Zero runtime dependencies.",
+  "description": "Local procedural ambient music synthesizer and reactive text-to-music engine for browsers, Node.js, Bun, and TypeScript. Zero GPU and zero runtime dependencies.",
+  "author": "Prabal Gupta <https://prabal.ca>",
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
   "keywords": [
-    "music",
-    "ambient",
+    "ambient-music",
+    "text-to-music",
+    "music-generator",
+    "procedural-audio",
     "synthesizer",
-    "dsp",
     "web-audio",
+    "dsp",
     "generative-music",
-    "audio",
-    "procedural"
+    "soundscape",
+    "focus-music",
+    "audio-synthesis",
+    "typescript",
+    "local-ai",
+    "music",
+    "audio"
   ],
   "repository": {
     "type": "git",
     "url": "https://github.com/prabal-rje/latentscore.git",
     "directory": "packages/latentscore"
   },
-  "homepage": "https://github.com/prabal-rje/latentscore",
+  "homepage": "https://latentscore.com",
+  "bugs": {
+    "url": "https://github.com/prabal-rje/latentscore/issues"
+  },
   "exports": {
     ".": {
       "import": {

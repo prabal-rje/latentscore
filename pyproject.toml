@@ -5,14 +5,39 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "latentscore"
 version = "0.1.9"
-description = "Generate ambient music from text. Locally. No GPU required."
+description = "Generate calm, reactive ambient music from text locally with no GPU. Procedural audio synthesizer for Python, with TypeScript and Rust SDKs."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
+authors = [
+    { name = "Prabal Gupta" },
+]
+keywords = [
+    "ambient-music",
+    "procedural-audio",
+    "text-to-music",
+    "music-generation",
+    "synthesizer",
+    "dsp",
+    "generative-music",
+    "audio-synthesis",
+    "soundscape",
+    "local-ai",
+    "creative-coding",
+]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
     "Operating System :: MacOS",
     "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Artistic Software",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Multimedia :: Sound/Audio :: Sound Synthesis",
 ]
 dependencies = [
     # Synthesis + audio I/O + playback + CLI rendering.
@@ -36,6 +61,14 @@ dependencies = [
     "tokenizers>=0.20.0",
     "sentencepiece",
 ]
+
+[project.urls]
+Homepage = "https://latentscore.com"
+Demo = "https://latentscore.com/demo"
+Repository = "https://github.com/prabal-rje/latentscore"
+Documentation = "https://github.com/prabal-rje/latentscore/blob/main/docs/library.md"
+Issues = "https://github.com/prabal-rje/latentscore/issues"
+Research = "https://prabal.ca/posts/latentscore-research/"
 
 [project.optional-dependencies]
 # Back-compat alias: pre-0.1.4 users had to do `pip install "latentscore[fast]"`.

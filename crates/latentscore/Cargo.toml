@@ -4,12 +4,13 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "Apache-2.0"
-description = "Local procedural ambient music synthesizer and reactive mood engine in pure Rust. Zero GPU, zero external runtime assets."
+description = "Local procedural ambient music synthesizer and reactive text-to-music engine in pure Rust. Zero GPU, zero external runtime assets, optional lock-free cpal playback."
 repository = "https://github.com/prabal-rje/latentscore"
-homepage = "https://github.com/prabal-rje/latentscore"
+homepage = "https://latentscore.com"
+documentation = "https://docs.rs/latentscore"
 readme = "README.md"
 keywords = ["audio", "music", "ambient", "synthesizer", "dsp"]
-categories = ["multimedia::audio"]
+categories = ["multimedia::audio", "multimedia::encoding", "wasm"]
 include = [
     "src/**",
     "spec/**",

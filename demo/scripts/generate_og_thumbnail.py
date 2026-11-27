@@ -13,6 +13,8 @@ File map:
 from __future__ import annotations
 
 import base64
+import shutil
+import subprocess
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -302,10 +304,18 @@ def render_og_thumbnail(out_path: Path = OUT_PATH) -> Path:
 
 
 def main() -> None:
-    """Generate frontend/public/og-card.png."""
+    """Generate frontend/public/og-card.png and compressed og-card.jpg."""
     path = render_og_thumbnail(OUT_PATH)
     size_kb = path.stat().st_size / 1024.0
     print(f"Generated {path} ({size_kb:.1f} KB)")
+    jpg_path = path.with_suffix(".jpg")
+    if shutil.which("sips"):
+        subprocess.run(
+            ["sips", "-s", "format", "jpeg", "-s", "formatOptions", "88", str(path), "--out", str(jpg_path)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+        print(f"Generated {jpg_path} ({jpg_path.stat().st_size / 1024.0:.1f} KB)")
 
 
 if __name__ == "__main__":
