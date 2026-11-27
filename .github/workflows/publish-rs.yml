@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   publish:
@@ -41,9 +42,14 @@ jobs:
           cargo clippy --features playback --all-targets -- -D warnings
           cargo package --allow-dirty
 
+      - name: Authenticate with crates.io via OIDC Trusted Publishing
+        if: startsWith(github.ref, 'refs/tags/rs-v')
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+
       - name: Publish to crates.io
         if: startsWith(github.ref, 'refs/tags/rs-v')
         working-directory: crates/latentscore
         run: cargo publish
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

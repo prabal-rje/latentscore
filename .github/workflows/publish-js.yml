@@ -18,10 +18,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Node 24 bundles npm 11+, required for passwordless OIDC Trusted Publishing.
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.14"
-          registry-url: "https://registry.npmjs.org"
+          node-version: "24"
 
       - name: Verify tag matches package.json version
         if: startsWith(github.ref, 'refs/tags/js-v')
@@ -34,12 +34,11 @@ jobs:
       - name: Build and test package
         working-directory: packages/latentscore
         run: |
+          npm --version
           npm ci
           npm test
 
-      - name: Publish to npm with OIDC provenance
+      - name: Publish to npm via OIDC Trusted Publishing
         if: startsWith(github.ref, 'refs/tags/js-v')
         working-directory: packages/latentscore
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
